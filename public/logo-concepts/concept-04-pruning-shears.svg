@@ -1,0 +1,20 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="100" cy="100" r="100" fill="#000000"/>
+
+  <!-- Pruning Shears Icon - minimalist -->
+
+  <!-- Left blade -->
+  <path d="M 70 90 L 90 110 L 85 115 L 65 95 Z" fill="#4a4a4a"/>
+  <path d="M 65 95 L 50 80 Q 45 75 42 78 Q 40 82 45 87 Z" fill="#5a5a5a"/>
+
+  <!-- Right blade -->
+  <path d="M 110 90 L 90 110 L 95 115 L 115 95 Z" fill="#4a4a4a"/>
+  <path d="M 115 95 L 130 80 Q 135 75 138 78 Q 140 82 135 87 Z" fill="#5a5a5a"/>
+
+  <!-- Pivot point - magenta accent -->
+  <circle cx="90" cy="110" r="6" fill="#e879f9"/>
+
+  <!-- Handle grips -->
+  <circle cx="45" cy="87" r="3" fill="#e879f9" opacity="0.6"/>
+  <circle cx="135" cy="87" r="3" fill="#e879f9" opacity="0.6"/>
+</svg>

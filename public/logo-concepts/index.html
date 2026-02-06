@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bonsai Logo Concepts</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: #e5e5e5;
+            padding: 3rem 2rem;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 4rem;
+            border-bottom: 2px solid #e879f9;
+            padding-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 0.5rem;
+            color: #ffffff;
+        }
+
+        h1 .accent {
+            color: #e879f9;
+        }
+
+        .subtitle {
+            color: #a0a0a0;
+            font-size: 1.1rem;
+        }
+
+        .current-logo {
+            text-align: center;
+            margin: 2rem 0 4rem 0;
+            padding: 2rem;
+            background: #2a2a2a;
+            border-radius: 12px;
+        }
+
+        .current-logo h2 {
+            margin-bottom: 1rem;
+            color: #f0abfc;
+        }
+
+        .current-logo img {
+            max-width: 150px;
+            border-radius: 50%;
+        }
+
+        .concepts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+
+        .concept-card {
+            background: #2a2a2a;
+            border-radius: 12px;
+            padding: 2rem;
+            transition: transform 0.3s, box-shadow 0.3s;
+            border: 2px solid transparent;
+        }
+
+        .concept-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(232, 121, 249, 0.3);
+            border-color: #e879f9;
+        }
+
+        .concept-number {
+            display: inline-block;
+            background: #e879f9;
+            color: #000;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+
+        .concept-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #f0abfc;
+        }
+
+        .concept-visual {
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            text-align: center;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .concept-visual img {
+            max-width: 100%;
+            max-height: 200px;
+        }
+
+        .concept-description {
+            color: #b0b0b0;
+            line-height: 1.7;
+        }
+
+        .concept-rationale {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #404040;
+            color: #909090;
+            font-size: 0.95rem;
+            font-style: italic;
+        }
+
+        .text-representation {
+            font-family: 'Courier New', monospace;
+            color: #4ade80;
+            background: #0a0a0a;
+            padding: 1rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            white-space: pre;
+            overflow-x: auto;
+        }
+
+        .footer {
+            margin-top: 4rem;
+            text-align: center;
+            padding-top: 2rem;
+            border-top: 1px solid #404040;
+            color: #707070;
+        }
+
+        .theme-badge {
+            display: inline-block;
+            background: #3a3a3a;
+            color: #e879f9;
+            padding: 0.3rem 0.7rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            margin: 0.2rem;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Bons<span class="accent">ai</span> Logo Concepts</h1>
+            <p class="subtitle">10 Visual Interpretations for the Developer OS</p>
+        </header>
+
+        <div class="current-logo">
+            <h2>Current Logo</h2>
+            <img src="../bonsai-os-logo-d.png" alt="Current Bonsai Logo">
+            <p style="margin-top: 1rem; color: #a0a0a0;">Stylized bonsai tree with pink cherry blossom accents</p>
+        </div>
+
+        <div class="concepts-grid">
+            <!-- Concept 1 -->
+            <div class="concept-card">
+                <span class="concept-number">01</span>
+                <h3>Classic Bonsai Refined</h3>
+                <div class="concept-visual">
+                    <p style="color: #707070; font-style: italic;">Geometric refinement of current tree illustration</p>
+                </div>
+                <div class="concept-description">
+                    Stylized bonsai tree in profile with simplified geometric shapes. Trunk uses gradient from dark gray to light gray, foliage represented as abstract cloud shapes with magenta/pink accent dots suggesting cherry blossoms.
+                </div>
+                <div class="concept-rationale">
+                    Evolution of current logo with cleaner, more modern execution. Maintains brand recognition while improving scalability and reducing visual complexity.
+                </div>
+                <div style="margin-top: 1rem;">
+                    <span class="theme-badge">Literal</span>
+                    <span class="theme-badge">Organic</span>
+                </div>
+            </div>
+
+            <!-- Concept 2 -->
+            <div class="concept-card">
+                <span class="concept-number">02</span>
+                <h3>Terminal Tree</h3>
+                <div class="concept-visual">
+                    <div class="text-representation">       *
+      /|\
+     /*|*\
+    /**|**\
+   /***|***\
+      |||
+      |||</div>
+                </div>
+                <div class="concept-description">
+                    Bonsai tree silhouette constructed entirely from monospace characters and symbols. Green terminal text on dark background, resembling ASCII art in a command-line interface.
+                </div>
+                <div class="concept-rationale">
+                    Bridges the "nature" and "developer OS" identities by reimagining the organic tree through the lens of code. Appeals directly to developer audience while maintaining the cultivation metaphor.
+                </div>
+                <div style="margin-top: 1rem;">
+                    <span class="theme-badge">Digital</span>
+                    <span class="theme-badge">Developer-focused</span>
+                </div>
+            </div>
+
+            <!-- Concept 3 -->
+            <div class="concept-card">
+                <span class="concept-number">03</span>
+                <h3>Growth Stack</h3>
+                <div class="concept-visual">
+                    <img src="concept-03-growth-stack.svg" alt="Growth Stack Logo">
+                </div>
+                <div class="concept-description">
+                    Abstract representation using horizontal layers/strata that decrease in width from bottom to top, creating a triangular tree silhouette. Layers colored in progression: dark gray → medium gray → light gray → pink → magenta.
+                </div>
+                <div class="concept-rationale">
+                    Abstracts the tree into a "tech stack" metaphor — each layer represents accumulated capability. The vertical growth mirrors both tree growth and software development progress.
+                </div>
+                <div style="margin-top: 1rem;">
+                    <span class="theme-badge">Abstract</span>
+                    <span class="theme-badge">Tech Stack</span>
+                </div>
+            </div>
+
+            <!-- Concept 4 -->
+            <div class="concept-card">
+                <span class="concept-number">04</span>
+                <h3>Pruning Shears Icon</h3>
+                <div class="concept-visual">
+                    <img src="concept-04-pruning-shears.svg" alt="Pruning Shears Logo">
+                </div>
+                <div class="concept-description">
+                    Minimalist icon of pruning shears/scissors designed specifically for bonsai cultivation. Clean line art in dark gray with magenta accent on the pivot point or handles.
+                </div>
+                <div class="concept-rationale">
+                    Shifts from the tree itself to the act of cultivation. Pruning represents deliberate decision-making, removing excess, and shaping growth — core to both bonsai art and software development.
+                </div>
+                <div style="margin-top: 1rem;">
+                    <span class="theme-badge">Tool/Process</span>
+                    <span class="theme-badge">Active Agency</span>
+                </div>
+            </div>
+
+            <!-- Concept 5 -->
+            <div class="concept-card">
+                <span class="concept-number">05</span>
+                <h3>Pot + Sprout</h3>
+                <div class="concept-visual">
+                    <img src="concept-05-pot-sprout.svg" alt="Pot and Sprout Logo">
+                </div>
+                <div class="concept-description">
+                    Stylized bonsai pot (wide, shallow, rectangular) in dark gray with a small, energetic sprout emerging from the center. Sprout has 2-3 leaves rendered in bright magenta/pink with simple geometric shapes.
+                </div>
+                <div class="concept-rationale">
+                    Represents the "developer OS" as the container/environment where AI agents (the sprout) grow. Emphasizes new beginnings, potential, and the nurturing environment Bonsai provides.
+                </div>
+                <div style="margin-top: 1rem;">
+                    <span class="theme-badge">Potential</span>
+                    <span class="theme-badge">Playful</span>
+                </div>
+            </div>
+
+            <!-- Concept 6 -->
+            <div class="concept-card">
+                <span class="concept-number">06</span>
+                <h3>Circuit Tree</h3>
+                <div class="concept-visual">
+                    <p style="color: #707070; font-style: italic;">Bonsai tree rendered as circuit board traces with glowing nodes</p>
+                </div>
+                <div class="concept-description">
+                    Bonsai tree where the trunk and branches are rendered as circuit board traces (copper/gold color) and the foliage is represented as glowing nodes/connection points in magenta and pink.
+                </div>
+                <div class="concept-rationale">
+                    Fuses organic growth with electronic/AI themes. The circuit traces suggest AI pathways and agent connections, while maintaining the tree structure. Directly communicates "AI-powered" nature.
+                </div>
+                <div style="margin-top: 1rem;">
+                    <span class="theme-badge">Hybrid</span>
+                    <span class="theme-badge">AI-Focused</span>
+                </div>
+            </div>
+
+            <!-- Concept 7 -->
+            <div class="concept-card">
+                <span class="concept-number">07</span>
+                <h3>Branch Network</h3>
+                <div class="concept-visual">
+                    <img src="concept-07-branch-network.svg" alt="Branch Network Logo">
+                </div>
+                <div class="concept-description">
+                    Abstract network diagram styled to resemble bonsai branch structure. Nodes are circles of varying sizes (representing different AI workers) connected by curved lines forming a tree-like hierarchy.
+                </div>
+                <div class="concept-rationale">
+                    Visualizes Bonsai's multi-agent architecture as an organic network. Each node represents a worker persona, branches represent communication/collaboration. Maintains growth metaphor while clearly signaling the "team of AI agents" concept.
+                </div>
+                <div style="margin-top: 1rem;">
+                    <span class="theme-badge">Multi-Agent</span>
+                    <span class="theme-badge">Network</span>
+                </div>
+            </div>
+
+            <!-- Concept 8 -->
+            <div class="concept-card">
+                <span class="concept-number">08</span>
+                <h3>Wordmark: "ai" Accent</h3>
+                <div class="concept-visual">
+                    <img src="concept-08-wordmark.svg" alt="Bonsai Wordmark with AI Accent">
+                </div>
+                <div class="concept-description">
+                    Clean sans-serif wordmark "Bonsai" in dark gray with the "ai" characters highlighted in bright magenta/pink. Optionally includes small bonsai tree icon to the left or integrated into the "B" letterform.
+                </div>
+                <div class="concept-rationale">
+                    Per ticket instructions: "the ai can be accented or colored differently." Makes the AI identity explicit while maintaining clean branding. Highly legible, works well at small sizes.
+                </div>
+                <div style="margin-top: 1rem;">
+                    <span class="theme-badge">Typography</span>
+                    <span class="theme-badge">AI Emphasis</span>
+                </div>
+            </div>
+
+            <!-- Concept 9 -->
+            <div class="concept-card">
+                <span class="concept-number">09</span>
+                <h3>Isometric Pot Garden</h3>
+                <div class="concept-visual">
+                    <p style="color: #707070; font-style: italic;">3D isometric view of pot containing multiple trees at different growth stages</p>
+                </div>
+                <div class="concept-description">
+                    Isometric/3D projection of a shallow bonsai pot viewed from above at 30° angle. Inside the pot are 4-5 small stylized trees/sprouts at different growth stages, representing the different AI worker types.
+                </div>
+                <div class="concept-rationale">
+                    Represents Bonsai as a "garden" of AI agents rather than a single tree. Each agent is at a different stage of growth/maturity. The isometric view gives a modern, game-like quality.
+                </div>
+                <div style="margin-top: 1rem;">
+                    <span class="theme-badge">Garden/Collective</span>
+                    <span class="theme-badge">3D/Isometric</span>
+                </div>
+            </div>
+
+            <!-- Concept 10 -->
+            <div class="concept-card">
+                <span class="concept-number">10</span>
+                <h3>Zen Circle + Minimal Tree</h3>
+                <div class="concept-visual">
+                    <img src="concept-10-zen-circle.svg" alt="Zen Circle with Minimal Tree">
+                </div>
+                <div class="concept-description">
+                    Ensō (Zen circle) hand-brushed in dark gray/black ink stroke. Inside the circle, a minimal bonsai tree reduced to absolute essentials: single curved trunk line, 2-3 foliage clouds as simple shapes.
+                </div>
+                <div class="concept-rationale">
+                    Embraces the Japanese/Zen aesthetic roots of bonsai culture. The ensō represents enlightenment, strength, and the universe. Minimal execution ensures scalability and creates a calm, focused brand presence.
+                </div>
+                <div style="margin-top: 1rem;">
+                    <span class="theme-badge">Zen/Eastern</span>
+                    <span class="theme-badge">Minimalist</span>
+                </div>
+            </div>
+        </div>
+
+        <footer class="footer">
+            <p><strong>Design Direction Themes:</strong></p>
+            <p style="margin-top: 0.5rem;">Literal → Abstract | Organic → Digital | Single Tree → Garden/Network | Growth → Cultivation | Eastern → Western</p>
+            <p style="margin-top: 2rem; font-size: 0.9rem;">
+                Bonsai Developer OS | Logo Concept Exploration
+            </p>
+        </footer>
+    </div>
+</body>
+</html>

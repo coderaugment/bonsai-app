@@ -1,0 +1,20 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="200" height="200" fill="#f5f5f5"/>
+
+  <!-- Ensō circle - hand-brushed zen circle -->
+  <circle cx="100" cy="100" r="85" fill="none" stroke="#2a2a2a" stroke-width="8" opacity="0.85" stroke-linecap="round" stroke-dasharray="530 5"/>
+
+  <!-- Minimal bonsai tree inside -->
+  <!-- Trunk - single curved line -->
+  <path d="M 100 140 Q 90 110 95 80" stroke="#3a3a3a" stroke-width="4" fill="none" stroke-linecap="round"/>
+
+  <!-- Foliage clouds - minimal -->
+  <!-- Left cloud -->
+  <ellipse cx="85" cy="85" rx="15" ry="12" fill="#6a6a6a" opacity="0.7"/>
+
+  <!-- Right cloud - magenta accent -->
+  <ellipse cx="108" cy="75" rx="18" ry="14" fill="#e879f9" opacity="0.8"/>
+
+  <!-- Top cloud -->
+  <ellipse cx="95" cy="68" rx="12" ry="10" fill="#8a8a8a" opacity="0.6"/>
+</svg>
