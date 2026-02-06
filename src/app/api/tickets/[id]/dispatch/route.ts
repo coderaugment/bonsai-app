@@ -1,3 +1,26 @@
+/**
+ * POST /api/tickets/[id]/dispatch
+ *
+ * Spawns a detached Claude agent process for ticket execution.
+ *
+ * Flow:
+ * 1. Fetch ticket, project, and available personas
+ * 2. If PM persona exists, run PM triage to select best agent for task
+ * 3. Create session directory at ~/.bonsai/sessions/{ticketId}-comment-{timestamp}/
+ * 4. Generate system prompt and task files with ticket context
+ * 5. Spawn detached `claude` CLI process with role-specific tool restrictions
+ * 6. Agent posts updates via webhook to /api/tickets/[id]/report
+ * 7. Agent posts final output to /api/tickets/[id]/agent-complete
+ *
+ * The agent runs independently - this endpoint returns immediately.
+ *
+ * Tool restrictions:
+ * - Researcher/Designer: Read-only tools (Read, Grep, Glob, Bash git)
+ * - Developer/Manager: Full tools (Read, Grep, Glob, Write, Edit, Bash)
+ *
+ * @route POST /api/tickets/:id/dispatch
+ */
+
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { tickets, personas, comments, projects } from "@/db/schema";
@@ -32,8 +55,22 @@ function resolveMainRepo(project: { githubRepo: string | null; slug: string }): 
   return path.join(HOME, "development", project.githubRepo || project.slug);
 }
 
-// ── PM Triage ────────────────────────────────────────
-// Calls claude -p with --max-turns 1 to get a quick JSON decision
+/**
+ * PM Triage - Uses PM persona to analyze ticket and select best agent.
+ *
+ * Runs a quick (max 1 turn) Claude invocation with the PM persona to determine:
+ * - Which role should handle this ticket (researcher, planner, developer, etc.)
+ * - Which specific persona is best suited
+ * - Reasoning for the selection
+ *
+ * The PM acts as a "router" that triages incoming tickets and assigns them
+ * to the most appropriate specialist agent.
+ *
+ * @param sessionDir - Path to session directory containing task.md and system-prompt.txt
+ * @param cwd - Working directory for the Claude CLI process
+ * @returns Triage decision with role, personaId, and reason, or null if failed
+ * @private
+ */
 async function pmTriage(
   sessionDir: string,
   cwd: string
@@ -163,6 +200,17 @@ function postAgentComment(
   }
 }
 
+/**
+ * Get allowed tools for a given agent role.
+ *
+ * Tool restrictions ensure agents operate within appropriate boundaries:
+ * - Researcher/Designer: Read-only access for exploration and analysis
+ * - Developer/Manager: Full access for implementation and oversight
+ *
+ * @param role - The agent role (researcher, designer, developer, manager, etc.)
+ * @returns Array of allowed tool names
+ * @private
+ */
 function toolsForRole(role: string): string[] {
   if (role === "researcher") return TOOLS_READONLY;
   if (role === "designer") return TOOLS_READONLY;
