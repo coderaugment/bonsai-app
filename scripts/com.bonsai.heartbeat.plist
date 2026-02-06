@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Bonsai Heartbeat - launchd configuration for macOS
+
+  This plist runs the heartbeat dispatcher every 5 minutes to process
+  tickets in the research → planning → implementation lifecycle.
+
+  Installation:
+    1. Copy this file to ~/Library/LaunchAgents/com.bonsai.heartbeat.plist
+    2. Replace {USER} with your username
+    3. Replace {WEBAPP_PATH} with absolute path to webapp directory
+    4. Load: launchctl load ~/Library/LaunchAgents/com.bonsai.heartbeat.plist
+
+  Status:
+    launchctl list | grep bonsai
+
+  Logs:
+    tail -f ~/.bonsai/logs/heartbeat.log
+    tail -f ~/.bonsai/logs/launchd.stdout.log
+    tail -f ~/.bonsai/logs/launchd.stderr.log
+
+  Unload:
+    launchctl unload ~/Library/LaunchAgents/com.bonsai.heartbeat.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.bonsai.heartbeat</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/{USER}/development/bonsai/webapp/scripts/heartbeat.sh</string>
+        <string>dev</string>
+    </array>
+
+    <!-- Run every 5 minutes (300 seconds) -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <!-- Start on login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Logs -->
+    <key>StandardOutPath</key>
+    <string>/Users/{USER}/.bonsai/logs/launchd.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/{USER}/.bonsai/logs/launchd.stderr.log</string>
+
+    <!-- Environment -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/Users/{USER}/.local/bin</string>
+    </dict>
+</dict>
+</plist>

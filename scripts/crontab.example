@@ -1,0 +1,42 @@
+# Bonsai Heartbeat - Cron Configuration
+#
+# This file contains example crontab entries for scheduling the Bonsai
+# heartbeat dispatcher on Linux/Unix systems.
+#
+# Installation:
+#   1. Edit this file to replace {USER} with your username
+#   2. Choose either dev or prod mode (comment out the other)
+#   3. Run: crontab -e
+#   4. Paste the appropriate line(s) below
+#
+# Verify installation:
+#   crontab -l
+#
+# View logs:
+#   tail -f ~/.bonsai/logs/heartbeat.log
+
+# ── Development Mode ──────────────────────────────────────────────────
+# Uses bonsai-dev.db database
+# Runs every 5 minutes
+*/5 * * * * /Users/{USER}/development/bonsai/webapp/scripts/heartbeat.sh dev
+
+# ── Production Mode ───────────────────────────────────────────────────
+# Uses bonsai.db database
+# Runs every 5 minutes
+# */5 * * * * /Users/{USER}/development/bonsai/webapp/scripts/heartbeat.sh prod
+
+# ── Alternative: Different schedules ──────────────────────────────────
+# Run every 10 minutes:
+# */10 * * * * /Users/{USER}/development/bonsai/webapp/scripts/heartbeat.sh dev
+
+# Run every hour at minute 0:
+# 0 * * * * /Users/{USER}/development/bonsai/webapp/scripts/heartbeat.sh dev
+
+# Run every 30 minutes:
+# */30 * * * * /Users/{USER}/development/bonsai/webapp/scripts/heartbeat.sh dev
+
+# ── Notes ─────────────────────────────────────────────────────────────
+# - Cron does not source your shell profile, so ensure PATH is correct
+# - The heartbeat.sh script sets up the environment automatically
+# - Lock file prevents concurrent runs if a job takes longer than 5 min
+# - Logs are automatically rotated (7 day retention)

@@ -1,0 +1,151 @@
+export type TicketType = "feature" | "bug" | "chore";
+
+export type TicketState =
+  | "backlog"
+  | "in_progress"
+  | "verification"
+  | "done";
+
+export interface TicketCreator {
+  name: string;
+  avatarUrl?: string;
+}
+
+export interface Ticket {
+  id: string;
+  title: string;
+  description: string;
+  type: TicketType;
+  state: TicketState;
+  priority: number;
+  assignee?: Persona;
+  creator?: TicketCreator;
+  acceptanceCriteria?: string;
+  commentCount: number;
+  hasAttachments: boolean;
+  lastAgentActivity?: string;
+  lastHumanCommentAt?: string;
+  returnedFromVerification?: boolean;
+  createdAt: string;
+  // Lifecycle tracking
+  researchCompletedAt?: string;
+  researchCompletedBy?: string;
+  researchApprovedAt?: string;
+  researchApprovedBy?: number;
+  planCompletedAt?: string;
+  planCompletedBy?: string;
+  planApprovedAt?: string;
+  planApprovedBy?: number;
+  // All personas who have interacted with this ticket
+  participants?: Persona[];
+}
+
+export type TicketDocumentType = "research" | "implementation_plan";
+
+export interface TicketDocument {
+  id: number;
+  ticketId: string;
+  type: TicketDocumentType;
+  content: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Legacy type - keeping for backward compatibility
+export type WorkerRole = "developer" | "researcher" | "designer" | "manager";
+
+// ============================================================================
+// SKILLS - Individual capabilities that can be attached to roles
+// ============================================================================
+export type SkillCategory = "technical" | "communication" | "planning" | "analysis" | "creative";
+
+export interface Skill {
+  id: number;
+  name: string;
+  description?: string;
+  category?: SkillCategory;
+  createdAt: string;
+}
+
+// ============================================================================
+// ROLES - Archetypes/templates for generating personas
+// ============================================================================
+// Claude Code Skill Definition (follows https://code.claude.com/docs/en/skills)
+export interface ClaudeSkillDefinition {
+  name: string; // lowercase, numbers, hyphens only (max 64 chars)
+  description: string;
+  argumentHint?: string; // e.g. "[issue-number]" or "[filename] [format]"
+  disableModelInvocation?: boolean; // true = only user can invoke
+  userInvocable?: boolean; // false = hide from / menu
+  allowedTools?: string; // e.g. "Read, Grep, Glob"
+  model?: string; // model to use
+  context?: "fork"; // run in subagent
+  agent?: string; // subagent type (Explore, Plan, general-purpose)
+  content: string; // markdown instructions
+}
+
+export interface Role {
+  id: number;
+  slug: string;
+  title: string;
+  description?: string;
+  color: string;
+  icon?: string;
+  workflow?: string[]; // Stored as JSON in DB
+  systemPrompt?: string;
+  tools?: string[]; // Allowed tools (MCP tools, bash commands, etc.)
+  folderAccess?: string[]; // Folder paths this role can access
+  skillDefinitions?: ClaudeSkillDefinition[]; // Claude Code skills for this role
+  skills?: Skill[]; // Populated via join (legacy)
+  createdAt: string;
+}
+
+// ============================================================================
+// PERSONAS - Generated identities assigned to projects
+// ============================================================================
+export interface Persona {
+  id: string;
+  name: string;
+  slug: string;
+  color: string;
+  avatar?: string;
+  roleId?: number; // Reference to the role archetype
+  role?: string; // Role slug (matches roles.slug)
+  roleData?: Role; // Populated via join
+  personality?: string;
+  skills: string[];
+  processes: string[];
+  goals: string[];
+  permissions: { tools: string[]; folders: string[] };
+  projectId?: number;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  slug: string;
+  ticketCount: number;
+  githubOwner?: string;
+  githubRepo?: string;
+}
+
+export interface CommentAttachment {
+  name: string;
+  type: string; // mime type
+  data: string; // base64 data URL
+}
+
+export interface Comment {
+  id: number;
+  ticketId: string;
+  authorType: "human" | "agent";
+  author?: {
+    name: string;
+    avatarUrl?: string;
+    color?: string;
+  };
+  content: string;
+  attachments?: CommentAttachment[];
+  createdAt: string;
+}

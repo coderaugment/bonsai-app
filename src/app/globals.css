@@ -1,8 +1,41 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg-primary: #0b0e14;
+  --bg-secondary: #131620;
+  --bg-card: #181b24;
+  --bg-card-hover: #1e2230;
+  --bg-sidebar: #0f1219;
+  --bg-input: #161923;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-medium: rgba(255, 255, 255, 0.1);
+
+  --text-primary: #e8eaf0;
+  --text-secondary: #8b8fa3;
+  --text-muted: #5c6070;
+
+  --accent-blue: #5b8df9;
+  --accent-green: #34d399;
+  --accent-amber: #fbbf24;
+  --accent-red: #f87171;
+  --accent-purple: #a78bfa;
+  --accent-indigo: #6366f1;
+
+  --badge-feature: #5b8df9;
+  --badge-feature-text: #93bbfd;
+  --badge-bug: #f97316;
+  --badge-bug-text: #fdba74;
+  --badge-chore: #22c55e;
+  --badge-chore-text: #86efac;
+
+  --column-backlog: #6b7280;
+  --column-in-progress: #fbbf24;
+  --column-verification: #a78bfa;
+  --column-done: #34d399;
+
+  --background: var(--bg-primary);
+  --foreground: var(--text-primary);
 }
 
 @theme inline {
@@ -12,15 +45,13 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
