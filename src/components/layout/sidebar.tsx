@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Image from "next/image";
 import { SettingsPanel } from "./settings-panel";
 import { AddProjectModal } from "../board/add-project-modal";
 
 const navItems = [
   { icon: "board", label: "Project kanban board", href: "/board" },
+  { icon: "workers", label: "Workers", href: "/workers" },
 ];
 
 function NavIcon({ icon, active }: { icon: string; active?: boolean }) {
@@ -28,6 +29,12 @@ function NavIcon({ icon, active }: { icon: string; active?: boolean }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 10.5v6m3-3H9m4.06-7.19l-2.12-2.12a1.5 1.5 0 00-1.06-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
         </svg>
       );
+    case "workers":
+      return (
+        <svg className={`w-5 h-5 ${base}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+        </svg>
+      );
     case "settings":
       return (
         <svg className={`w-5 h-5 ${base}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -42,6 +49,7 @@ function NavIcon({ icon, active }: { icon: string; active?: boolean }) {
 
 export function Sidebar({ userName }: { userName?: string }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showNewProject, setShowNewProject] = useState(false);
   const [clientName, setClientName] = useState(userName ?? "");
@@ -97,6 +105,7 @@ export function Sidebar({ userName }: { userName?: string }) {
           return (
             <button
               key={item.icon}
+              onClick={() => router.push(item.href)}
               className="group relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/5"
               style={
                 isActive
@@ -125,16 +134,18 @@ export function Sidebar({ userName }: { userName?: string }) {
           <NavIcon icon="settings" active={settingsOpen} />
         </button>
 
-        {/* User avatar */}
+        {/* User avatar — also opens settings */}
         {avatarUrl ? (
           <img
             src={avatarUrl}
             alt={displayName}
+            onClick={() => setSettingsOpen(!settingsOpen)}
             className="w-8 h-8 rounded-full mt-2 cursor-pointer hover:opacity-80 transition-opacity object-cover"
             title={displayName}
           />
         ) : (
           <div
+            onClick={() => setSettingsOpen(!settingsOpen)}
             className="w-8 h-8 rounded-full flex items-center justify-center mt-2 text-xs font-medium text-white cursor-pointer hover:opacity-80 transition-opacity"
             style={{ backgroundColor: "var(--accent-indigo)" }}
             title={displayName}

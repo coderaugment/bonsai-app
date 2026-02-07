@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { tickets, users } from "@/db/schema";
+import { tickets, users, comments, ticketDocuments } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { getTickets } from "@/db/queries";
 
@@ -35,6 +35,18 @@ export async function PUT(req: Request) {
     })
     .where(eq(tickets.id, ticketId))
     .run();
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(req: Request) {
+  const { ticketId } = await req.json();
+  if (!ticketId) {
+    return NextResponse.json({ error: "ticketId required" }, { status: 400 });
+  }
+  // Delete comments and documents first, then the ticket
+  db.delete(comments).where(eq(comments.ticketId, ticketId)).run();
+  db.delete(ticketDocuments).where(eq(ticketDocuments.ticketId, ticketId)).run();
+  db.delete(tickets).where(eq(tickets.id, ticketId)).run();
   return NextResponse.json({ ok: true });
 }
 
@@ -74,6 +86,20 @@ export async function POST(req: Request) {
     })
     .returning()
     .get();
+
+  // Auto-dispatch research agent (fire-and-forget)
+  try {
+    const origin = new URL(req.url).origin;
+    fetch(`${origin}/api/tickets/${id}/dispatch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        commentContent: `New ticket created. Research this ticket.\n\n${title.trim()}${description ? `\n\n${description.trim()}` : ""}${acceptanceCriteria ? `\n\nAcceptance Criteria:\n${acceptanceCriteria.trim()}` : ""}`,
+      }),
+    }).catch(() => {}); // fire-and-forget, don't block ticket creation
+  } catch {
+    // dispatch failure shouldn't block ticket creation
+  }
 
   return NextResponse.json({ success: true, ticket });
 }

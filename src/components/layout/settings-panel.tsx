@@ -15,6 +15,7 @@ interface SettingsData {
   name: string;
   githubLogin: string;
   githubAvatarUrl: string;
+  userAvatarUrl: string;
   tokenConnected: boolean;
 }
 
@@ -47,6 +48,7 @@ export function SettingsPanel({
         name: userData.user?.name ?? "",
         githubLogin: githubData.login ?? "",
         githubAvatarUrl: githubData.avatarUrl ?? "",
+        userAvatarUrl: userData.user?.avatarUrl ?? "",
         tokenConnected: !!githubData.login,
       };
       setData(d);
@@ -90,12 +92,11 @@ export function SettingsPanel({
       }}
     >
       <div
-        className="relative flex rounded-xl shadow-2xl overflow-hidden"
+        className="relative flex shadow-2xl overflow-hidden"
         style={{
           backgroundColor: "var(--bg-secondary)",
-          border: "1px solid var(--border-medium)",
-          width: 640,
-          height: 500,
+          width: "100vw",
+          height: "100vh",
         }}
       >
         {/* Close button */}
@@ -145,7 +146,7 @@ export function SettingsPanel({
         </div>
 
         {/* Right content */}
-        <div className="flex-1 py-5 px-6 overflow-y-auto">
+        <div className="flex-1 py-5 px-6 overflow-y-auto flex flex-col">
           {!data ? (
             <div className="flex items-center justify-center h-full">
               <span className="text-sm" style={{ color: "var(--text-muted)" }}>
@@ -162,6 +163,7 @@ export function SettingsPanel({
               onNameChange={setNameValue}
               onSaveName={handleSaveName}
               onCancelEdit={() => setEditingName(false)}
+              onAvatarChange={(url) => setData((d) => d ? { ...d, userAvatarUrl: url } : d)}
             />
           ) : activeSection === "api-keys" ? (
             <ApiKeysSection />
@@ -185,6 +187,7 @@ function PreferencesSection({
   onNameChange,
   onSaveName,
   onCancelEdit,
+  onAvatarChange,
 }: {
   data: SettingsData;
   editingName: boolean;
@@ -194,7 +197,35 @@ function PreferencesSection({
   onNameChange: (v: string) => void;
   onSaveName: () => void;
   onCancelEdit: () => void;
+  onAvatarChange: (url: string) => void;
 }) {
+  const [generatingAvatar, setGeneratingAvatar] = useState(false);
+
+  const displayAvatar = data.userAvatarUrl || data.githubAvatarUrl;
+
+  async function handleGenerateAvatar() {
+    if (!data.name) return;
+    setGeneratingAvatar(true);
+    try {
+      const res = await fetch("/api/avatar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: data.name, role: "user", personality: null, useUserStyle: true }),
+      });
+      const result = await res.json();
+      if (result.avatar) {
+        await fetch("/api/settings/avatar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ avatarUrl: result.avatar }),
+        });
+        onAvatarChange(result.avatar);
+      }
+    } finally {
+      setGeneratingAvatar(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -214,25 +245,35 @@ function PreferencesSection({
         >
           Avatar
         </label>
-        {data.githubAvatarUrl ? (
-          <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3">
+          {displayAvatar ? (
             <img
-              src={data.githubAvatarUrl}
+              src={displayAvatar}
               alt={data.name}
               className="w-14 h-14 rounded-full object-cover"
             />
-            <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Synced from GitHub
+          ) : (
+            <div
+              className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-medium text-white"
+              style={{ backgroundColor: "var(--accent-indigo)" }}
+            >
+              {data.name ? data.name[0].toUpperCase() : "?"}
+            </div>
+          )}
+          <div className="flex flex-col gap-1.5">
+            <button
+              onClick={handleGenerateAvatar}
+              disabled={generatingAvatar || !data.name}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-white disabled:opacity-40 transition-opacity"
+              style={{ backgroundColor: "var(--accent-blue)" }}
+            >
+              {generatingAvatar ? "Generating..." : "Generate avatar"}
+            </button>
+            <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+              {data.userAvatarUrl ? "AI-generated using team style" : data.githubAvatarUrl ? "Synced from GitHub" : "No avatar set"}
             </span>
           </div>
-        ) : (
-          <div
-            className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-medium text-white"
-            style={{ backgroundColor: "var(--accent-indigo)" }}
-          >
-            {data.name ? data.name[0].toUpperCase() : "?"}
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Name */}
@@ -655,6 +696,11 @@ function ApiKeysSection() {
 
 const PROMPT_OPTIONS = [
   { key: "prompt_avatar_style", label: "Team Avatar Style", description: "Art direction for generated worker avatar images" },
+  { key: "prompt_user_avatar_style", label: "User Avatar Style", description: "Art direction for your personal avatar image" },
+  { key: "prompt_role_researcher", label: "Researcher Prompt", description: "System instructions for the researcher agent role" },
+  { key: "prompt_role_developer", label: "Developer Prompt", description: "System instructions for the developer agent role" },
+  { key: "prompt_role_designer", label: "Designer Prompt", description: "System instructions for the designer agent role" },
+  { key: "prompt_role_skeptic", label: "Skeptic Prompt", description: "System instructions for the skeptic/devil's advocate role" },
 ];
 
 function PromptsSection() {
@@ -719,8 +765,8 @@ function PromptsSection() {
   const selected = PROMPT_OPTIONS.find((o) => o.key === selectedKey)!;
 
   return (
-    <div className="space-y-5">
-      <div>
+    <div className="flex flex-col h-full gap-5">
+      <div className="shrink-0">
         <h3
           className="text-base font-semibold mb-1"
           style={{ color: "var(--text-primary)" }}
@@ -737,7 +783,7 @@ function PromptsSection() {
           Loading...
         </span>
       ) : (
-        <>
+        <div className="flex-1 flex flex-col gap-5 min-h-0">
           {/* Prompt selector dropdown */}
           <div>
             <label
@@ -768,9 +814,9 @@ function PromptsSection() {
           </div>
 
           {/* Prompt editor */}
-          <div>
+          <div className="flex-1 flex flex-col min-h-0">
             <label
-              className="text-xs font-medium mb-1.5 block"
+              className="text-xs font-medium mb-1.5 block shrink-0"
               style={{ color: "var(--text-muted)" }}
             >
               Content
@@ -781,8 +827,7 @@ function PromptsSection() {
                 setEditValue(e.target.value);
                 setDirty(true);
               }}
-              rows={8}
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-[var(--accent-blue)] resize-y"
+              className="w-full flex-1 px-3 py-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-[var(--accent-blue)] resize-none"
               style={{
                 backgroundColor: "var(--bg-input)",
                 border: "1px solid var(--border-medium)",
@@ -794,7 +839,7 @@ function PromptsSection() {
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={handleSave}
               disabled={saving || !dirty}
@@ -811,7 +856,7 @@ function PromptsSection() {
               Reset to default
             </button>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

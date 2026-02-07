@@ -110,6 +110,10 @@ export function BoardView({ tickets: initialTickets, projectId }: BoardViewProps
       <TicketDetailModal
         ticket={selectedTicket}
         onClose={() => setSelectedTicket(null)}
+        onDelete={(ticketId) => {
+          setTickets((prev) => prev.filter((t) => t.id !== ticketId));
+          setSelectedTicket(null);
+        }}
       />
     </div>
   );

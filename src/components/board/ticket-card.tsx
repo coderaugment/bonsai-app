@@ -205,7 +205,7 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit }: TicketCar
               key={i}
               style={{
                 marginLeft: i > 0 ? -10 : 0,
-                zIndex: visibleAvatars.length - i,
+                zIndex: i + 1,
                 position: "relative",
               }}
               title={av.isWorking ? `${av.label} — working` : av.label}

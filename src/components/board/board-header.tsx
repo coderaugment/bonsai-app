@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Project, Persona } from "@/types";
-import { AddTicketModal } from "./add-ticket-modal";
 import { CompanyModal } from "./company-modal";
 import { ProjectSelector } from "./project-selector";
 
@@ -13,7 +13,7 @@ interface BoardHeaderProps {
 }
 
 export function BoardHeader({ project, allProjects, personas }: BoardHeaderProps) {
-  const [showTicketModal, setShowTicketModal] = useState(false);
+  const router = useRouter();
   const [showCompanyModal, setShowCompanyModal] = useState(false);
 
   return (
@@ -39,7 +39,7 @@ export function BoardHeader({ project, allProjects, personas }: BoardHeaderProps
           </button>
 
           <button
-            onClick={() => setShowTicketModal(true)}
+            onClick={() => router.push("/new-ticket")}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
             style={{ backgroundColor: "var(--accent-blue)" }}
           >
@@ -52,11 +52,6 @@ export function BoardHeader({ project, allProjects, personas }: BoardHeaderProps
         </div>
       </div>
 
-      <AddTicketModal
-        open={showTicketModal}
-        onClose={() => setShowTicketModal(false)}
-        projectSlug={project.slug}
-      />
       <CompanyModal
         open={showCompanyModal}
         onClose={() => setShowCompanyModal(false)}

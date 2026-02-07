@@ -51,6 +51,16 @@ export const workerRoles: Record<WorkerRole, WorkerRoleConfig> = {
     placeholder:
       "## Core Truths\nNo surprises. A late 'heads up' is worse than an early 'I don't know.' Ship dates are promises.\n\n## Boundaries\nWon't let meetings run without an agenda. Won't say 'let's circle back' and then not.\n\n## Vibe\nCalm, organized, slightly terrifying attention to detail. Uses checklists like weapons. Celebrates wins loudly.\n\n## Continuity\nKnows exactly which task has been 'almost done' for three sprints.",
   },
+  skeptic: {
+    label: "Skeptic",
+    color: "#ef4444",
+    defaultSkills: [],
+    defaultProcesses: [],
+    defaultGoals: [],
+    defaultPermissions: { tools: [], folders: [] },
+    placeholder:
+      "## Core Truths\nIf nobody is pushing back, nobody is thinking. The best idea survives the hardest questions.\n\n## Boundaries\nWon't approve without stress-testing. Won't let 'it works on my machine' slide.\n\n## Vibe\nThe person who asks 'what happens when this fails?' Constructive contrarian. Respects the work, questions the assumptions.\n\n## Continuity\nRemembers every 'we'll fix it later' that was never fixed.",
+  },
 };
 
 // --- Random persona generation (MVP: template-based, no AI) ---
@@ -76,6 +86,7 @@ const namePool: Record<WorkerRole, string[]> = {
     "Naomi", "Devin", "Amara", "Theo", "Sasha",
     "Owen", "Lia", "Raj", "Maya", "Ezra",
   ],
+  skeptic: [],
 };
 
 const personalityTemplates: Record<WorkerRole, string[]> = {
@@ -103,6 +114,7 @@ const personalityTemplates: Record<WorkerRole, string[]> = {
     "Relationship builder who knows every team member's strengths. Removes blockers before anyone notices them.",
     "Strategic planner who balances long-term vision with daily execution. Keeps stakeholders informed without creating noise.",
   ],
+  skeptic: [],
 };
 
 function pickRandom<T>(arr: T[]): T {

@@ -53,7 +53,7 @@ export interface TicketDocument {
 }
 
 // Legacy type - keeping for backward compatibility
-export type WorkerRole = "developer" | "researcher" | "designer" | "manager";
+export type WorkerRole = "developer" | "researcher" | "designer" | "manager" | "skeptic";
 
 // ============================================================================
 // SKILLS - Individual capabilities that can be attached to roles
@@ -136,6 +136,17 @@ export interface CommentAttachment {
   data: string; // base64 data URL
 }
 
+export interface TicketAttachment {
+  id: number;
+  ticketId: string;
+  filename: string;
+  mimeType: string;
+  data: string; // base64 data URL
+  createdByType: "human" | "agent";
+  createdById?: string;
+  createdAt: string;
+}
+
 export interface Comment {
   id: number;
   ticketId: string;
@@ -144,6 +155,7 @@ export interface Comment {
     name: string;
     avatarUrl?: string;
     color?: string;
+    role?: string;
   };
   content: string;
   attachments?: CommentAttachment[];

@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { Modal } from "@/components/ui/modal";
-import { getProject, getUser } from "@/db/queries";
+import { getProject, getUser, isTeamComplete, hasTickets } from "@/db/queries";
+
+export const dynamic = "force-dynamic";
 
 export default function OnboardLayout({
   children,
@@ -9,7 +11,7 @@ export default function OnboardLayout({
 }) {
   const user = getUser();
   const project = getProject();
-  if (user && project) {
+  if (user && project && isTeamComplete() && hasTickets()) {
     redirect("/board");
   }
 

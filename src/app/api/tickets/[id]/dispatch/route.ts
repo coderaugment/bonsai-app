@@ -1,21 +1,20 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { tickets, personas, comments, projects } from "@/db/schema";
-import { eq, or, isNull } from "drizzle-orm";
-import { exec, spawn } from "node:child_process";
-import { promisify } from "node:util";
+import { tickets, personas, comments, projects, ticketDocuments } from "@/db/schema";
+import { eq, or, isNull, desc } from "drizzle-orm";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
+import { getSetting } from "@/db/queries";
 
-const execAsync = promisify(exec);
-
-// ── Config (mirrors agent/src/lib/dispatcher.ts) ──────────
+// ── Config ──────────────────────────────────────────
 const HOME = process.env.HOME || "~";
 const CLAUDE_CLI = path.join(HOME, ".local", "bin", "claude");
 const MODEL = "sonnet";
 const BONSAI_DIR = path.join(HOME, ".bonsai");
+const API_BASE = "http://localhost:3000";
 
-const TOOLS_READONLY = ["Read", "Grep", "Glob", 'Bash(git:*)'];
+const TOOLS_READONLY = ["Read", "Grep", "Glob", "Bash"];
 const TOOLS_FULL = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
 
 function shellEscape(s: string): string {
@@ -32,91 +31,34 @@ function resolveMainRepo(project: { githubRepo: string | null; slug: string }): 
   return path.join(HOME, "development", project.githubRepo || project.slug);
 }
 
-// ── PM Triage ────────────────────────────────────────
-// Calls claude -p with --max-turns 1 to get a quick JSON decision
-async function pmTriage(
-  sessionDir: string,
-  cwd: string
-): Promise<{ role: string; personaId: string; reason: string } | null> {
-  const taskFile = path.join(sessionDir, "task.md");
-  const outputFile = path.join(sessionDir, "pm-output.json");
-  const stderrFile = path.join(sessionDir, "pm-stderr.log");
-  const promptFile = path.join(sessionDir, "system-prompt.txt");
-
-  const cmd = [
-    `cat ${shellEscape(taskFile)} |`,
-    shellEscape(CLAUDE_CLI),
-    `-p`,
-    `--model ${MODEL}`,
-    `--max-turns 1`,
-    `--output-format json`,
-    `--no-session-persistence`,
-    `--append-system-prompt "$(cat ${shellEscape(promptFile)})"`,
-    `> ${shellEscape(outputFile)} 2> ${shellEscape(stderrFile)}`,
-  ].join(" ");
-
-  try {
-    await execAsync(cmd, {
-      cwd,
-      env: { ...process.env, DISABLE_AUTOUPDATER: "1" },
-      timeout: 30_000, // 30s max for PM triage
-      maxBuffer: 1024,
-      killSignal: "SIGTERM",
-    });
-  } catch {
-    // timed out or errored — read whatever output exists
-  }
-
-  if (!fs.existsSync(outputFile)) return null;
-
-  const raw = fs.readFileSync(outputFile, "utf-8").trim();
-  if (!raw) return null;
-
-  // output-format json wraps the response — extract the result text
-  try {
-    const envelope = JSON.parse(raw);
-    // Claude --output-format json returns { result: "..." } or an array of content blocks
-    let text = "";
-    if (typeof envelope.result === "string") {
-      text = envelope.result;
-    } else if (Array.isArray(envelope)) {
-      // array of content blocks
-      text = envelope
-        .filter((b: { type: string }) => b.type === "text")
-        .map((b: { text: string }) => b.text)
-        .join("");
-    } else if (typeof envelope === "string") {
-      text = envelope;
-    }
-
-    // Extract JSON object from the text (PM may wrap it in markdown code fences)
-    const jsonMatch = text.match(/\{[\s\S]*?"role"[\s\S]*?"personaId"[\s\S]*?"reason"[\s\S]*?\}/);
-    if (!jsonMatch) return null;
-
-    const decision = JSON.parse(jsonMatch[0]);
-    if (decision.role && decision.personaId && decision.reason) {
-      return decision;
-    }
-  } catch {
-    // parse failed
-  }
-
-  return null;
-}
-
-// ── Agent Spawn (fire-and-forget) ────────────────────
+// ── Agent Spawn (fire-and-forget, posts back when done) ──
 function spawnAgent(
   sessionDir: string,
   cwd: string,
-  tools: string[]
+  tools: string[],
+  ticketId: string,
+  personaId: string
 ) {
   const taskFile = path.join(sessionDir, "task.md");
   const outputFile = path.join(sessionDir, "output.md");
   const stderrFile = path.join(sessionDir, "stderr.log");
   const promptFile = path.join(sessionDir, "system-prompt.txt");
+  const reportScript = path.join(sessionDir, "report.sh");
 
-  // Build the shell command — same pattern as dispatcher.ts
-  const cmd = [
+  // Write a helper script the agent can call to post progress updates
+  fs.writeFileSync(reportScript, [
+    `#!/usr/bin/env node`,
+    `const msg = process.argv.slice(2).join(" ");`,
+    `if (!msg) process.exit(0);`,
+    `fetch("${API_BASE}/api/tickets/${ticketId}/report", {`,
+    `  method: "POST",`,
+    `  headers: { "Content-Type": "application/json" },`,
+    `  body: JSON.stringify({ personaId: "${personaId}", content: msg }),`,
+    `}).catch(() => {});`,
+  ].join("\n"));
+  fs.chmodSync(reportScript, 0o755);
+
+  const claudeCmd = [
     `cat ${shellEscape(taskFile)} |`,
     shellEscape(CLAUDE_CLI),
     `-p`,
@@ -128,8 +70,27 @@ function spawnAgent(
     `> ${shellEscape(outputFile)} 2> ${shellEscape(stderrFile)}`,
   ].join(" ");
 
-  // Fire-and-forget: detached process, stdio ignored, unref'd
-  const child = spawn("sh", ["-c", cmd], {
+  // After claude finishes, post the output to agent-complete endpoint
+  const postScriptFile = path.join(sessionDir, "post-output.mjs");
+  fs.writeFileSync(postScriptFile, [
+    `import fs from "fs";`,
+    `const output = fs.readFileSync(${JSON.stringify(outputFile)}, "utf-8").trim();`,
+    `if (!output) process.exit(0);`,
+    `try {`,
+    `  const res = await fetch(${JSON.stringify(`${API_BASE}/api/tickets/${ticketId}/agent-complete`)}, {`,
+    `    method: "POST",`,
+    `    headers: { "Content-Type": "application/json" },`,
+    `    body: JSON.stringify({ personaId: ${JSON.stringify(personaId)}, content: output }),`,
+    `  });`,
+    `  const body = await res.text();`,
+    `  fs.writeFileSync(${JSON.stringify(path.join(sessionDir, "post-result.log"))}, res.status + " " + body);`,
+    `} catch (e) {`,
+    `  fs.writeFileSync(${JSON.stringify(path.join(sessionDir, "post-error.log"))}, String(e));`,
+    `}`,
+  ].join("\n"));
+  const postScript = `node ${shellEscape(postScriptFile)}`;
+
+  const child = spawn("sh", ["-c", `${claudeCmd} ; ${postScript}`], {
     cwd,
     detached: true,
     stdio: "ignore",
@@ -139,34 +100,60 @@ function spawnAgent(
 }
 
 // ── Helpers ──────────────────────────────────────────
-function postAgentComment(
-  ticketId: string,
-  personaId: string,
-  content: string
-) {
-  db.insert(comments)
-    .values({
-      ticketId,
-      authorType: "agent",
-      personaId,
-      content,
-    })
-    .run();
-
-  // Bump comment count
+function postAgentComment(ticketId: string, personaId: string, content: string) {
+  db.insert(comments).values({ ticketId, authorType: "agent", personaId, content }).run();
   const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
   if (ticket) {
-    db.update(tickets)
-      .set({ commentCount: (ticket.commentCount || 0) + 1 })
-      .where(eq(tickets.id, ticketId))
-      .run();
+    db.update(tickets).set({ commentCount: (ticket.commentCount || 0) + 1 }).where(eq(tickets.id, ticketId)).run();
   }
 }
 
 function toolsForRole(role: string): string[] {
   if (role === "researcher") return TOOLS_READONLY;
   if (role === "designer") return TOOLS_READONLY;
-  return TOOLS_FULL; // developer, manager
+  if (role === "skeptic") return TOOLS_READONLY;
+  return TOOLS_FULL;
+}
+
+// Determine which role should handle based on ticket state
+function resolveTargetRole(ticket: typeof tickets.$inferSelect): string {
+  // Research not approved yet → researcher handles it
+  if (!ticket.researchApprovedAt) return "researcher";
+  // Research approved but plan not approved → developer builds the plan
+  if (!ticket.planApprovedAt) return "developer";
+  // Both approved → developer implements
+  return "developer";
+}
+
+// ── Fetch ticket context ─────────────────────────────
+function getTicketContext(ticketId: string) {
+  const recentComments = db.select().from(comments)
+    .where(eq(comments.ticketId, ticketId))
+    .orderBy(desc(comments.createdAt))
+    .limit(10)
+    .all()
+    .reverse();
+
+  const enrichedComments = recentComments.map((c) => {
+    let authorName = "Unknown";
+    if (c.authorType === "agent" && c.personaId) {
+      const p = db.select().from(personas).where(eq(personas.id, c.personaId)).get();
+      if (p) authorName = `${p.name} (${p.role})`;
+    } else {
+      authorName = "Human";
+    }
+    return `**${authorName}** [${c.authorType}]:\n${c.content}`;
+  });
+
+  const docs = db.select().from(ticketDocuments)
+    .where(eq(ticketDocuments.ticketId, ticketId))
+    .orderBy(desc(ticketDocuments.version))
+    .all();
+
+  const researchDoc = docs.find((d) => d.type === "research");
+  const implPlan = docs.find((d) => d.type === "implementation_plan");
+
+  return { enrichedComments, researchDoc, implPlan };
 }
 
 // ── POST /api/tickets/[id]/dispatch ──────────────────
@@ -177,213 +164,77 @@ export async function POST(
   const { id: ticketId } = await params;
   const { commentContent } = await req.json();
 
-  // Fetch ticket
   const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
-  if (!ticket) {
-    return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
-  }
+  if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
 
-  // Fetch project
   const project = ticket.projectId
     ? db.select().from(projects).where(eq(projects.id, ticket.projectId)).get()
     : null;
-  if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
-  }
+  if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  // Fetch all personas — company-wide (NULL projectId) + any project-specific
-  const projectPersonas = db
-    .select()
-    .from(personas)
+  // Get all personas for this project
+  const projectPersonas = db.select().from(personas)
     .where(or(eq(personas.projectId, project.id), isNull(personas.projectId)))
     .all();
 
-  // Find the PM persona — if none, pick best available agent and skip triage
-  const pmPersona = projectPersonas.find((p) => p.role === "manager");
-  if (!pmPersona) {
-    // No PM — pick best agent: researcher > developer > anyone
-    const fallbackPersona =
-      projectPersonas.find((p) => p.role === "researcher") ||
-      projectPersonas.find((p) => p.role === "developer") ||
-      projectPersonas[0];
-    if (!fallbackPersona) {
-      return NextResponse.json({ error: "No personas available" }, { status: 400 });
-    }
+  // Route directly based on ticket phase — no PM triage
+  const targetRole = resolveTargetRole(ticket);
+  const targetPersona = projectPersonas.find((p) => p.role === targetRole)
+    || projectPersonas.find((p) => p.role === "developer")
+    || projectPersonas.find((p) => p.role !== "manager")
+    || projectPersonas[0];
 
-    const sessionDir = path.join(
-      BONSAI_DIR,
-      "sessions",
-      `${ticketId}-comment-${Date.now()}`
-    );
-    fs.mkdirSync(sessionDir, { recursive: true });
-
-    const cwd = resolveMainRepo(project);
-
-    fs.writeFileSync(
-      path.join(sessionDir, "system-prompt.txt"),
-      buildAgentSystemPrompt(fallbackPersona, project, ticket)
-    );
-    fs.writeFileSync(
-      path.join(sessionDir, "task.md"),
-      assembleAgentTask(commentContent, ticket, fallbackPersona)
-    );
-
-    const tools = toolsForRole(fallbackPersona.role || "developer");
-    spawnAgent(sessionDir, cwd, tools);
-
-    // Post a visible dispatch comment (no PM, so the agent "self-assigns")
-    const dispatchMsg = `Picking up this comment. Looking into it now.`;
-    postAgentComment(ticketId, fallbackPersona.id, dispatchMsg);
-
-    // Set last_agent_activity to prevent heartbeat overlap
-    db.update(tickets)
-      .set({ lastAgentActivity: new Date().toISOString() })
-      .where(eq(tickets.id, ticketId))
-      .run();
-
-    const fallbackComment = {
-      id: Date.now(),
-      ticketId,
-      authorType: "agent" as const,
-      author: {
-        name: fallbackPersona.name,
-        avatarUrl: fallbackPersona.avatar || undefined,
-        color: fallbackPersona.color,
-      },
-      content: dispatchMsg,
-      createdAt: new Date().toISOString(),
-    };
-
-    return NextResponse.json({
-      persona: {
-        id: fallbackPersona.id,
-        name: fallbackPersona.name,
-        role: fallbackPersona.role,
-      },
-      pmComment: fallbackComment,
-    });
+  if (!targetPersona) {
+    return NextResponse.json({ error: "No personas available" }, { status: 400 });
   }
 
-  // ── PM Triage ──────────────────────────────
-  const sessionDir = path.join(
-    BONSAI_DIR,
-    "sessions",
-    `${ticketId}-comment-${Date.now()}`
-  );
-  fs.mkdirSync(sessionDir, { recursive: true });
   const cwd = resolveMainRepo(project);
 
-  // Build the PM's available-personas list (excluding PM itself)
-  const availablePersonas = projectPersonas
-    .filter((p) => p.role !== "manager")
-    .map((p) => `- ${p.name} (id: ${p.id}, role: ${p.role})`)
-    .join("\n");
-
-  // Write PM system prompt
-  const pmSystemPrompt = [
-    `You are ${pmPersona.name}, the Project Manager for ${project.name}.`,
-    pmPersona.personality ? `Personality: ${pmPersona.personality}` : "",
-    "",
-    "Your job is to read a user's comment on a ticket and decide which team member should handle it.",
-    "Respond with ONLY a JSON object (no markdown, no explanation):",
-    '{ "role": "<researcher|developer|designer>", "personaId": "<id>", "reason": "<one sentence>" }',
-    "",
-    "Available team members:",
-    availablePersonas,
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  fs.writeFileSync(path.join(sessionDir, "system-prompt.txt"), pmSystemPrompt);
-
-  // Write PM task (the comment + ticket context)
-  const pmTask = [
-    `# Ticket: ${ticket.title}`,
-    `ID: ${ticket.id} | State: ${ticket.state} | Type: ${ticket.type}`,
-    ticket.description ? `\nDescription:\n${ticket.description}` : "",
-    "",
-    "## User Comment (just posted)",
-    commentContent,
-    "",
-    "Decide which team member should handle this. Respond with JSON only.",
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  fs.writeFileSync(path.join(sessionDir, "task.md"), pmTask);
-
-  // Run PM triage (synchronous, ~5-10s)
-  const decision = await pmTriage(sessionDir, cwd);
-
-  // Resolve the assigned persona
-  let assignedPersona = decision
-    ? projectPersonas.find((p) => p.id === decision.personaId)
-    : null;
-
-  // Fallback if PM picked an invalid persona
-  if (!assignedPersona) {
-    assignedPersona =
-      projectPersonas.find((p) => p.role === "developer") ||
-      projectPersonas.find((p) => p.role !== "manager") ||
-      null;
-  }
-
-  if (!assignedPersona) {
-    return NextResponse.json({ error: "No suitable agent found" }, { status: 400 });
-  }
-
-  const reason = decision?.reason || "Handling this comment";
-
-  // Post PM comment
-  const pmCommentContent = `Assigning to **${assignedPersona.name}** to handle this. ${reason}`;
-  postAgentComment(ticketId, pmPersona.id, pmCommentContent);
-
-  // Enrich PM comment for frontend response
-  const pmComment = {
-    id: Date.now(), // approximate — real ID from DB
-    ticketId,
-    authorType: "agent" as const,
-    author: {
-      name: pmPersona.name,
-      avatarUrl: pmPersona.avatar || undefined,
-      color: pmPersona.color,
-    },
-    content: pmCommentContent,
-    createdAt: new Date().toISOString(),
-  };
-
-  // ── Spawn the assigned agent (fire-and-forget) ──────
-  const agentSessionDir = path.join(
-    BONSAI_DIR,
-    "sessions",
-    `${ticketId}-agent-${Date.now()}`
-  );
-  fs.mkdirSync(agentSessionDir, { recursive: true });
+  // Create agent session
+  const sessionDir = path.join(BONSAI_DIR, "sessions", `${ticketId}-agent-${Date.now()}`);
+  fs.mkdirSync(sessionDir, { recursive: true });
 
   fs.writeFileSync(
-    path.join(agentSessionDir, "system-prompt.txt"),
-    buildAgentSystemPrompt(assignedPersona, project, ticket)
+    path.join(sessionDir, "system-prompt.txt"),
+    buildAgentSystemPrompt(targetPersona, project, ticket, sessionDir)
   );
   fs.writeFileSync(
-    path.join(agentSessionDir, "task.md"),
-    assembleAgentTask(commentContent, ticket, assignedPersona)
+    path.join(sessionDir, "task.md"),
+    assembleAgentTask(commentContent, ticket, targetPersona)
   );
 
-  spawnAgent(agentSessionDir, cwd, toolsForRole(assignedPersona.role || "developer"));
+  // Spawn the agent (fire-and-forget, posts comment when done)
+  spawnAgent(sessionDir, cwd, toolsForRole(targetPersona.role || "developer"), ticketId, targetPersona.id);
+
+  // Post a brief "working on it" comment
+  const ackMsg = `Looking into this now.`;
+  postAgentComment(ticketId, targetPersona.id, ackMsg);
 
   // Set last_agent_activity to prevent heartbeat overlap
   db.update(tickets)
-    .set({ lastAgentActivity: new Date().toISOString() })
+    .set({ lastAgentActivity: new Date().toISOString(), assigneeId: targetPersona.id })
     .where(eq(tickets.id, ticketId))
     .run();
 
   return NextResponse.json({
     persona: {
-      id: assignedPersona.id,
-      name: assignedPersona.name,
-      role: assignedPersona.role,
+      id: targetPersona.id,
+      name: targetPersona.name,
+      role: targetPersona.role,
     },
-    pmComment,
+    pmComment: {
+      id: Date.now(),
+      ticketId,
+      authorType: "agent" as const,
+      author: {
+        name: targetPersona.name,
+        avatarUrl: targetPersona.avatar || undefined,
+        color: targetPersona.color,
+        role: targetPersona.role || undefined,
+      },
+      content: ackMsg,
+      createdAt: new Date().toISOString(),
+    },
   });
 }
 
@@ -391,55 +242,95 @@ export async function POST(
 function buildAgentSystemPrompt(
   persona: typeof personas.$inferSelect,
   project: typeof projects.$inferSelect,
-  ticket: typeof tickets.$inferSelect
+  ticket: typeof tickets.$inferSelect,
+  sessionDir: string
 ): string {
   const workspace = resolveMainRepo(project);
+  const reportScript = path.join(sessionDir, "report.sh");
+
+  // Role prompts: read from settings (editable in Settings > Prompts), fall back to defaults
+  const defaultRolePrompts: Record<string, string> = {
+    researcher: "You are a researcher. Your stdout IS the research document — output ONLY structured markdown, no preamble or conversational wrapper.\n\n## How to research\nInvestigate the codebase: read files, search code, understand architecture. Reference specific file paths and line numbers.\n\n## What to include\nFor every finding, show your work:\n- **What you looked at**: which files, functions, patterns you examined and why\n- **What you found**: the relevant code, config, or architecture detail\n- **Why it matters**: how this finding affects the ticket's implementation\n\nStructure the document with a \"Research Log\" section that traces your investigation path — what you searched for, what you found, what led you to look deeper. The reader should be able to follow your reasoning and verify your conclusions.\n\n## Style\nBe concise — only include information a developer needs to start planning. Skip obvious architecture descriptions.\nNever say \"I've created a document\" or \"here's what I found.\" Just output the document directly.\nIf the user is answering questions you asked in the research document, incorporate their answers into your analysis.",
+    developer: "You are a developer. You can read, write, and edit code in the workspace.\nImplement changes, fix bugs, or prototype solutions as requested.\nMake targeted changes — don't refactor unrelated code.",
+    designer: "You are a designer. Review the UI/UX, suggest improvements, and analyze the design system.\nReference specific components, CSS variables, and layout patterns.",
+    skeptic: "You are a skeptic and devil's advocate. Challenge assumptions, find holes in reasoning, and stress-test proposals.\nYou NEVER edit files or write code. You only read and comment.\nBe direct, specific, and constructive. Don't just say 'this might fail' — explain HOW it could fail and what to do about it.",
+  };
+  const role = persona.role || "developer";
+  const roleInstructions = getSetting(`prompt_role_${role}`) || defaultRolePrompts[role] || defaultRolePrompts.developer;
 
   return [
-    `You are ${persona.name}, working on ticket ${ticket.id} for project ${project.name}.`,
+    `You are ${persona.name}, working on project "${project.name}".`,
     `Workspace: ${workspace}`,
-    persona.personality ? `\nPersonality: ${persona.personality}` : "",
-    `\nYour role is ${persona.role}. Respond to the user's comment on this ticket.`,
-    `When you are done, post your findings or changes as a comment by writing your final answer.`,
-    `Your output will be saved and posted as a comment on the ticket.`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+    persona.personality ? `\nPersonality:\n${persona.personality}` : "",
+    "",
+    roleInstructions,
+    "",
+    `## Ticket: ${ticket.id} — ${ticket.title}`,
+    `State: ${ticket.state} | Type: ${ticket.type}`,
+    "",
+    "## Progress Reporting",
+    `You MUST report progress to the ticket thread as you work using: \`${reportScript} "your message"\``,
+    "Post a report when you:",
+    "- **Start investigating** a new area (e.g. \"Examining auth middleware in src/middleware.ts\")",
+    "- **Find something significant** (e.g. \"Found that session tokens are stored in localStorage, not httpOnly cookies\")",
+    "- **Complete a major step** (e.g. \"Finished analyzing the database schema — 3 tables involved\")",
+    "- **Make a decision** (e.g. \"Going with approach B: adding a new API route instead of modifying the existing one\")",
+    "- **Hit a blocker or uncertainty** (e.g. \"Not sure if we need to handle the legacy format — flagging for review\")",
+    "Keep reports short (1-3 sentences). They form the audit trail of your work.",
+    "",
+    "## Output",
+    "Your entire stdout output will be posted as a comment on the ticket thread.",
+    "Write your response as a clear, well-formatted markdown comment.",
+    "Address the user's message directly. Include code snippets, file references, or findings as appropriate.",
+    "Keep it focused — this is a comment in a conversation, not a dissertation.",
+  ].filter(Boolean).join("\n");
 }
 
 // ── Agent task assembler ─────────────────────────────
-// TODO: This is your decision point — how much ticket context should the
-// agent receive? The quoted text, the user's comment, ticket metadata,
-// documents, recent comments — mix and match based on what you think
-// will give the agent the best context to do useful work.
-//
-// Trade-offs to consider:
-// - More context = better understanding, but longer prompt = slower + more tokens
-// - Including full documents helps for code review comments but may be noise for simple questions
-// - Recent comments give conversation thread context but may confuse the agent if lengthy
 function assembleAgentTask(
   commentContent: string,
   ticket: typeof tickets.$inferSelect,
   persona: typeof personas.$inferSelect
 ): string {
-  // TODO(you): Customize the task assembly below (~5-10 lines).
-  // The commentContent already includes the quoted text (as "> lines")
-  // plus the user's actual comment, formatted by the frontend.
+  const { enrichedComments, researchDoc, implPlan } = getTicketContext(ticket.id);
 
-  return [
+  const sections: string[] = [
     `# Ticket: ${ticket.title}`,
     `ID: ${ticket.id} | State: ${ticket.state} | Type: ${ticket.type}`,
-    ticket.description ? `\n## Description\n${ticket.description}` : "",
-    ticket.acceptanceCriteria
-      ? `\n## Acceptance Criteria\n${ticket.acceptanceCriteria}`
-      : "",
+  ];
+
+  if (ticket.description) {
+    sections.push("", "## Description", ticket.description);
+  }
+  if (ticket.acceptanceCriteria) {
+    sections.push("", "## Acceptance Criteria", ticket.acceptanceCriteria);
+  }
+
+  if (researchDoc) {
+    const content = researchDoc.content.length > 3000
+      ? researchDoc.content.slice(0, 3000) + "\n\n[...truncated]"
+      : researchDoc.content;
+    sections.push("", "## Research Document (v" + researchDoc.version + ")", content);
+  }
+  if (implPlan) {
+    const content = implPlan.content.length > 3000
+      ? implPlan.content.slice(0, 3000) + "\n\n[...truncated]"
+      : implPlan.content;
+    sections.push("", "## Implementation Plan (v" + implPlan.version + ")", content);
+  }
+
+  if (enrichedComments.length > 0) {
+    sections.push("", "## Recent Comments");
+    sections.push(...enrichedComments.map((c) => c + "\n---"));
+  }
+
+  sections.push(
     "",
-    "## User Comment (respond to this)",
+    "## New Comment (respond to this)",
     commentContent,
     "",
-    `You are ${persona.name} (${persona.role}). Address the user's comment above.`,
-    "Write your response as a clear, actionable comment.",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    `You are ${persona.name} (${persona.role}). Address the comment above.`,
+  );
+
+  return sections.join("\n");
 }

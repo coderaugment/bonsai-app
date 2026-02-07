@@ -41,6 +41,14 @@ trap "rm -f '$LOCK_FILE'" EXIT
 # Log rotation (keep last 7 days)
 find "$LOG_DIR" -name "heartbeat-*.log" -mtime +7 -delete 2>/dev/null || true
 
+# Source env file for API keys (GEMINI_API_KEY, etc.)
+ENV_FILE="$WEBAPP_DIR/.env.development"
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
+
 # Run dispatch
 echo "$(date -Iseconds) === Heartbeat starting (env=$BONSAI_ENV) ===" >> "$LOG_FILE"
 cd "$WEBAPP_DIR"

@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { BoardHeader } from "@/components/board/board-header";
 import { BoardView } from "@/components/board/board-view";
-import { getProjectBySlug, getProjects, getTickets, getPersonas, getUser, setSetting } from "@/db/queries";
+import { getProjectBySlug, getProjects, getTickets, getPersonas, getUser, setSetting, isTeamComplete, hasTickets } from "@/db/queries";
+
+export const dynamic = "force-dynamic";
 
 export default async function ProjectBoardPage({
   params,
@@ -18,6 +20,14 @@ export default async function ProjectBoardPage({
   const project = getProjectBySlug(slug);
   if (!project) {
     redirect("/board");
+  }
+
+  if (!isTeamComplete()) {
+    redirect("/onboard/team");
+  }
+
+  if (!hasTickets()) {
+    redirect("/onboard/ticket");
   }
 
   // Remember this as the active project for /board redirect

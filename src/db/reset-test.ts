@@ -23,9 +23,14 @@ sqlite.pragma("foreign_keys = ON");
 
 const db = drizzle(sqlite, { schema });
 
-// Clear existing data
+// Clear existing data (child tables first to satisfy FK constraints)
+db.delete(schema.ticketDocuments).run();
+db.delete(schema.comments).run();
 db.delete(schema.tickets).run();
 db.delete(schema.personas).run();
+db.delete(schema.roleSkills).run();
+db.delete(schema.roles).run();
+db.delete(schema.skills).run();
 db.delete(schema.projects).run();
 db.delete(schema.settings).run();
 db.delete(schema.users).run();
@@ -53,11 +58,23 @@ const project = db
   .get();
 console.log(`Created project: ${project.name} (id: ${project.id})`);
 
+// Seed roles
+const roleData = [
+  { slug: "researcher", title: "Research Analyst", description: "Investigates tickets before implementation. Explores the codebase, identifies constraints, and documents findings.", color: "#8b5cf6" },
+  { slug: "developer", title: "Software Developer", description: "Implements features and fixes bugs. Writes clean, tested code following project patterns.", color: "#3b82f6" },
+  { slug: "designer", title: "Product Designer", description: "Creates user interfaces and experiences. Focuses on usability, accessibility, and visual design.", color: "#f59e0b" },
+  { slug: "manager", title: "Project Manager", description: "Coordinates work and removes blockers. Keeps the team aligned and stakeholders informed.", color: "#22c55e" },
+  { slug: "skeptic", title: "Skeptic / Critic", description: "Challenges assumptions and stress-tests ideas. The constructive contrarian.", color: "#ef4444" },
+];
+const insertedRoles = db.insert(schema.roles).values(roleData).returning().all();
+const roleMap = new Map(insertedRoles.map((r) => [r.slug, r.id]));
+console.log(`Created ${insertedRoles.length} roles`);
+
 // Seed personas
 const personaData = [
   {
     id: "p1", name: "Kira", slug: "kira", color: "#3b82f6", projectId: project.id,
-    role: "developer" as const,
+    role: "developer" as const, roleId: roleMap.get("developer"),
     personality: "Methodical and precise. Prefers small, well-tested PRs over large sweeping changes. Gets excited about type safety and elegant abstractions.",
     skills: JSON.stringify(["React", "TypeScript", "Node.js", "Testing", "CI/CD"]),
     processes: JSON.stringify(["TDD", "Code review", "Trunk-based dev"]),
@@ -66,7 +83,7 @@ const personaData = [
   },
   {
     id: "p2", name: "Renzo", slug: "renzo", color: "#22c55e", projectId: project.id,
-    role: "manager" as const,
+    role: "manager" as const, roleId: roleMap.get("manager"),
     personality: "Calm under pressure with a talent for breaking big goals into achievable sprints. The team's favorite meeting facilitator.",
     skills: JSON.stringify(["Planning", "Risk assessment", "Agile", "Sprint planning"]),
     processes: JSON.stringify(["Stand-ups", "Retrospectives", "Status reports"]),
@@ -75,7 +92,7 @@ const personaData = [
   },
   {
     id: "p3", name: "Mika", slug: "mika", color: "#f59e0b", projectId: project.id,
-    role: "designer" as const,
+    role: "designer" as const, roleId: roleMap.get("designer"),
     personality: "Visually driven with strong opinions about whitespace. Believes every pixel matters but ships imperfect work early to gather feedback fast.",
     skills: JSON.stringify(["Figma", "UI design", "UX research", "Design systems", "Accessibility"]),
     processes: JSON.stringify(["User interviews", "Design critique", "Iterative prototyping"]),

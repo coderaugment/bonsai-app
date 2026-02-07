@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { personas, roles } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { createPersona } from "@/db/queries";
+import { createPersona, getPersonas } from "@/db/queries";
+
+export async function GET() {
+  const all = getPersonas();
+  return NextResponse.json(all);
+}
 
 export async function POST(req: Request) {
   const { name, role, roleId, personality, skills, processes, goals, permissions, projectId, avatar } =

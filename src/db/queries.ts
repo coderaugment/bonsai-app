@@ -1,6 +1,6 @@
 import { db } from ".";
 import { eq, or, sql, desc, and, isNull, lt, asc } from "drizzle-orm";
-import { projects, personas, tickets, settings, users, comments, ticketDocuments } from "./schema";
+import { projects, personas, tickets, settings, users, comments, ticketDocuments, roles } from "./schema";
 import type { Ticket, Persona, Project, WorkerRole } from "@/types";
 import { workerRoles } from "@/lib/worker-types";
 
@@ -361,4 +361,20 @@ export function getNextTicket(personaId?: string): typeof tickets.$inferSelect |
     .get();
 
   return backlog || null;
+}
+
+export function isTeamComplete(): boolean {
+  const allRoles = db.select({ id: roles.id }).from(roles).all();
+  if (allRoles.length === 0) return false;
+  const filledRoleIds = new Set(
+    db.select({ roleId: personas.roleId }).from(personas).all()
+      .map((r) => r.roleId)
+      .filter(Boolean)
+  );
+  return allRoles.every((r) => filledRoleIds.has(r.id));
+}
+
+export function hasTickets(): boolean {
+  const row = db.select({ count: sql<number>`count(*)` }).from(tickets).get();
+  return (row?.count ?? 0) > 0;
 }

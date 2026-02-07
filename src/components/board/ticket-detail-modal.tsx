@@ -4,24 +4,19 @@ import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
-import type { Ticket, TicketType, TicketState, Comment, CommentAttachment, TicketDocument } from "@/types";
+import type { Ticket, TicketType, TicketState, Comment, CommentAttachment, TicketDocument, TicketAttachment } from "@/types";
 import { ticketTypes } from "@/lib/ticket-types";
-
-interface Attachment {
-  id: string;
-  url: string;
-  name: string;
-}
 
 interface TicketDetailModalProps {
   ticket: Ticket | null;
   onClose: () => void;
+  onDelete?: (ticketId: string) => void;
 }
 
 const typeOptions: TicketType[] = ["feature", "bug", "chore"];
 const stateOptions: TicketState[] = ["backlog", "in_progress", "verification", "done"];
 
-export function TicketDetailModal({ ticket, onClose }: TicketDetailModalProps) {
+export function TicketDetailModal({ ticket, onClose, onDelete }: TicketDetailModalProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -36,8 +31,9 @@ export function TicketDetailModal({ ticket, onClose }: TicketDetailModalProps) {
   const [state, setState] = useState<TicketState>("backlog");
 
   // Attachments state
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
   // Comments state
   const [comments, setComments] = useState<Comment[]>([]);
@@ -82,6 +78,7 @@ export function TicketDetailModal({ ticket, onClose }: TicketDetailModalProps) {
       setPlanApprovedAt(ticket.planApprovedAt);
       loadComments(ticket.id);
       loadDocuments(ticket.id);
+      loadAttachments(ticket.id);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId]);
@@ -139,6 +136,16 @@ export function TicketDetailModal({ ticket, onClose }: TicketDetailModalProps) {
       setDocuments(data.documents || []);
     } finally {
       setLoadingDocuments(false);
+    }
+  }
+
+  async function loadAttachments(ticketId: string) {
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/attachments`);
+      const data = await res.json();
+      setAttachments(data || []);
+    } catch (error) {
+      console.error("Failed to load attachments:", error);
     }
   }
 
@@ -357,31 +364,66 @@ export function TicketDetailModal({ ticket, onClose }: TicketDetailModalProps) {
     }
   }
 
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
-    if (!files) return;
+    if (!files || !ticket) return;
 
-    Array.from(files).forEach((file) => {
-      if (!file.type.startsWith("image/")) return;
+    setUploadingAttachment(true);
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const url = event.target?.result as string;
-        setAttachments((prev) => [
-          ...prev,
-          { id: crypto.randomUUID(), url, name: file.name },
-        ]);
-      };
-      reader.readAsDataURL(file);
-    });
+    try {
+      for (const file of Array.from(files)) {
+        const reader = new FileReader();
+        const dataUrl = await new Promise<string>((resolve) => {
+          reader.onload = (event) => resolve(event.target?.result as string);
+          reader.readAsDataURL(file);
+        });
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+        // Upload to API
+        const res = await fetch(`/api/tickets/${ticket.id}/attachments`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: file.name,
+            mimeType: file.type,
+            data: dataUrl,
+            createdByType: "human",
+            createdById: "1", // TODO: Get actual user ID
+          }),
+        });
+
+        if (!res.ok) {
+          console.error("Failed to upload attachment");
+          continue;
+        }
+
+        const newAttachment = await res.json();
+        setAttachments((prev) => [...prev, newAttachment]);
+      }
+
+      router.refresh();
+    } finally {
+      setUploadingAttachment(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   }
 
-  function removeAttachment(id: string) {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  async function removeAttachment(id: number) {
+    if (!ticket) return;
+
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}/attachments/${id}`, {
+        method: "DELETE",
+      });
+
+      if (res.ok) {
+        setAttachments((prev) => prev.filter((a) => a.id !== id));
+        router.refresh();
+      }
+    } catch (error) {
+      console.error("Failed to delete attachment:", error);
+    }
   }
 
   function formatTime(dateStr: string) {
@@ -455,15 +497,39 @@ export function TicketDetailModal({ ticket, onClose }: TicketDetailModalProps) {
                 placeholder="Ticket title..."
               />
             </div>
-            <button
-              onClick={onClose}
-              className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/10"
-              style={{ color: "var(--text-muted)" }}
-            >
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-1">
+              {onDelete && (
+                <button
+                  onClick={async () => {
+                    if (!ticket) return;
+                    if (!confirm(`Delete ${ticket.id}?`)) return;
+                    await fetch("/api/tickets", {
+                      method: "DELETE",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ ticketId: ticket.id }),
+                    });
+                    onDelete(ticket.id);
+                    onClose();
+                  }}
+                  className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-red-500/10"
+                  style={{ color: "var(--text-muted)" }}
+                  title="Delete ticket"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                  </svg>
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/10"
+                style={{ color: "var(--text-muted)" }}
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Body - scrollable */}
@@ -720,8 +786,14 @@ export function TicketDetailModal({ ticket, onClose }: TicketDetailModalProps) {
                   </svg>
                   Upload
                 </button>
-                <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileSelect} className="hidden" />
+                <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" />
               </div>
+
+              {uploadingAttachment && (
+                <div className="mb-3 text-xs" style={{ color: "var(--text-muted)" }}>
+                  Uploading...
+                </div>
+              )}
 
               {attachments.length === 0 ? (
                 <div
@@ -732,29 +804,63 @@ export function TicketDetailModal({ ticket, onClose }: TicketDetailModalProps) {
                   <svg className="w-6 h-6 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
                   </svg>
-                  <span className="text-xs">Drop images or click to upload</span>
+                  <span className="text-xs">Drop files or click to upload</span>
                 </div>
               ) : (
                 <div className="grid grid-cols-4 gap-2">
-                  {attachments.map((att) => (
-                    <div
-                      key={att.id}
-                      className="relative group aspect-square rounded-lg overflow-hidden cursor-pointer"
-                      style={{ backgroundColor: "rgba(0,0,0,0.3)" }}
-                      onClick={() => setLightboxImage(att.url)}
-                    >
-                      <img src={att.url} alt={att.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
-                      <button
-                        onClick={(e) => { e.stopPropagation(); removeAttachment(att.id); }}
-                        className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        style={{ backgroundColor: "rgba(0,0,0,0.7)" }}
-                      >
-                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
+                  {attachments.map((att) => {
+                    const isImage = att.mimeType.startsWith("image/");
+                    const attachmentUrl = `/api/tickets/${ticket?.id}/attachments/${att.id}`;
+
+                    if (isImage) {
+                      return (
+                        <div
+                          key={att.id}
+                          className="relative group aspect-square rounded-lg overflow-hidden cursor-pointer"
+                          style={{ backgroundColor: "rgba(0,0,0,0.3)" }}
+                          onClick={() => setLightboxImage(attachmentUrl)}
+                        >
+                          <img src={attachmentUrl} alt={att.filename} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                          <button
+                            onClick={(e) => { e.stopPropagation(); removeAttachment(att.id); }}
+                            className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ backgroundColor: "rgba(0,0,0,0.7)" }}
+                          >
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      );
+                    } else {
+                      // Non-image file badge
+                      return (
+                        <a
+                          key={att.id}
+                          href={attachmentUrl}
+                          download={att.filename}
+                          className="relative group rounded-lg p-3 flex flex-col items-center justify-center gap-1 transition-colors hover:bg-white/10"
+                          style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid var(--border-subtle)" }}
+                        >
+                          <svg className="w-6 h-6" style={{ color: "var(--text-muted)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                          </svg>
+                          <span className="text-xs text-center truncate w-full" style={{ color: "var(--text-secondary)" }}>
+                            {att.filename}
+                          </span>
+                          <button
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeAttachment(att.id); }}
+                            className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ backgroundColor: "rgba(0,0,0,0.7)" }}
+                          >
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </a>
+                      );
+                    }
+                  })}
                   <div
                     className="aspect-square rounded-lg flex items-center justify-center cursor-pointer transition-colors hover:bg-white/10"
                     style={{ border: "1px dashed var(--border-medium)", color: "var(--text-muted)" }}
@@ -864,7 +970,7 @@ export function TicketDetailModal({ ticket, onClose }: TicketDetailModalProps) {
                             color: comment.authorType === "agent" ? "#a78bfa" : "#60a5fa",
                           }}
                         >
-                          {comment.authorType}
+                          {comment.authorType === "agent" && comment.author?.role ? comment.author.role : comment.authorType}
                         </span>
                         <span className="text-xs" style={{ color: "var(--text-muted)" }}>
                           {formatTime(comment.createdAt)}

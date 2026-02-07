@@ -139,7 +139,7 @@ export function CompanyModal({ open, onClose, projectSlug, personas }: CompanyMo
       const res = await fetch("/api/generate-worker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: getRoleSlug(), field: "identity" }),
+        body: JSON.stringify({ role: getRoleSlug(), field: "appearance", name: name.trim() || undefined, gender }),
       });
       const data = await res.json();
       if (data.name) setName(data.name);
@@ -154,7 +154,7 @@ export function CompanyModal({ open, onClose, projectSlug, personas }: CompanyMo
       const res = await fetch("/api/generate-worker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: getRoleSlug(), field: "style" }),
+        body: JSON.stringify({ role: getRoleSlug(), field: "style", name: name.trim() || undefined, gender }),
       });
       const data = await res.json();
       if (data.style) setCommStyle(data.style);
@@ -206,7 +206,7 @@ export function CompanyModal({ open, onClose, projectSlug, personas }: CompanyMo
       const genRes = await fetch("/api/generate-worker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: roleSlug }),
+        body: JSON.stringify({ role: roleSlug, name: name.trim() || undefined, gender }),
       });
       const genData = await genRes.json();
       if (genData.name) setName(genData.name);
@@ -1001,6 +1001,37 @@ Instructions for Claude...`}
                               placeholder="e.g. Maya, Atlas, Nova..."
                               className="w-full px-4 py-3 rounded-lg text-sm bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent-blue)]"
                             />
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-medium text-[var(--text-muted)] mb-1.5 block">Gender</label>
+                            <div className="flex gap-2">
+                              {(["male", "female", "non-binary"] as const).map((g) => (
+                                <button
+                                  key={g}
+                                  onClick={() => setGender(g)}
+                                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                    gender === g
+                                      ? "bg-white/15 text-[var(--text-primary)] border border-white/20"
+                                      : "text-[var(--text-muted)] border border-[var(--border-medium)] hover:bg-white/5"
+                                  }`}
+                                >
+                                  {g.charAt(0).toUpperCase() + g.slice(1)}
+                                </button>
+                              ))}
+                              <button
+                                onClick={() => {
+                                  const options: ("male" | "female" | "non-binary")[] = ["male", "female", "non-binary"];
+                                  setGender(options[Math.floor(Math.random() * options.length)]);
+                                }}
+                                className="px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--text-muted)] border border-[var(--border-medium)] hover:bg-white/5 hover:text-[var(--text-primary)] transition-colors"
+                                title="Random gender"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                                </svg>
+                              </button>
+                            </div>
                           </div>
 
                           <div>

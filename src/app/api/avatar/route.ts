@@ -12,13 +12,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "GEMINI_API_KEY not configured" }, { status: 500 });
   }
 
-  const { name, role, personality } = await req.json();
+  const { name, role, personality, style, useUserStyle } = await req.json();
 
   if (!name || !role) {
     return NextResponse.json({ error: "name and role are required" }, { status: 400 });
   }
 
-  const stylePrompt = getSetting("prompt_avatar_style") || DEFAULT_STYLE;
+  const stylePrompt = style
+    || (useUserStyle && getSetting("prompt_user_avatar_style"))
+    || getSetting("prompt_avatar_style")
+    || DEFAULT_STYLE;
   console.log("[avatar] style prompt source:", getSetting("prompt_avatar_style") ? "custom" : "default");
   const prompt = buildAvatarPrompt(name, role, personality, stylePrompt);
 

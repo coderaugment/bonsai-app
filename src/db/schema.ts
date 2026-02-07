@@ -152,6 +152,17 @@ export const ticketDocuments = sqliteTable("ticket_documents", {
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const ticketAttachments = sqliteTable("ticket_attachments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  ticketId: text("ticket_id").notNull().references(() => tickets.id, { onDelete: "cascade" }),
+  filename: text("filename").notNull(),
+  mimeType: text("mime_type").notNull(),
+  data: text("data").notNull(), // base64 data URL
+  createdByType: text("created_by_type", { enum: ["human", "agent"] }).notNull(),
+  createdById: text("created_by_id"), // user id or persona id
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 // ── Type exports for prompt builder ──────────────
 
 export type PersonaRow = typeof personas.$inferSelect;
@@ -160,3 +171,4 @@ export type TicketRow = typeof tickets.$inferSelect;
 export type CommentRow = typeof comments.$inferSelect;
 export type TicketDocumentRow = typeof ticketDocuments.$inferSelect;
 export type RoleRow = typeof roles.$inferSelect;
+export type TicketAttachmentRow = typeof ticketAttachments.$inferSelect;

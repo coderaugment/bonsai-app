@@ -21,6 +21,7 @@ import { researcherRole } from "../../agent/src/roles/researcher.js";
 import { plannerRole } from "../../agent/src/roles/planner.js";
 import { developerRole } from "../../agent/src/roles/developer.js";
 import { buildSystemPrompt } from "../src/lib/prompt-builder.js";
+import { getVault } from "../src/lib/vault.js";
 
 const execAsync = promisify(exec);
 
@@ -391,11 +392,32 @@ function ensureWorktree(project: ProjectRow, ticketId: string): string | null {
   }
 }
 
+// ── Vault → env vars ────────────────────────────
+// Load all api_key entries from the vault and return as env var map
+async function loadVaultEnv(): Promise<Record<string, string>> {
+  try {
+    const vault = await getVault();
+    const keys = await vault.list();
+    const env: Record<string, string> = {};
+    for (const entry of keys) {
+      if (entry.type === "api_key") {
+        const value = await vault.get(entry.key);
+        if (value) env[entry.key.toUpperCase()] = value;
+      }
+    }
+    return env;
+  } catch (err) {
+    log(`  WARN: failed to load vault keys: ${(err as Error).message}`);
+    return {};
+  }
+}
+
 // ── Claude CLI ──────────────────────────────────
 const CLAUDE_CLI = path.join(process.env.HOME || "", ".local", "bin", "claude");
 const MODEL = "sonnet";
+const API_BASE = "http://localhost:3000";
 
-const TOOLS_READONLY = ["Read", "Grep", "Glob", "Bash(git:*)"];
+const TOOLS_READONLY = ["Read", "Grep", "Glob", "Bash"];
 const TOOLS_FULL = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
 
 function shellEscape(s: string): string {
@@ -424,7 +446,8 @@ async function runClaude(
   systemPrompt: string,
   cwd: string,
   timeoutMs: number,
-  tools: string[] = TOOLS_READONLY
+  tools: string[] = TOOLS_READONLY,
+  extraEnv: Record<string, string> = {}
 ): Promise<{ stdout: string; stderr: string; code: number; timedOut: boolean }> {
   const taskFile = path.join(sessionDir, "task.md");
   const outputFile = path.join(sessionDir, "output.md");
@@ -448,7 +471,7 @@ async function runClaude(
   try {
     await execAsync(cmd, {
       cwd,
-      env: { ...process.env, DISABLE_AUTOUPDATER: "1" },
+      env: { ...process.env, ...extraEnv, DISABLE_AUTOUPDATER: "1" },
       timeout: timeoutMs,
       maxBuffer: 1024,
       killSignal: "SIGTERM",
@@ -535,7 +558,8 @@ async function runAgentPhase(
   systemPrompt: string,
   taskContent: string,
   tools: string[],
-  timeoutMs: number
+  timeoutMs: number,
+  extraEnv: Record<string, string> = {}
 ): Promise<string | null> {
   const workspacePath = ensureWorktree(project, ticket.id);
 
@@ -545,13 +569,74 @@ async function runAgentPhase(
 
   const sessionDir = path.join(BONSAI_DIR, "sessions", `${ticket.id}-${phase}`);
   fs.mkdirSync(sessionDir, { recursive: true });
-  fs.writeFileSync(path.join(sessionDir, "system-prompt.txt"), systemPrompt);
+
+  // Write report helper script for progress updates
+  const reportScript = path.join(sessionDir, "report.sh");
+  fs.writeFileSync(reportScript, [
+    `#!/usr/bin/env node`,
+    `const msg = process.argv.slice(2).join(" ");`,
+    `if (!msg) process.exit(0);`,
+    `fetch("${API_BASE}/api/tickets/${ticket.id}/report", {`,
+    `  method: "POST",`,
+    `  headers: { "Content-Type": "application/json" },`,
+    `  body: JSON.stringify({ personaId: "${persona.id}", content: msg }),`,
+    `}).catch(() => {});`,
+  ].join("\n"));
+  fs.chmodSync(reportScript, 0o755);
+
+  // Resolve tool script paths
+  const nanoBananaScript = path.resolve(__dirname, "tools", "nano-banana.mjs");
+  const attachFileScript = path.resolve(__dirname, "tools", "attach-file.mjs");
+
+  // Inject progress reporting instructions into system prompt
+  const reportInstructions = [
+    `\n## Progress Reporting`,
+    `You MUST report progress to the ticket thread as you work using: \`${reportScript} "your message"\``,
+    `Post a report when you:`,
+    `- **Start investigating** a new area`,
+    `- **Find something significant**`,
+    `- **Complete a major step**`,
+    `- **Make a decision** about approach`,
+    `- **Hit a blocker or uncertainty**`,
+    `Keep reports short (1-3 sentences). They form the audit trail of your work.`,
+  ].join("\n");
+
+  // Inject image generation tool instructions
+  // nano-banana now auto-attaches to ticket when --ticket flag is provided
+  const nanoBananaInstructions = [
+    `\n## Image Generation Tool (Nano Banana)`,
+    `You can generate images using the Nano Banana tool. Call it via Bash:`,
+    `\`\`\``,
+    `node ${nanoBananaScript} --prompt "your image description" --output ./path/to/image.png --ticket ${ticket.id} --persona ${persona.id}`,
+    `\`\`\``,
+    `The tool uses Gemini's image generation model. Use it when you need to:`,
+    `- Create logo concepts or design assets`,
+    `- Generate visual mockups or illustrations`,
+    `- Create icons, banners, or other graphics`,
+    `Use descriptive, detailed prompts for best results.`,
+    ``,
+    `The --ticket and --persona flags automatically upload the generated image to the ticket as an attachment.`,
+    `**Always include --ticket ${ticket.id} --persona ${persona.id}** so images appear in the ticket's Attachments section.`,
+  ].join("\n");
+
+  // Inject file attachment tool instructions (for non-generated files)
+  const attachFileInstructions = [
+    `\n## File Attachment Tool`,
+    `For attaching non-generated files (screenshots, documents, etc.) to this ticket:`,
+    `\`\`\``,
+    `node ${attachFileScript} ${ticket.id} <file-path> ${persona.id}`,
+    `\`\`\``,
+  ].join("\n");
+
+  const fullPrompt = systemPrompt + reportInstructions + nanoBananaInstructions + attachFileInstructions;
+
+  fs.writeFileSync(path.join(sessionDir, "system-prompt.txt"), fullPrompt);
   fs.writeFileSync(path.join(sessionDir, "task.md"), taskContent);
 
   log(`  [${ticket.id}] running ${phase} in ${workspacePath}`);
 
   try {
-    const result = await runClaude(sessionDir, systemPrompt, workspacePath, timeoutMs, tools);
+    const result = await runClaude(sessionDir, systemPrompt, workspacePath, timeoutMs, tools, extraEnv);
 
     fs.appendFileSync(
       path.join(sessionDir, "session.jsonl"),
@@ -876,6 +961,11 @@ async function dispatchImplementation(maxTickets: number): Promise<DispatchResul
 async function dispatch(maxTickets: number) {
   log("heartbeat dispatch starting (work scheduler mode)...");
 
+  // Load API keys from vault for agent environment
+  const vaultEnv = await loadVaultEnv();
+  const vaultKeyCount = Object.keys(vaultEnv).length;
+  if (vaultKeyCount > 0) log(`  loaded ${vaultKeyCount} API key(s) from vault`);
+
   // Get all projects and all personas (company-wide)
   const allProjects = db.prepare(`SELECT id FROM projects`).all() as { id: number }[];
   const allPersonas = db.prepare(`
@@ -929,13 +1019,13 @@ async function dispatch(maxTickets: number) {
       if (neededPhase === "awaiting_approval") continue;
 
       // Role selector: pick the right persona for the phase
-      // Research/plan → researcher (if available), otherwise developer
-      // Implement → developer
+      // Research → researcher (if available), otherwise developer
+      // Plan/implement → developer
       let neededRole: string;
-      if (neededPhase === "implement") {
-        neededRole = "developer";
-      } else {
+      if (neededPhase === "research") {
         neededRole = hasResearcher ? "researcher" : "developer";
+      } else {
+        neededRole = "developer";
       }
 
       // Find a persona with the needed role that isn't already busy this cycle
@@ -1028,7 +1118,7 @@ async function dispatch(maxTickets: number) {
       markTicketPickedUp(ticket.id);
       dispatched++;
 
-      const result = await runAgentPhase(ticket, persona, project, phase, systemPrompt, taskContent, tools, timeoutMs);
+      const result = await runAgentPhase(ticket, persona, project, phase, systemPrompt, taskContent, tools, timeoutMs, vaultEnv);
 
       if (result) {
         if (phase === "research") {

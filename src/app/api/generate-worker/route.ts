@@ -13,16 +13,17 @@ export async function POST(req: Request) {
 
   // name + gender provided by user, field: "all" (default), "appearance", "style"
   const { role, field, name, gender } = await req.json();
-  if (!role || !workerRoles[role as WorkerRole]) {
-    return NextResponse.json({ error: "Valid role is required" }, { status: 400 });
+  if (!role) {
+    return NextResponse.json({ error: "Role is required" }, { status: 400 });
   }
 
-  const config = workerRoles[role as WorkerRole];
+  const config = workerRoles[role as WorkerRole] || { label: role.replace(/_/g, " ") };
   const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
   const g = gender || "male";
   const age = pick(["early 20s", "late 20s", "early 30s", "late 30s", "early 40s", "late 40s", "50s"]);
   const hair = pick(["short cropped", "long flowing", "buzzcut", "curly", "braided", "shaved sides with top knot", "shoulder-length wavy", "afro", "slicked back", "messy bedhead"]);
+  const build = pick(["stocky", "tall and lanky", "broad-shouldered", "petite", "heavyset", "athletic", "average build", "wiry", "compact and muscular", "round-faced and sturdy"]);
   const clothingStyle = pick(["streetwear", "minimalist", "vintage", "athletic", "punk-influenced", "preppy", "bohemian", "workwear", "techwear", "classic professional"]);
   const commStyle = pick(["direct and blunt", "warm and encouraging", "dry and witty", "casual and laid-back", "precise and methodical", "energetic and enthusiastic"]);
 
@@ -30,29 +31,31 @@ export async function POST(req: Request) {
   let prompt: string;
 
   if (rerollField === "appearance") {
-    prompt = `Generate a visual description for a ${g} ${config.label.toLowerCase()} named ${name || "unknown"} on a software team.
-Traits: ${age}, ${hair} hair, ${clothingStyle} clothing.
-Appearance: 1-2 sentences describing what they look like. Use their name. Include the traits above plus build, accessories, or distinguishing features. This drives their avatar image.
+    prompt = `Generate a visual description for a ${g} ${config.label.toLowerCase()} on a software team.
+Traits: ${age}, ${build}, ${hair} hair, ${clothingStyle} clothing.
+Appearance: 1-2 sentences describing what they look like. Do NOT use any name — describe them in third person (e.g. "A stocky developer in his 30s..."). Include ALL the traits above plus accessories or distinguishing features. This drives their avatar image. Do NOT use the word "lean".
 Return ONLY valid JSON: {"appearance": "..."}`;
   } else if (rerollField === "style") {
     prompt = `Write a 1-2 sentence communication style for a ${config.label.toLowerCase()} on a software team. They are ${commStyle}. They are a competent professional, not a joke character. Do NOT use any name — describe the style generically.
 Return ONLY valid JSON: {"style": "..."}`;
   } else {
-    prompt = `Generate a ${g} ${config.label.toLowerCase()} character for a software team named ${name || "unknown"}.
+    const hasName = name && name.trim();
+    prompt = `Generate a ${g} ${config.label.toLowerCase()} character for a software team${hasName ? ` named ${name}` : ""}.
 
 REQUIRED TRAITS (use these exactly):
 - Gender: ${g}
 - Age: ${age}
+- Build: ${build}
 - Hair: ${hair}
 - Clothing style: ${clothingStyle}
 - Communication: ${commStyle}
-
-Appearance: 1-2 sentences incorporating ALL the traits above. Use their name "${name || "unknown"}". Add build, accessories, or distinguishing features. This drives their avatar image.
+${hasName ? "" : "\nName: Generate a single first name that fits their gender and background. Be creative — avoid overused AI names.\n"}
+Appearance: 1-2 sentences incorporating ALL the traits above. Do NOT use any name — describe them in third person (e.g. "A tall developer in her 30s..."). Add accessories or distinguishing features. Do NOT use the word "lean". This drives their avatar image.
 
 Style: 1-2 sentences about their ${commStyle} communication style in work chat. They are a competent professional, not a joke character. Do NOT reference the name in the style — keep it generic.
 
 Return ONLY valid JSON:
-{"appearance": "...", "style": "..."}`;
+{${hasName ? "" : '"name": "...", '}"appearance": "...", "style": "..."}`;
   }
 
   try {

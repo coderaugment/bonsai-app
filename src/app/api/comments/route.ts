@@ -20,7 +20,7 @@ export async function GET(req: Request) {
 
   // Enrich with author info
   const enriched = rows.map((row) => {
-    let author: { name: string; avatarUrl?: string; color?: string } | undefined;
+    let author: { name: string; avatarUrl?: string; color?: string; role?: string } | undefined;
 
     if (row.authorType === "human" && row.authorId) {
       const user = db.select().from(users).where(eq(users.id, row.authorId)).get();
@@ -30,7 +30,7 @@ export async function GET(req: Request) {
     } else if (row.authorType === "agent" && row.personaId) {
       const persona = db.select().from(personas).where(eq(personas.id, row.personaId)).get();
       if (persona) {
-        author = { name: persona.name, avatarUrl: persona.avatar || undefined, color: persona.color };
+        author = { name: persona.name, avatarUrl: persona.avatar || undefined, color: persona.color, role: persona.role || undefined };
       }
     }
 
