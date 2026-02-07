@@ -9,9 +9,10 @@ import { ProjectSettingsModal } from "./project-settings-modal";
 interface ProjectSelectorProps {
   project: Project;
   allProjects: Project[];
+  onSwitch?: (slug: string) => void;
 }
 
-export function ProjectSelector({ project, allProjects }: ProjectSelectorProps) {
+export function ProjectSelector({ project, allProjects, onSwitch }: ProjectSelectorProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -47,7 +48,11 @@ export function ProjectSelector({ project, allProjects }: ProjectSelectorProps) 
       return;
     }
     setOpen(false);
-    router.push(`/p/${targetSlug}`);
+    if (onSwitch) {
+      onSwitch(targetSlug);
+    } else {
+      router.push(`/p/${targetSlug}`);
+    }
   }
 
   return (

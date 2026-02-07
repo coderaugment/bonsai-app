@@ -8,10 +8,11 @@ const columnConfig: Record<
   TicketState,
   { label: string; color: string }
 > = {
-  backlog: { label: "Backlog", color: "var(--column-backlog)" },
-  in_progress: { label: "In Progress", color: "var(--column-in-progress)" },
-  verification: { label: "Verification", color: "var(--column-verification)" },
-  done: { label: "Done", color: "var(--column-done)" },
+  research: { label: "Research", color: "var(--column-research)" },
+  plan: { label: "Plan", color: "var(--column-plan)" },
+  build: { label: "Build", color: "var(--column-build)" },
+  test: { label: "Test", color: "var(--column-test)" },
+  ship: { label: "Ship", color: "var(--column-ship)" },
 };
 
 interface ColumnProps {

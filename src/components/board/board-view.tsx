@@ -7,10 +7,11 @@ import { Column } from "./column";
 import { TicketDetailModal } from "./ticket-detail-modal";
 
 const columnOrder: TicketState[] = [
-  "backlog",
-  "in_progress",
-  "verification",
-  "done",
+  "research",
+  "plan",
+  "build",
+  "test",
+  "ship",
 ];
 
 interface BoardViewProps {
@@ -98,7 +99,7 @@ export function BoardView({ tickets: initialTickets, projectId }: BoardViewProps
           key={state}
           state={state}
           tickets={grouped[state]}
-          defaultCollapsed={state === "done"}
+          defaultCollapsed={state === "ship" || (state !== "research" && grouped[state].length === 0)}
           draggingId={draggingId}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}

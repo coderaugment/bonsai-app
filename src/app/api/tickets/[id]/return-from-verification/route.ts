@@ -22,18 +22,18 @@ export async function POST(
     return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
   }
 
-  if (ticket.state !== "verification") {
+  if (ticket.state !== "test") {
     return NextResponse.json(
-      { error: "Ticket is not in verification state" },
+      { error: "Ticket is not in test state" },
       { status: 400 }
     );
   }
 
-  // Set returned flag and move back to in_progress
+  // Set returned flag and move back to build
   db.update(tickets)
     .set({
       returnedFromVerification: true,
-      state: "in_progress",
+      state: "build",
     })
     .where(eq(tickets.id, ticketId))
     .run();

@@ -21,6 +21,8 @@ export function ProjectSettingsModal({ open, onClose, project }: ProjectSettings
   );
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const [mounted, setMounted] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
@@ -34,6 +36,7 @@ export function ProjectSettingsModal({ open, onClose, project }: ProjectSettings
     setGithubUser(project.githubOwner ?? "");
     setRepoExists(project.githubRepo ? true : null);
     setError("");
+    setConfirmDelete(false);
 
     fetch("/api/github/user")
       .then((r) => r.json())
@@ -115,6 +118,29 @@ export function ProjectSettingsModal({ open, onClose, project }: ProjectSettings
     } catch {
       setError("Network error. Please try again.");
       setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/projects", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: project.id }),
+      });
+      if (!res.ok) {
+        setError("Failed to delete project");
+        setDeleting(false);
+        return;
+      }
+      setDeleting(false);
+      onClose();
+      router.push("/board");
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
+      setDeleting(false);
     }
   }
 
@@ -222,24 +248,56 @@ export function ProjectSettingsModal({ open, onClose, project }: ProjectSettings
 
         {/* Footer */}
         <div
-          className="flex justify-end gap-2 px-5 py-3 border-t"
+          className="flex items-center justify-between px-5 py-3 border-t"
           style={{ borderColor: "var(--border-subtle)" }}
         >
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/5"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!name.trim() || saving || !hasChanges}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
-            style={{ backgroundColor: "var(--accent-blue)" }}
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
+          <div>
+            {confirmDelete ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm" style={{ color: "#ef4444" }}>Delete this project?</span>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-40"
+                  style={{ backgroundColor: "#ef4444" }}
+                >
+                  {deleting ? "Deleting..." : "Confirm"}
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors hover:bg-white/5"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  No
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors hover:bg-red-500/10"
+                style={{ color: "#ef4444" }}
+              >
+                Delete
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/5"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!name.trim() || saving || !hasChanges}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
+              style={{ backgroundColor: "var(--accent-blue)" }}
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

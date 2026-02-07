@@ -16,7 +16,7 @@ interface TicketDetailModalProps {
 }
 
 const typeOptions: TicketType[] = ["feature", "bug", "chore"];
-const stateOptions: TicketState[] = ["backlog", "in_progress", "verification", "done"];
+const stateOptions: TicketState[] = ["research", "plan", "build", "test", "ship"];
 
 export function TicketDetailModal({ ticket, onClose, onDelete }: TicketDetailModalProps) {
   const router = useRouter();
@@ -30,7 +30,7 @@ export function TicketDetailModal({ ticket, onClose, onDelete }: TicketDetailMod
   const [description, setDescription] = useState("");
   const [acceptanceCriteria, setAcceptanceCriteria] = useState("");
   const [type, setType] = useState<TicketType>("feature");
-  const [state, setState] = useState<TicketState>("backlog");
+  const [state, setState] = useState<TicketState>("plan");
 
   // Attachments state
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);

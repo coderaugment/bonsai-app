@@ -134,15 +134,32 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit }: TicketCar
 
       {/* Badge row */}
       <div className="flex items-center justify-between mb-4">
-        <span
-          className="px-3 py-1 rounded-lg text-xs font-semibold"
-          style={{
-            backgroundColor: `color-mix(in srgb, ${style.bg} 15%, transparent)`,
-            color: style.text,
-          }}
-        >
-          {style.label}
-        </span>
+        <div className="flex items-center gap-2">
+          <span
+            className="px-3 py-1 rounded-lg text-xs font-semibold"
+            style={{
+              backgroundColor: `color-mix(in srgb, ${style.bg} 15%, transparent)`,
+              color: style.text,
+            }}
+          >
+            {style.label}
+          </span>
+          {ticket.state === "ship" && ticket.mergedAt && (
+            <span
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold"
+              style={{
+                backgroundColor: "rgba(139, 92, 246, 0.18)",
+                color: "#a78bfa",
+              }}
+              title={`Merged ${ticket.mergeCommit ? `(${ticket.mergeCommit.slice(0, 7)})` : ""}`}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
+              </svg>
+              Merged
+            </span>
+          )}
+        </div>
         {agentActive && ticket.assignee && (
           <span
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold"

@@ -75,7 +75,7 @@ export async function POST(req: Request) {
       id,
       title: title.trim(),
       type: type || "feature",
-      state: "backlog",
+      state: "plan",
       description: description?.trim() || null,
       acceptanceCriteria: acceptanceCriteria?.trim() || null,
       priority: 500,

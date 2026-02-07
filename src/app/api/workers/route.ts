@@ -94,8 +94,8 @@ export async function GET() {
       isActive,
       stats: {
         assignedTickets: assignedTickets.length,
-        activeTickets: assignedTickets.filter((t) => t.state !== "done").length,
-        doneTickets: assignedTickets.filter((t) => t.state === "done").length,
+        activeTickets: assignedTickets.filter((t) => t.state !== "ship").length,
+        doneTickets: assignedTickets.filter((t) => t.state === "ship").length,
         totalComments: allTicketComments.filter((c) => c.personaId === p.id).length,
       },
       tickets: assignedTickets.map((t) => ({

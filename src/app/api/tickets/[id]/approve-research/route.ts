@@ -41,7 +41,7 @@ export async function POST(req: Request, context: RouteContext) {
     .set({
       researchApprovedAt: now,
       researchApprovedBy: user.id,
-      state: "in_progress",
+      state: "build",
     })
     .where(eq(tickets.id, ticketId))
     .run();
@@ -50,7 +50,7 @@ export async function POST(req: Request, context: RouteContext) {
     ok: true,
     approvedAt: now,
     approvedBy: user.id,
-    state: "in_progress",
+    state: "build",
   });
 }
 
