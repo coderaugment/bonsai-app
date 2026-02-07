@@ -1,10 +1,11 @@
 export type TicketType = "feature" | "bug" | "chore";
 
 export type TicketState =
-  | "backlog"
-  | "in_progress"
-  | "verification"
-  | "done";
+  | "research"
+  | "plan"
+  | "build"
+  | "test"
+  | "ship";
 
 export interface TicketCreator {
   name: string;
@@ -36,6 +37,9 @@ export interface Ticket {
   planCompletedBy?: string;
   planApprovedAt?: string;
   planApprovedBy?: number;
+  // Merge tracking
+  mergedAt?: string;
+  mergeCommit?: string;
   // All personas who have interacted with this ticket
   participants?: Persona[];
 }
@@ -125,6 +129,10 @@ export interface Project {
   id: string;
   name: string;
   slug: string;
+  description?: string;
+  targetCustomer?: string;
+  techStack?: string;
+  visibility?: string;
   ticketCount: number;
   githubOwner?: string;
   githubRepo?: string;
@@ -159,5 +167,29 @@ export interface Comment {
   };
   content: string;
   attachments?: CommentAttachment[];
+  createdAt: string;
+}
+
+// ============================================================================
+// PROJECT NOTES - Freeform Desktop notes (voice, text, images)
+// ============================================================================
+export interface ProjectNote {
+  id: number;
+  projectId: number;
+  type: "text" | "image";
+  content: string;
+  createdAt: string;
+}
+
+// ============================================================================
+// EXTRACTED ITEMS - Work items extracted from notes via Claude
+// ============================================================================
+export interface ExtractedItem {
+  id: number;
+  projectId: number;
+  title: string;
+  description?: string;
+  type: TicketType;
+  status: "pending" | "approved" | "rejected";
   createdAt: string;
 }

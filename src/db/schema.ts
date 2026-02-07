@@ -72,9 +72,12 @@ export const projects = sqliteTable("projects", {
     .notNull()
     .default("private"),
   description: text("description"),
+  targetCustomer: text("target_customer"),
+  techStack: text("tech_stack"),
   githubOwner: text("github_owner"),
   githubRepo: text("github_repo"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  deletedAt: text("deleted_at"),
 });
 
 export const personas = sqliteTable("personas", {
@@ -102,10 +105,10 @@ export const tickets = sqliteTable("tickets", {
   description: text("description"),
   type: text("type", { enum: ["feature", "bug", "chore"] }).notNull(),
   state: text("state", {
-    enum: ["backlog", "in_progress", "verification", "done"],
+    enum: ["research", "plan", "build", "test", "ship"],
   })
     .notNull()
-    .default("backlog"),
+    .default("plan"),
   priority: integer("priority").notNull().default(0),
   assigneeId: text("assignee_id").references(() => personas.id),
   createdBy: integer("created_by").references(() => users.id),
@@ -130,6 +133,9 @@ export const tickets = sqliteTable("tickets", {
   planCompletedBy: text("plan_completed_by").references(() => personas.id),
   planApprovedAt: text("plan_approved_at"),
   planApprovedBy: integer("plan_approved_by").references(() => users.id),
+  // Merge tracking
+  mergedAt: text("merged_at"),
+  mergeCommit: text("merge_commit"),
 });
 
 export const comments = sqliteTable("comments", {
@@ -164,6 +170,38 @@ export const ticketAttachments = sqliteTable("ticket_attachments", {
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+// ============================================================================
+// PROJECT NOTES - Freeform notes on the Desktop (voice, text, images)
+// ============================================================================
+export const projectNotes = sqliteTable("project_notes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id),
+  type: text("type", { enum: ["text", "image"] }).notNull().default("text"),
+  content: text("content").notNull(),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+// ============================================================================
+// EXTRACTED ITEMS - Work items extracted from notes via Claude
+// ============================================================================
+export const extractedItems = sqliteTable("extracted_items", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id),
+  title: text("title").notNull(),
+  description: text("description"),
+  type: text("type", { enum: ["feature", "bug", "chore"] })
+    .notNull()
+    .default("feature"),
+  status: text("status", { enum: ["pending", "approved", "rejected"] })
+    .notNull()
+    .default("pending"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 // ── Type exports for prompt builder ──────────────
 
 export type PersonaRow = typeof personas.$inferSelect;
@@ -173,3 +211,5 @@ export type CommentRow = typeof comments.$inferSelect;
 export type TicketDocumentRow = typeof ticketDocuments.$inferSelect;
 export type RoleRow = typeof roles.$inferSelect;
 export type TicketAttachmentRow = typeof ticketAttachments.$inferSelect;
+export type ProjectNoteRow = typeof projectNotes.$inferSelect;
+export type ExtractedItemRow = typeof extractedItems.$inferSelect;

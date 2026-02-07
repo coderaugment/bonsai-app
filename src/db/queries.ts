@@ -24,6 +24,10 @@ function projectFromRow(row: typeof projects.$inferSelect): Project {
     id: String(row.id),
     name: row.name,
     slug: row.githubRepo ?? row.slug,
+    description: row.description ?? undefined,
+    targetCustomer: row.targetCustomer ?? undefined,
+    techStack: row.techStack ?? undefined,
+    visibility: row.visibility ?? undefined,
     ticketCount: count,
     githubOwner: row.githubOwner ?? undefined,
     githubRepo: row.githubRepo ?? undefined,
@@ -31,11 +35,12 @@ function projectFromRow(row: typeof projects.$inferSelect): Project {
 }
 
 export function getProject(): Project | null {
+  const notDeleted = isNull(projects.deletedAt);
   const activeId = getSetting("active_project_id");
   const row = activeId
-    ? db.select().from(projects).where(eq(projects.id, Number(activeId))).get()
-      ?? db.select().from(projects).limit(1).get()
-    : db.select().from(projects).limit(1).get();
+    ? db.select().from(projects).where(and(eq(projects.id, Number(activeId)), notDeleted)).get()
+      ?? db.select().from(projects).where(notDeleted).limit(1).get()
+    : db.select().from(projects).where(notDeleted).limit(1).get();
   if (!row) return null;
   return projectFromRow(row);
 }
@@ -44,14 +49,14 @@ export function getProjectBySlug(slug: string): Project | null {
   const row = db
     .select()
     .from(projects)
-    .where(or(eq(projects.githubRepo, slug), eq(projects.slug, slug)))
+    .where(and(or(eq(projects.githubRepo, slug), eq(projects.slug, slug)), isNull(projects.deletedAt)))
     .get();
   if (!row) return null;
   return projectFromRow(row);
 }
 
 export function getProjects(): Project[] {
-  return db.select().from(projects).all().map(projectFromRow);
+  return db.select().from(projects).where(isNull(projects.deletedAt)).all().map(projectFromRow);
 }
 
 export function getPersonas(projectId?: number): Persona[] {
@@ -139,6 +144,9 @@ export function getTickets(projectId?: number): Ticket[] {
       planApprovedBy: r.planApprovedBy ?? undefined,
       lastHumanCommentAt: r.lastHumanCommentAt ?? undefined,
       returnedFromVerification: r.returnedFromVerification ?? false,
+      // Merge tracking
+      mergedAt: r.mergedAt ?? undefined,
+      mergeCommit: r.mergeCommit ?? undefined,
       participants,
     };
   });
@@ -313,8 +321,9 @@ export function getNextTicket(personaId?: string): typeof tickets.$inferSelect |
       isNull(tickets.lastAgentActivity),
       lt(tickets.lastAgentActivity, thirtyMinutesAgo)
     ),
-    // Exclude done tickets
-    sql`${tickets.state} != 'done'`,
+    // Exclude research and ship tickets (agents don't touch these)
+    sql`${tickets.state} != 'research'`,
+    sql`${tickets.state} != 'ship'`,
   ];
 
   // Add persona filter if specified
@@ -348,7 +357,8 @@ export function getNextTicket(personaId?: string): typeof tickets.$inferSelect |
   const inProgress = db
     .select()
     .from(tickets)
-    .where(and(...baseFilters, eq(tickets.state, "in_progress")))
+    .where(and(...baseFilters, eq(tickets.state, "build")))
+
     .orderBy(desc(tickets.priority), asc(tickets.createdAt))
     .limit(1)
     .get();
@@ -359,7 +369,7 @@ export function getNextTicket(personaId?: string): typeof tickets.$inferSelect |
   const backlog = db
     .select()
     .from(tickets)
-    .where(and(...baseFilters, eq(tickets.state, "backlog")))
+    .where(and(...baseFilters, eq(tickets.state, "plan")))
     .orderBy(desc(tickets.priority), asc(tickets.createdAt))
     .limit(1)
     .get();
