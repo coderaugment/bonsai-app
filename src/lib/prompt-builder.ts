@@ -1,3 +1,19 @@
+/**
+ * Agent system prompt construction.
+ *
+ * Builds comprehensive context for Claude agents including:
+ * - Agent persona (identity, role, skills, personality)
+ * - Role-specific instructions and workflows
+ * - Project context (tech stack, CLAUDE.md guidelines)
+ * - Ticket details (title, description, acceptance criteria)
+ * - Recent conversation history (comments)
+ *
+ * The prompt is assembled from modular sections to maintain consistency
+ * across different agent types and ticket phases.
+ *
+ * @module prompt-builder
+ */
+
 import { getCommentsByTicket } from '../db/queries';
 import { detectTechStack, loadClaudeMd } from './project-analyzer';
 import {
@@ -51,6 +67,32 @@ export interface PromptOptions {
   roleData?: RoleRow;
 }
 
+/**
+ * Build a complete system prompt for an AI agent.
+ *
+ * Assembles a comprehensive prompt from multiple sections:
+ * 1. Persona identity (name, personality, role)
+ * 2. Role-specific instructions and skills (if roleData provided)
+ * 3. Project context (tech stack, CLAUDE.md) (if workspacePath provided)
+ * 4. Ticket details (title, description, acceptance criteria)
+ * 5. Recent conversation history (if includeComments is true)
+ *
+ * The prompt is designed to give agents:
+ * - Clear identity and personality
+ * - Specific instructions for their role
+ * - Full context about the project and task
+ * - Relevant conversation history
+ *
+ * @param persona - The AI agent persona with identity and personality
+ * @param project - The project the ticket belongs to
+ * @param ticket - The ticket the agent will work on
+ * @param options - Optional configuration for prompt building
+ * @param options.commentLimit - Max comments to include (default: 10)
+ * @param options.includeComments - Whether to include comments (default: true)
+ * @param options.workspacePath - Path to project workspace for tech stack detection
+ * @param options.roleData - Detailed role definition with skills and workflow
+ * @returns The complete system prompt as a string
+ */
 export function buildSystemPrompt(
   persona: PersonaRow,
   project: ProjectRow,
