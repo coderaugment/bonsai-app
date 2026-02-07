@@ -12,6 +12,46 @@ interface AddTicketModalProps {
 
 import { ticketTypes } from "@/lib/ticket-types";
 
+// Web Speech API TypeScript declarations
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+  isFinal: boolean;
+  length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  onend: ((event: Event) => void) | null;
+}
+
+declare var webkitSpeechRecognition: {
+  new (): SpeechRecognition;
+};
+
 function slugify(text: string) {
   return text
     .toLowerCase()
@@ -28,6 +68,17 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
   const [acceptanceCriteria, setAcceptanceCriteria] = useState("");
   const [saving, setSaving] = useState(false);
   const descRef = useRef<HTMLTextAreaElement>(null);
+
+  // Speech-to-text state
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingAI, setIsProcessingAI] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Check if Web Speech API is supported
+  const isSpeechSupported = typeof window !== 'undefined' &&
+    ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window);
 
   const accent = ticketTypes[type].color;
   const titleSlug = slugify(title);
@@ -46,7 +97,137 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
     }
   }, [open, onClose]);
 
+  // Cleanup speech recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+      }
+      if (recordingTimeoutRef.current) {
+        clearTimeout(recordingTimeoutRef.current);
+      }
+    };
+  }, []);
+
   if (!open) return null;
+
+  const startRecording = () => {
+    if (!isSpeechSupported) return;
+
+    try {
+      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+      const recognition = new SpeechRecognition();
+
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      let finalTranscript = '';
+
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
+        let interim = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + ' ';
+          } else {
+            interim += transcript;
+          }
+        }
+
+        setInterimTranscript(finalTranscript + interim);
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        setIsRecording(false);
+        setInterimTranscript('');
+        // TODO: Show error toast to user
+      };
+
+      recognition.onend = () => {
+        if (isRecording) {
+          // Recording was stopped, process the transcript
+          processTranscript(finalTranscript.trim());
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setIsRecording(true);
+
+      // Safety timeout: auto-stop after 2 minutes
+      recordingTimeoutRef.current = setTimeout(() => {
+        stopRecording();
+      }, 120000);
+
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+      // TODO: Show error toast
+    }
+  };
+
+  const stopRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsRecording(false);
+    }
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
+  };
+
+  const cancelRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.abort();
+      recognitionRef.current = null;
+    }
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
+    setIsRecording(false);
+    setInterimTranscript('');
+  };
+
+  const processTranscript = async (transcript: string) => {
+    if (!transcript) {
+      setInterimTranscript('');
+      return;
+    }
+
+    setIsProcessingAI(true);
+
+    try {
+      const res = await fetch("/api/generate-title", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description: transcript,
+          field: "massage"
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.massage) {
+        // AI cleanup successful - use cleaned text
+        setDescription(data.massage);
+      } else {
+        // AI failed - fallback to raw transcript
+        setDescription(transcript);
+      }
+    } catch (error) {
+      console.error('Failed to process transcript:', error);
+      // Fallback: use raw transcript even if AI fails
+      setDescription(transcript);
+    } finally {
+      setIsProcessingAI(false);
+      setInterimTranscript('');
+    }
+  };
 
   async function handleCreate() {
     if (!title.trim()) return;
@@ -125,17 +306,72 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
 
             {/* Description */}
             <div className="flex-1 flex flex-col min-h-0">
-              <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">
-                Description
-              </label>
-              <textarea
-                ref={descRef}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder={ticketTypes[type].placeholder}
-                className="flex-1 w-full px-4 py-3 rounded-lg text-sm outline-none transition-all resize-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
-                style={{ "--accent": accent } as React.CSSProperties}
-              />
+              <div className="flex items-center justify-between mb-2">
+                <label htmlFor="description" className="text-sm font-medium text-[var(--text-secondary)]">
+                  Description
+                </label>
+                {isSpeechSupported && (
+                  <div className="flex items-center gap-2">
+                    {isRecording && (
+                      <button
+                        type="button"
+                        onClick={cancelRecording}
+                        className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={isRecording ? stopRecording : startRecording}
+                      disabled={isProcessingAI}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded transition-colors ${
+                        isRecording
+                          ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                          : 'bg-[var(--bg-input)] text-[var(--text-secondary)] hover:bg-[var(--bg-input)]/80 border border-[var(--border-medium)]'
+                      } ${isProcessingAI ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      title={isRecording ? 'Stop recording' : 'Start voice input'}
+                    >
+                      {isRecording ? (
+                        <>
+                          <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                          Recording...
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                          </svg>
+                          Voice
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="relative flex-1">
+                <textarea
+                  id="description"
+                  ref={descRef}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder={isRecording ? interimTranscript || "Listening..." : ticketTypes[type].placeholder}
+                  className="flex-1 w-full h-full px-4 py-3 rounded-lg text-sm outline-none transition-all resize-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
+                  style={{ "--accent": accent } as React.CSSProperties}
+                  disabled={isProcessingAI}
+                />
+                {isProcessingAI && (
+                  <div className="absolute inset-0 bg-[var(--bg-card)]/80 backdrop-blur-sm rounded-lg flex items-center justify-center">
+                    <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Cleaning up your description...
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Acceptance Criteria */}
