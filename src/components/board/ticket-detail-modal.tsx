@@ -43,6 +43,7 @@ export function TicketDetailModal({ ticket, onClose, onDelete }: TicketDetailMod
   const [postingComment, setPostingComment] = useState(false);
   const [dragOverComment, setDragOverComment] = useState(false);
   const commentFileInputRef = useRef<HTMLInputElement>(null);
+  const commentInputRef = useRef<HTMLTextAreaElement>(null);
 
   // Documents state
   const [documents, setDocuments] = useState<TicketDocument[]>([]);
@@ -79,6 +80,13 @@ export function TicketDetailModal({ ticket, onClose, onDelete }: TicketDetailMod
       loadComments(ticket.id);
       loadDocuments(ticket.id);
       loadAttachments(ticket.id);
+
+      // Auto-focus comment input after a brief delay to ensure DOM is ready
+      const focusTimer = setTimeout(() => {
+        commentInputRef.current?.focus();
+      }, 100);
+
+      return () => clearTimeout(focusTimer);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId]);
@@ -1037,6 +1045,7 @@ export function TicketDetailModal({ ticket, onClose, onDelete }: TicketDetailMod
               onDrop={handleCommentFileDrop}
             >
               <textarea
+                ref={commentInputRef}
                 value={newComment}
                 onChange={(e) => setNewComment(e.target.value)}
                 placeholder="Write a comment or drop files..."
