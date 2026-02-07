@@ -57,11 +57,15 @@ export function getProjects(): Project[] {
 export function getPersonas(projectId?: number): Persona[] {
   // Personas are company-wide (projectId = NULL) — always include them.
   // If a projectId is given, also include any project-specific personas.
+  // Always exclude soft-deleted personas.
   const rows = projectId
     ? db.select().from(personas).where(
-        or(eq(personas.projectId, projectId), isNull(personas.projectId))
+        and(
+          or(eq(personas.projectId, projectId), isNull(personas.projectId)),
+          isNull(personas.deletedAt)
+        )
       ).all()
-    : db.select().from(personas).all();
+    : db.select().from(personas).where(isNull(personas.deletedAt)).all();
 
   return rows.map((r) => ({
     id: r.id,
@@ -367,7 +371,9 @@ export function isTeamComplete(): boolean {
   const allRoles = db.select({ id: roles.id }).from(roles).all();
   if (allRoles.length === 0) return false;
   const filledRoleIds = new Set(
-    db.select({ roleId: personas.roleId }).from(personas).all()
+    db.select({ roleId: personas.roleId }).from(personas)
+      .where(isNull(personas.deletedAt))
+      .all()
       .map((r) => r.roleId)
       .filter(Boolean)
   );

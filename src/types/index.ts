@@ -53,7 +53,7 @@ export interface TicketDocument {
 }
 
 // Legacy type - keeping for backward compatibility
-export type WorkerRole = "developer" | "researcher" | "designer" | "manager" | "skeptic";
+export type WorkerRole = "lead" | "researcher" | "developer" | "designer" | "critic" | "hacker";
 
 // ============================================================================
 // SKILLS - Individual capabilities that can be attached to roles

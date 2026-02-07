@@ -69,10 +69,12 @@ function buildAvatarPrompt(name: string, role: string, personality: string | und
   // The personality has two paragraphs: appearance (first) and communication style (second)
   // Use the appearance paragraph for the avatar. Fall back to a generic role description.
   const fallbacks: Record<string, string> = {
-    developer: "a software developer wearing a hoodie, messy hair, glasses",
+    lead: "a team lead, polished professional attire, confident smile",
     researcher: "a research analyst with wire-frame glasses, button-down shirt",
+    developer: "a software developer wearing a hoodie, messy hair, glasses",
     designer: "a UI/UX designer with stylish accessories, creative energy",
-    manager: "a project manager, polished professional attire, confident smile",
+    critic: "a sharp-eyed critic with an intense gaze, minimalist style",
+    hacker: "a security engineer in a dark hoodie, focused expression, terminal glow",
   };
 
   let appearance = fallbacks[role] || fallbacks.developer;

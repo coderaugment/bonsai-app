@@ -93,6 +93,7 @@ export const personas = sqliteTable("personas", {
   goals: text("goals"),
   permissions: text("permissions"),
   projectId: integer("project_id").references(() => projects.id),
+  deletedAt: text("deleted_at"),
 });
 
 export const tickets = sqliteTable("tickets", {

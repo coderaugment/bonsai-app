@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { personas, roles } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { createPersona, getPersonas } from "@/db/queries";
 
 export async function GET() {
@@ -87,6 +87,23 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "Persona not found" }, { status: 404 });
   }
 
-  db.delete(personas).where(eq(personas.id, id)).run();
+  // Prevent deleting the last active persona of a role
+  const activeWithSameRole = db
+    .select()
+    .from(personas)
+    .where(and(eq(personas.role, existing.role!), isNull(personas.deletedAt)))
+    .all();
+
+  if (activeWithSameRole.length <= 1) {
+    return NextResponse.json(
+      { error: `Cannot delete the last ${existing.role}` },
+      { status: 400 }
+    );
+  }
+
+  db.update(personas)
+    .set({ deletedAt: new Date().toISOString() })
+    .where(eq(personas.id, id))
+    .run();
   return NextResponse.json({ success: true });
 }

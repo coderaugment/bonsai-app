@@ -46,17 +46,21 @@ const ART_STYLES: Record<ArtStyle, { label: string; prompt: string }> = {
   },
 };
 
-// Fixed role order for the sequential flow
-const ROLE_ORDER = ["researcher", "developer", "designer", "manager"];
-
 export default function TeamPage() {
   const router = useRouter();
   const [roles, setRoles] = useState<Role[]>([]);
+  const [existingPersonas, setExistingPersonas] = useState<Persona[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Step: 0 = art style, 1-4 = create worker for each role
+  // All unfilled roles — every role goes through character creation
+  const [unfilledRoles, setUnfilledRoles] = useState<Role[]>([]);
+
+  // Step: 0 = art style, 1..N = create worker for each unfilled role
   const [step, setStep] = useState(0);
   const [artStyle, setArtStyle] = useState<ArtStyle>("hollywood");
+  const [hasArtStyle, setHasArtStyle] = useState(false);
+  // The actual saved style prompt from DB (used for avatar generation)
+  const [savedStylePrompt, setSavedStylePrompt] = useState<string | null>(null);
 
   // Created workers (saved after each hire)
   const [hiredWorkers, setHiredWorkers] = useState<Persona[]>([]);
@@ -74,47 +78,79 @@ export default function TeamPage() {
   const generateAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    fetchRoles();
+    fetchInitialData();
   }, []);
 
   // Auto-generate worker with random gender when entering a hire step
   useEffect(() => {
-    if (step < 1 || roles.length === 0) return;
-    const slug = ROLE_ORDER[step - 1];
-    const role = roles.find((r) => r.slug === slug);
+    if (step < 1 || unfilledRoles.length === 0) return;
+    const role = unfilledRoles[step - 1];
     if (!role) return;
     const g = (["male", "female", "non-binary"] as const)[Math.floor(Math.random() * 3)];
     setGender(g);
     generateWorker(role.slug, g);
-  }, [step, roles]);
+  }, [step, unfilledRoles]);
 
-  async function fetchRoles() {
+  async function fetchInitialData() {
     setLoading(true);
     try {
-      const res = await fetch("/api/roles");
-      setRoles(await res.json());
+      const [rolesRes, personasRes, promptsRes] = await Promise.all([
+        fetch("/api/roles"),
+        fetch("/api/personas"),
+        fetch("/api/settings/prompts"),
+      ]);
+      const allRoles: Role[] = await rolesRes.json();
+      const allPersonas: Persona[] = await personasRes.json();
+      const promptsData = await promptsRes.json();
+
+      setRoles(allRoles);
+      setExistingPersonas(allPersonas);
+
+      // Check if art style is already set (not default)
+      const avatarStyleEntry = promptsData.prompts?.prompt_avatar_style;
+      const styleSet = avatarStyleEntry?.isDefault === false;
+      setHasArtStyle(styleSet);
+      if (styleSet && avatarStyleEntry?.value) {
+        setSavedStylePrompt(avatarStyleEntry.value);
+      }
+
+      // Compute unfilled roles: roles with no active persona matching that roleId
+      const filledRoleIds = new Set(allPersonas.map((p) => p.roleId).filter(Boolean));
+      const unfilled = allRoles.filter((r) => !filledRoleIds.has(r.id));
+      setUnfilledRoles(unfilled);
+
+      // If art style already set, skip step 0 → go directly to step 1
+      if (styleSet) {
+        setStep(1);
+      }
     } catch (err) {
-      console.error("Failed to fetch roles:", err);
+      console.error("Failed to fetch initial data:", err);
     }
     setLoading(false);
   }
 
-  // Get the role for the current hire step (step 1 = ROLE_ORDER[0], etc.)
+  // Resolve the active style prompt: saved DB value > local ART_STYLES lookup
+  function getStylePrompt(): string {
+    return savedStylePrompt || ART_STYLES[artStyle].prompt;
+  }
+
+  // Get the role for the current hire step (step 1 = unfilledRoles[0], etc.)
   function currentRole(): Role | null {
     if (step < 1) return null;
-    const slug = ROLE_ORDER[step - 1];
-    return roles.find((r) => r.slug === slug) || null;
+    return unfilledRoles[step - 1] || null;
   }
 
   // ── Step transitions ──
 
   async function handleStyleSelect(key: ArtStyle) {
     setArtStyle(key);
+    const prompt = ART_STYLES[key].prompt;
+    setSavedStylePrompt(prompt);
     // Save chosen style to settings and advance immediately
     await fetch("/api/settings/prompts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: "prompt_avatar_style", value: ART_STYLES[key].prompt }),
+      body: JSON.stringify({ key: "prompt_avatar_style", value: prompt }),
     });
     setStep(1);
     resetForm();
@@ -155,61 +191,21 @@ export default function TeamPage() {
       }
 
       const nextStep = step + 1;
-      if (nextStep > ROLE_ORDER.length) {
-        // All manual roles hired — auto-generate the skeptic
-        await autoGenerateSkeptic();
-        router.push("/onboard/ticket");
+      if (nextStep > unfilledRoles.length) {
+        // All roles hired — redirect based on whether tickets exist
+        const ticketsRes = await fetch("/api/tickets");
+        const ticketsData = await ticketsRes.json();
+        if (Array.isArray(ticketsData) && ticketsData.length > 0) {
+          router.push("/board");
+        } else {
+          router.push("/onboard/ticket");
+        }
       } else {
         setStep(nextStep);
         resetForm();
       }
     } catch {}
     setSaving(false);
-  }
-
-  async function autoGenerateSkeptic() {
-    const skepticRole = roles.find((r) => r.slug === "skeptic");
-    if (!skepticRole) return;
-    const g = (["male", "female", "non-binary"] as const)[Math.floor(Math.random() * 3)];
-    try {
-      // Generate text + avatar
-      const genRes = await fetch("/api/generate-worker", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "skeptic", gender: g }),
-      });
-      const genData = await genRes.json();
-
-      let avatar: string | undefined;
-      if (genData.appearance) {
-        const avatarRes = await fetch("/api/avatar", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ appearance: genData.appearance, gender: g }),
-        });
-        const avatarData = await avatarRes.json();
-        if (avatarData.url) avatar = avatarData.url;
-      }
-
-      const personality = [genData.appearance || "", genData.style || ""].filter(Boolean).join("\n\n");
-      await fetch("/api/personas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: genData.name || "Vex",
-          roleId: skepticRole.id,
-          role: "skeptic",
-          personality: personality || undefined,
-          avatar,
-          skills: [],
-          processes: [],
-          goals: [],
-          permissions: { tools: [], folders: [] },
-        }),
-      });
-    } catch {
-      // Silently skip — skeptic is optional
-    }
   }
 
   // ── Generation helpers ──
@@ -245,7 +241,7 @@ export default function TeamPage() {
           name: genData.name || "Worker",
           role: roleSlug,
           personality: genData.appearance || "",
-          style: ART_STYLES[artStyle].prompt,
+          style: getStylePrompt(),
         }),
         signal,
       });
@@ -325,7 +321,7 @@ export default function TeamPage() {
           name,
           role: role.slug,
           personality: appearance,
-          style: ART_STYLES[artStyle].prompt,
+          style: getStylePrompt(),
         }),
       });
       const data = await res.json();
@@ -424,32 +420,40 @@ export default function TeamPage() {
   }
 
   // ══════════════════════════════════════════════
-  // STEPS 1-4: Create worker for each role
+  // STEPS 1-N: RPG Character Creation for each role
   // ══════════════════════════════════════════════
   const role = currentRole();
   if (!role) return null;
 
   const accent = role.color;
   const initial = name.trim() ? name.trim()[0].toUpperCase() : "?";
-  const stepLabel = `${step} of ${ROLE_ORDER.length}`;
+  const stepLabel = `${step} of ${unfilledRoles.length}`;
+  const isLastRole = step >= unfilledRoles.length;
+  // Show existing personas + newly hired ones as the avatar row
+  const allHired = [...existingPersonas, ...hiredWorkers];
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header with step progress + previously hired avatars */}
+      {/* Header with step progress + role identity */}
       <div className="flex items-center justify-between px-10 pt-8 pb-4">
         <div>
           <h2 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
-            Create your {role.title}
+            <span style={{ color: accent }}>Hire your {role.title}</span>
           </h2>
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            Step {stepLabel} &middot; {role.description}
+          <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+            Step {stepLabel}
           </p>
+          {role.description && (
+            <p className="text-sm mt-2 max-w-lg" style={{ color: "var(--text-secondary)" }}>
+              {role.description}
+            </p>
+          )}
         </div>
 
         {/* Previously hired mini-avatars */}
-        {hiredWorkers.length > 0 && (
+        {allHired.length > 0 && (
           <div className="flex items-center gap-1">
-            {hiredWorkers.map((w) => (
+            {allHired.map((w) => (
               <div
                 key={w.id}
                 className="w-9 h-9 rounded-full overflow-hidden border-2 -ml-2 first:ml-0"
@@ -467,8 +471,8 @@ export default function TeamPage() {
                 )}
               </div>
             ))}
-            {/* Placeholder for remaining */}
-            {Array.from({ length: ROLE_ORDER.length - hiredWorkers.length }).map((_, i) => (
+            {/* Placeholder for remaining unfilled */}
+            {Array.from({ length: unfilledRoles.length - hiredWorkers.length }).map((_, i) => (
               <div
                 key={`empty-${i}`}
                 className="w-9 h-9 rounded-full border-2 border-dashed -ml-2"
@@ -631,9 +635,9 @@ export default function TeamPage() {
             >
               {saving
                 ? "Hiring..."
-                : step < ROLE_ORDER.length
-                  ? `Hire ${name.trim() || role.title} & Continue`
-                  : `Hire ${name.trim() || role.title} & Create First Ticket`}
+                : isLastRole
+                  ? `Hire ${name.trim() || role.title} — You are ready to work`
+                  : `Hire ${name.trim() || role.title} & Continue`}
             </button>
           </div>
     </div>

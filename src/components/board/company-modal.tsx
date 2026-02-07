@@ -372,7 +372,12 @@ Your skill instructions here...
 
   async function handleDeleteWorker(personaId: string) {
     try {
-      await fetch(`/api/personas?id=${personaId}`, { method: "DELETE" });
+      const res = await fetch(`/api/personas?id=${personaId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || "Failed to delete worker");
+        return;
+      }
       router.refresh();
     } catch (err) {
       console.error("Failed to delete worker:", err);

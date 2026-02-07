@@ -12,7 +12,7 @@ export const personas: Persona[] = [
   },
   {
     id: "p2", name: "Renzo", slug: "renzo", color: "#22c55e",
-    role: "manager",
+    role: "lead",
     personality: "Calm under pressure. Breaks big goals into achievable sprints.",
     skills: ["Planning", "Risk assessment", "Agile", "Sprint planning"],
     processes: ["Stand-ups", "Retrospectives", "Status reports"],

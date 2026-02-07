@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { tickets, personas, comments, projects, ticketDocuments } from "@/db/schema";
-import { eq, or, isNull, desc } from "drizzle-orm";
+import { eq, or, and, isNull, desc } from "drizzle-orm";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
@@ -111,7 +111,8 @@ function postAgentComment(ticketId: string, personaId: string, content: string) 
 function toolsForRole(role: string): string[] {
   if (role === "researcher") return TOOLS_READONLY;
   if (role === "designer") return TOOLS_READONLY;
-  if (role === "skeptic") return TOOLS_READONLY;
+  if (role === "critic") return TOOLS_READONLY;
+  if (role === "lead") return TOOLS_READONLY;
   return TOOLS_FULL;
 }
 
@@ -172,16 +173,19 @@ export async function POST(
     : null;
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  // Get all personas for this project
+  // Get all non-deleted personas for this project
   const projectPersonas = db.select().from(personas)
-    .where(or(eq(personas.projectId, project.id), isNull(personas.projectId)))
+    .where(and(
+      or(eq(personas.projectId, project.id), isNull(personas.projectId)),
+      isNull(personas.deletedAt)
+    ))
     .all();
 
   // Route directly based on ticket phase — no PM triage
   const targetRole = resolveTargetRole(ticket);
   const targetPersona = projectPersonas.find((p) => p.role === targetRole)
     || projectPersonas.find((p) => p.role === "developer")
-    || projectPersonas.find((p) => p.role !== "manager")
+    || projectPersonas.find((p) => p.role !== "lead")
     || projectPersonas[0];
 
   if (!targetPersona) {
@@ -253,7 +257,9 @@ function buildAgentSystemPrompt(
     researcher: "You are a researcher. Your stdout IS the research document — output ONLY structured markdown, no preamble or conversational wrapper.\n\n## How to research\nInvestigate the codebase: read files, search code, understand architecture. Reference specific file paths and line numbers.\n\n## What to include\nFor every finding, show your work:\n- **What you looked at**: which files, functions, patterns you examined and why\n- **What you found**: the relevant code, config, or architecture detail\n- **Why it matters**: how this finding affects the ticket's implementation\n\nStructure the document with a \"Research Log\" section that traces your investigation path — what you searched for, what you found, what led you to look deeper. The reader should be able to follow your reasoning and verify your conclusions.\n\n## Style\nBe concise — only include information a developer needs to start planning. Skip obvious architecture descriptions.\nNever say \"I've created a document\" or \"here's what I found.\" Just output the document directly.\nIf the user is answering questions you asked in the research document, incorporate their answers into your analysis.",
     developer: "You are a developer. You can read, write, and edit code in the workspace.\nImplement changes, fix bugs, or prototype solutions as requested.\nMake targeted changes — don't refactor unrelated code.",
     designer: "You are a designer. Review the UI/UX, suggest improvements, and analyze the design system.\nReference specific components, CSS variables, and layout patterns.",
-    skeptic: "You are a skeptic and devil's advocate. Challenge assumptions, find holes in reasoning, and stress-test proposals.\nYou NEVER edit files or write code. You only read and comment.\nBe direct, specific, and constructive. Don't just say 'this might fail' — explain HOW it could fail and what to do about it.",
+    critic: "You are a critic and devil's advocate. Challenge assumptions, find holes in reasoning, and stress-test proposals.\nYou NEVER edit files or write code. You only read and comment.\nBe direct, specific, and constructive. Don't just say 'this might fail' — explain HOW it could fail and what to do about it.",
+    lead: "You are a team lead. Coordinate work, remove blockers, and keep the team aligned.\nFocus on planning, prioritization, and communication. Break down tasks and identify dependencies.",
+    hacker: "You are a security-focused engineer. Find vulnerabilities, harden the codebase, and think like an attacker.\nYou can read, write, and edit code. Be specific about threats — explain the attack vector and provide a fix.",
   };
   const role = persona.role || "developer";
   const roleInstructions = getSetting(`prompt_role_${role}`) || defaultRolePrompts[role] || defaultRolePrompts.developer;

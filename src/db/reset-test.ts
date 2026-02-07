@@ -60,11 +60,12 @@ console.log(`Created project: ${project.name} (id: ${project.id})`);
 
 // Seed roles
 const roleData = [
+  { slug: "lead", title: "Lead", description: "Coordinates work and removes blockers. Keeps the team aligned and stakeholders informed.", color: "#22c55e" },
   { slug: "researcher", title: "Research Analyst", description: "Investigates tickets before implementation. Explores the codebase, identifies constraints, and documents findings.", color: "#8b5cf6" },
   { slug: "developer", title: "Software Developer", description: "Implements features and fixes bugs. Writes clean, tested code following project patterns.", color: "#3b82f6" },
   { slug: "designer", title: "Product Designer", description: "Creates user interfaces and experiences. Focuses on usability, accessibility, and visual design.", color: "#f59e0b" },
-  { slug: "manager", title: "Project Manager", description: "Coordinates work and removes blockers. Keeps the team aligned and stakeholders informed.", color: "#22c55e" },
-  { slug: "skeptic", title: "Skeptic / Critic", description: "Challenges assumptions and stress-tests ideas. The constructive contrarian.", color: "#ef4444" },
+  { slug: "critic", title: "Critic", description: "Challenges assumptions and stress-tests ideas. The constructive contrarian who asks the hard questions.", color: "#ef4444" },
+  { slug: "hacker", title: "Hacker", description: "Security-focused engineer who finds vulnerabilities and hardens the codebase.", color: "#06b6d4" },
 ];
 const insertedRoles = db.insert(schema.roles).values(roleData).returning().all();
 const roleMap = new Map(insertedRoles.map((r) => [r.slug, r.id]));
@@ -83,7 +84,7 @@ const personaData = [
   },
   {
     id: "p2", name: "Renzo", slug: "renzo", color: "#22c55e", projectId: project.id,
-    role: "manager" as const, roleId: roleMap.get("manager"),
+    role: "lead" as const, roleId: roleMap.get("lead"),
     personality: "Calm under pressure with a talent for breaking big goals into achievable sprints. The team's favorite meeting facilitator.",
     skills: JSON.stringify(["Planning", "Risk assessment", "Agile", "Sprint planning"]),
     processes: JSON.stringify(["Stand-ups", "Retrospectives", "Status reports"]),

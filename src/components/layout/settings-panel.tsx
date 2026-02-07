@@ -697,10 +697,12 @@ function ApiKeysSection() {
 const PROMPT_OPTIONS = [
   { key: "prompt_avatar_style", label: "Team Avatar Style", description: "Art direction for generated worker avatar images" },
   { key: "prompt_user_avatar_style", label: "User Avatar Style", description: "Art direction for your personal avatar image" },
+  { key: "prompt_role_lead", label: "Lead Prompt", description: "System instructions for the team lead agent role" },
   { key: "prompt_role_researcher", label: "Researcher Prompt", description: "System instructions for the researcher agent role" },
   { key: "prompt_role_developer", label: "Developer Prompt", description: "System instructions for the developer agent role" },
   { key: "prompt_role_designer", label: "Designer Prompt", description: "System instructions for the designer agent role" },
-  { key: "prompt_role_skeptic", label: "Skeptic Prompt", description: "System instructions for the skeptic/devil's advocate role" },
+  { key: "prompt_role_critic", label: "Critic Prompt", description: "System instructions for the critic/devil's advocate role" },
+  { key: "prompt_role_hacker", label: "Hacker Prompt", description: "System instructions for the security hacker agent role" },
 ];
 
 function PromptsSection() {

@@ -4,16 +4,21 @@ import { getSetting, setSetting } from "@/db/queries";
 const PROMPT_KEYS = [
   "prompt_avatar_style",
   "prompt_user_avatar_style",
+  "prompt_role_lead",
   "prompt_role_researcher",
   "prompt_role_developer",
   "prompt_role_designer",
-  "prompt_role_skeptic",
+  "prompt_role_critic",
+  "prompt_role_hacker",
 ] as const;
 type PromptKey = (typeof PROMPT_KEYS)[number];
 
 const DEFAULTS: Record<PromptKey, string> = {
   prompt_avatar_style: `A real photograph — NOT an illustration, NOT a cartoon, NOT anime, NOT digital art, NOT 3D render. Shot on a Canon EOS R5 camera, 85mm f/1.4 lens. Real skin texture, real lighting, real depth of field. Professional headshot quality. Subject centered in frame for circular crop. Soft bokeh background. Natural warm studio lighting. Friendly, confident expression. No text, no watermarks, no logos. Square format.`,
   prompt_user_avatar_style: `A real photograph — NOT an illustration, NOT a cartoon, NOT anime, NOT digital art, NOT 3D render. Shot on a Canon EOS R5 camera, 85mm f/1.4 lens. Real skin texture, real lighting, real depth of field. Professional headshot quality. Subject centered in frame for circular crop. Soft bokeh background. Natural warm studio lighting. Friendly, confident expression. No text, no watermarks, no logos. Square format.`,
+  prompt_role_lead: `You are a team lead. You coordinate work, remove blockers, and keep the team aligned.
+You can read files to understand context but focus on planning, prioritization, and communication.
+Break down large tasks, identify dependencies, and ensure nothing falls through the cracks.`,
   prompt_role_researcher: `You are a researcher. Your stdout IS the research document — output ONLY structured markdown, no preamble or conversational wrapper.
 
 ## How to research
@@ -36,7 +41,7 @@ Implement changes, fix bugs, or prototype solutions as requested.
 Make targeted changes — don't refactor unrelated code.`,
   prompt_role_designer: `You are a designer. Review the UI/UX, suggest improvements, and analyze the design system.
 Reference specific components, CSS variables, and layout patterns.`,
-  prompt_role_skeptic: `You are a skeptic and devil's advocate. Your job is to challenge assumptions, find holes in reasoning, and stress-test proposals before the team commits to them.
+  prompt_role_critic: `You are a critic and devil's advocate. Your job is to challenge assumptions, find holes in reasoning, and stress-test proposals before the team commits to them.
 
 You NEVER edit files, write code, or make changes. You only read and comment.
 
@@ -58,6 +63,22 @@ When commenting on tickets:
 - Suggest failure scenarios the team should test for
 
 Be direct, specific, and constructive. Don't just say "this might fail" — explain HOW it could fail and what to do about it. Your goal is to make the team's work better, not to block progress.`,
+  prompt_role_hacker: `You are a security-focused engineer. Your job is to find vulnerabilities, harden the codebase, and think like an attacker to build better defenses.
+
+You can read, write, and edit code in the workspace.
+
+When reviewing code:
+- Look for injection vulnerabilities (SQL, XSS, command injection)
+- Check authentication and authorization boundaries
+- Identify insecure defaults, hardcoded secrets, or missing input validation
+- Flag insecure dependencies or outdated packages
+
+When implementing:
+- Add security hardening (input sanitization, output encoding, CSP headers)
+- Write security tests and fuzzing scenarios
+- Fix vulnerabilities with minimal blast radius
+
+Be specific about threats. Don't just say "this is insecure" — explain the attack vector and provide a fix.`,
 };
 
 export async function GET() {

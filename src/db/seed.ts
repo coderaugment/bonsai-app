@@ -44,7 +44,7 @@ const personaData = [
   },
   {
     id: "p2", name: "Renzo", slug: "renzo", color: "#22c55e", projectId: project.id,
-    role: "manager" as const,
+    role: "lead" as const,
     personality: "Calm under pressure with a talent for breaking big goals into achievable sprints. The team's favorite meeting facilitator.",
     skills: JSON.stringify(["Planning", "Risk assessment", "Agile", "Sprint planning"]),
     processes: JSON.stringify(["Stand-ups", "Retrospectives", "Status reports"]),

@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import type { Ticket, TicketType, TicketState, Comment, CommentAttachment, TicketDocument, TicketAttachment } from "@/types";
 import { ticketTypes } from "@/lib/ticket-types";
+import { useVoiceInput } from "@/hooks/use-voice-input";
+import { VoiceButton } from "@/components/voice-button";
 
 interface TicketDetailModalProps {
   ticket: Ticket | null;
@@ -57,6 +59,18 @@ export function TicketDetailModal({ ticket, onClose, onDelete }: TicketDetailMod
 
   // Full-screen document viewer
   const [expandedDoc, setExpandedDoc] = useState<TicketDocument | null>(null);
+
+  // Voice input hooks
+  const descVoice = useVoiceInput({
+    onTranscript: useCallback((text: string) => setDescription(text), []),
+  });
+  const criteriaVoice = useVoiceInput({
+    onTranscript: useCallback((text: string) => setAcceptanceCriteria(text), []),
+    aiField: "massage_criteria",
+  });
+  const commentVoice = useVoiceInput({
+    onTranscript: useCallback((text: string) => setNewComment((prev) => prev ? prev + " " + text : text), []),
+  });
 
   // Quote-to-comment state — popup uses refs (no re-render) to preserve selection
   const quotePopupRef = useRef<HTMLDivElement>(null);
@@ -544,42 +558,76 @@ export function TicketDetailModal({ ticket, onClose, onDelete }: TicketDetailMod
           <div className="flex-1 overflow-y-auto px-8 py-6 space-y-8">
             {/* Description */}
             <div>
-              <label className="block text-sm font-semibold mb-3" style={{ color: "var(--text-secondary)" }}>
-                Description
-              </label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={10}
-                className="w-full rounded-xl p-5 text-[15px] leading-relaxed resize-y min-h-[220px]"
-                style={{
-                  backgroundColor: "var(--bg-input)",
-                  border: "1px solid var(--border-medium)",
-                  color: "var(--text-primary)",
-                  outline: "none",
-                }}
-                placeholder="Describe what needs to be done..."
-              />
+              <div className="flex items-center justify-between mb-3">
+                <label className="text-sm font-semibold" style={{ color: "var(--text-secondary)" }}>
+                  Description
+                </label>
+                <VoiceButton voice={descVoice} />
+              </div>
+              <div className="relative">
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={10}
+                  disabled={descVoice.isProcessingAI}
+                  className="w-full rounded-xl p-5 text-[15px] leading-relaxed resize-y min-h-[220px]"
+                  style={{
+                    backgroundColor: "var(--bg-input)",
+                    border: "1px solid var(--border-medium)",
+                    color: "var(--text-primary)",
+                    outline: "none",
+                  }}
+                  placeholder={descVoice.isRecording ? descVoice.interimTranscript || "Listening..." : "Describe what needs to be done..."}
+                />
+                {descVoice.isProcessingAI && (
+                  <div className="absolute inset-0 rounded-xl flex items-center justify-center" style={{ backgroundColor: "rgba(15, 15, 26, 0.85)", backdropFilter: "blur(4px)" }}>
+                    <div className="flex items-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Cleaning up your description...
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Acceptance Criteria */}
             <div>
-              <label className="block text-sm font-semibold mb-3" style={{ color: "var(--text-secondary)" }}>
-                Acceptance Criteria
-              </label>
-              <textarea
-                value={acceptanceCriteria}
-                onChange={(e) => setAcceptanceCriteria(e.target.value)}
-                rows={10}
-                className="w-full rounded-xl p-5 text-sm font-mono leading-relaxed resize-y min-h-[220px]"
-                style={{
-                  backgroundColor: "rgba(0, 0, 0, 0.3)",
-                  border: "1px solid var(--border-medium)",
-                  color: "var(--text-primary)",
-                  outline: "none",
-                }}
-                placeholder="- Criteria 1&#10;- Criteria 2&#10;- Criteria 3"
-              />
+              <div className="flex items-center justify-between mb-3">
+                <label className="text-sm font-semibold" style={{ color: "var(--text-secondary)" }}>
+                  Acceptance Criteria
+                </label>
+                <VoiceButton voice={criteriaVoice} />
+              </div>
+              <div className="relative">
+                <textarea
+                  value={acceptanceCriteria}
+                  onChange={(e) => setAcceptanceCriteria(e.target.value)}
+                  rows={10}
+                  disabled={criteriaVoice.isProcessingAI}
+                  className="w-full rounded-xl p-5 text-sm font-mono leading-relaxed resize-y min-h-[220px]"
+                  style={{
+                    backgroundColor: "rgba(0, 0, 0, 0.3)",
+                    border: "1px solid var(--border-medium)",
+                    color: "var(--text-primary)",
+                    outline: "none",
+                  }}
+                  placeholder={criteriaVoice.isRecording ? criteriaVoice.interimTranscript || "Listening..." : "- Criteria 1\n- Criteria 2\n- Criteria 3"}
+                />
+                {criteriaVoice.isProcessingAI && (
+                  <div className="absolute inset-0 rounded-xl flex items-center justify-center" style={{ backgroundColor: "rgba(0, 0, 0, 0.7)", backdropFilter: "blur(4px)" }}>
+                    <div className="flex items-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Formatting criteria...
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Research & Plan Documents */}
@@ -1048,8 +1096,9 @@ export function TicketDetailModal({ ticket, onClose, onDelete }: TicketDetailMod
                 ref={commentInputRef}
                 value={newComment}
                 onChange={(e) => setNewComment(e.target.value)}
-                placeholder="Write a comment or drop files..."
+                placeholder={commentVoice.isRecording ? commentVoice.interimTranscript || "Listening..." : "Write a comment or drop files..."}
                 rows={3}
+                disabled={commentVoice.isProcessingAI}
                 className="w-full p-4 text-sm resize-none bg-transparent"
                 style={{ color: "var(--text-primary)", outline: "none" }}
                 onKeyDown={(e) => {
@@ -1113,6 +1162,7 @@ export function TicketDetailModal({ ticket, onClose, onDelete }: TicketDetailMod
                   Attach
                 </button>
                 <input ref={commentFileInputRef} type="file" multiple onChange={handleCommentFileSelect} className="hidden" />
+                <VoiceButton voice={commentVoice} compact />
                 <span className="text-xs" style={{ color: "var(--text-muted)" }}>
                   ⌘+Enter to send
                 </span>
