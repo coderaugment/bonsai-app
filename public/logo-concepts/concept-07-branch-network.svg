@@ -1,0 +1,25 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="100" cy="100" r="100" fill="#000000"/>
+
+  <!-- Branch Network - AI agents as connected nodes -->
+
+  <!-- Connections (branches) -->
+  <path d="M 100 150 Q 70 130 60 100" stroke="#4a4a4a" stroke-width="2" fill="none"/>
+  <path d="M 100 150 Q 100 130 100 100" stroke="#4a4a4a" stroke-width="2" fill="none"/>
+  <path d="M 100 150 Q 130 130 140 100" stroke="#4a4a4a" stroke-width="2" fill="none"/>
+  <path d="M 100 100 Q 85 80 80 60" stroke="#4a4a4a" stroke-width="2" fill="none"/>
+  <path d="M 100 100 Q 115 80 120 60" stroke="#4a4a4a" stroke-width="2" fill="none"/>
+
+  <!-- Nodes (AI worker personas) -->
+  <!-- Root node - Manager/orchestrator -->
+  <circle cx="100" cy="150" r="10" fill="#e879f9"/>
+
+  <!-- Mid-level nodes - Core workers -->
+  <circle cx="60" cy="100" r="8" fill="#8a8a8a"/>
+  <circle cx="100" cy="100" r="8" fill="#8a8a8a"/>
+  <circle cx="140" cy="100" r="8" fill="#8a8a8a"/>
+
+  <!-- Top nodes - Specialized workers -->
+  <circle cx="80" cy="60" r="6" fill="#f0abfc"/>
+  <circle cx="120" cy="60" r="6" fill="#f0abfc"/>
+</svg>

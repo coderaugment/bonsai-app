@@ -1,0 +1,22 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="100" cy="100" r="100" fill="#000000"/>
+
+  <!-- Growth Stack - layers representing accumulated capability -->
+  <!-- Base layer - darkest -->
+  <rect x="40" y="140" width="120" height="12" rx="6" fill="#2a2a2a"/>
+
+  <!-- Second layer -->
+  <rect x="50" y="122" width="100" height="12" rx="6" fill="#3f3f3f"/>
+
+  <!-- Third layer -->
+  <rect x="60" y="104" width="80" height="12" rx="6" fill="#5a5a5a"/>
+
+  <!-- Fourth layer -->
+  <rect x="70" y="86" width="60" height="12" rx="6" fill="#8a8a8a"/>
+
+  <!-- Fifth layer - transitioning to pink -->
+  <rect x="80" y="68" width="40" height="12" rx="6" fill="#b88ab8"/>
+
+  <!-- Top layer - magenta accent -->
+  <rect x="90" y="50" width="20" height="12" rx="6" fill="#e879f9"/>
+</svg>

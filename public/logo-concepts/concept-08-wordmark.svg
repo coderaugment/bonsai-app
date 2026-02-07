@@ -1,0 +1,19 @@
+<svg width="300" height="100" viewBox="0 0 300 100" xmlns="http://www.w3.org/2000/svg">
+  <rect width="300" height="100" fill="#ffffff"/>
+
+  <!-- Wordmark: Bons[ai] with "ai" accented -->
+  <text x="50" y="65" font-family="Arial, sans-serif" font-size="48" font-weight="600" fill="#2a2a2a">
+    Bons
+    <tspan fill="#e879f9">ai</tspan>
+  </text>
+
+  <!-- Small tree icon integrated into design -->
+  <g transform="translate(15, 30)">
+    <!-- Simplified tree trunk -->
+    <path d="M 12 35 Q 10 25 12 15" stroke="#3a3a3a" stroke-width="2" fill="none"/>
+    <!-- Foliage cloud -->
+    <circle cx="12" cy="12" r="6" fill="#e879f9" opacity="0.8"/>
+    <circle cx="8" cy="15" r="4" fill="#f0abfc" opacity="0.7"/>
+    <circle cx="16" cy="14" r="4" fill="#fae8ff" opacity="0.7"/>
+  </g>
+</svg>
