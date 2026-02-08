@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import type { TicketType } from "@/types";
 import { ticketTypes } from "@/lib/ticket-types";
+import { useVoiceInput } from "@/hooks/use-voice-input";
+import { VoiceButton } from "@/components/voice-button";
 
 function slugify(text: string) {
   return text
@@ -25,6 +27,19 @@ export default function OnboardTicketPage() {
   const [generatingCriteria, setGeneratingCriteria] = useState(false);
   const [projectSlug, setProjectSlug] = useState("");
   const descRef = useRef<HTMLTextAreaElement>(null);
+  const pendingVoiceBlurRef = useRef(false);
+
+  const voice = useVoiceInput({
+    onTranscript: useCallback((text: string) => {
+      setDescription(text);
+      pendingVoiceBlurRef.current = true;
+    }, []),
+  });
+
+  const criteriaVoice = useVoiceInput({
+    onTranscript: useCallback((text: string) => setAcceptanceCriteria(text), []),
+    aiField: "massage_criteria",
+  });
 
   useEffect(() => {
     fetch("/api/projects")
@@ -43,11 +58,11 @@ export default function OnboardTicketPage() {
     ? `~/.bonsai/worktrees/${projectSlug}/${titleSlug}`
     : "";
 
-  async function onDescriptionBlur() {
+  async function onDescriptionBlur(opts?: { skipEnhance?: boolean }) {
     if (!description.trim()) return;
     const jobs: Promise<void>[] = [];
     // Enhance: fix errors + improve clarity
-    jobs.push((async () => {
+    if (!opts?.skipEnhance) jobs.push((async () => {
       try {
         const res = await fetch("/api/generate-title", {
           method: "POST",
@@ -90,6 +105,15 @@ export default function OnboardTicketPage() {
     }
     await Promise.all(jobs);
   }
+
+  // After voice populates description, auto-generate title + criteria (skip enhance — voice already cleaned it)
+  useEffect(() => {
+    if (pendingVoiceBlurRef.current && description.trim()) {
+      pendingVoiceBlurRef.current = false;
+      onDescriptionBlur({ skipEnhance: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [description]);
 
   async function handleCreate() {
     if (!title.trim()) return;
@@ -143,18 +167,35 @@ export default function OnboardTicketPage() {
         <div className="flex-1 flex flex-col px-10 py-8 gap-6 overflow-y-auto">
           {/* Description — primary input, enhanced on blur */}
           <div className="flex-1 flex flex-col min-h-0">
-            <label className="text-sm font-medium mb-2 text-[var(--text-secondary)]">
-              Description
-            </label>
-            <textarea
-              ref={descRef}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              onBlur={onDescriptionBlur}
-              placeholder={ticketTypes[type].placeholder}
-              autoFocus
-              className="flex-1 w-full px-4 py-3 rounded-lg text-sm outline-none transition-all resize-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-blue)]"
-            />
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-medium text-[var(--text-secondary)]">
+                Description
+              </label>
+              <VoiceButton voice={voice} />
+            </div>
+            <div className="relative flex-1">
+              <textarea
+                ref={descRef}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                onBlur={() => onDescriptionBlur()}
+                placeholder={voice.isRecording ? voice.interimTranscript || "Listening..." : ticketTypes[type].placeholder}
+                autoFocus
+                disabled={voice.isProcessingAI}
+                className="flex-1 w-full h-full px-4 py-3 rounded-lg text-sm outline-none transition-all resize-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-blue)]"
+              />
+              {voice.isProcessingAI && (
+                <div className="absolute inset-0 bg-[var(--bg-primary)]/80 backdrop-blur-sm rounded-lg flex items-center justify-center">
+                  <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Cleaning up your description...
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Title — auto-generated from description on blur */}
@@ -176,18 +217,35 @@ export default function OnboardTicketPage() {
 
           {/* Acceptance Criteria */}
           <div className="flex-1 flex flex-col min-h-0">
-            <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">
-              Acceptance criteria
-              {generatingCriteria && (
-                <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">generating...</span>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-medium text-[var(--text-secondary)]">
+                Acceptance criteria
+                {generatingCriteria && (
+                  <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">generating...</span>
+                )}
+              </label>
+              <VoiceButton voice={criteriaVoice} />
+            </div>
+            <div className="relative flex-1">
+              <textarea
+                value={acceptanceCriteria}
+                onChange={(e) => setAcceptanceCriteria(e.target.value)}
+                placeholder={criteriaVoice.isRecording ? criteriaVoice.interimTranscript || "Listening..." : generatingCriteria ? "Generating criteria..." : ticketTypes[type].criteriaPlaceholder}
+                disabled={criteriaVoice.isProcessingAI}
+                className="flex-1 w-full h-full px-4 py-3 rounded-lg text-sm outline-none transition-all resize-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] min-h-[120px] focus:border-[var(--accent-blue)]"
+              />
+              {criteriaVoice.isProcessingAI && (
+                <div className="absolute inset-0 bg-[var(--bg-primary)]/80 backdrop-blur-sm rounded-lg flex items-center justify-center">
+                  <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Formatting criteria...
+                  </div>
+                </div>
               )}
-            </label>
-            <textarea
-              value={acceptanceCriteria}
-              onChange={(e) => setAcceptanceCriteria(e.target.value)}
-              placeholder={generatingCriteria ? "Generating criteria..." : ticketTypes[type].criteriaPlaceholder}
-              className="flex-1 w-full px-4 py-3 rounded-lg text-sm outline-none transition-all resize-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] min-h-[120px] focus:border-[var(--accent-blue)]"
-            />
+            </div>
           </div>
         </div>
 

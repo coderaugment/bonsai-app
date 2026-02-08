@@ -186,6 +186,10 @@ export default function TeamPage() {
         }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        console.error("[handleHire] API error:", data.error || data);
+        return;
+      }
       if (data.persona) {
         setHiredWorkers([...hiredWorkers, data.persona]);
       }
@@ -198,13 +202,15 @@ export default function TeamPage() {
         if (Array.isArray(ticketsData) && ticketsData.length > 0) {
           router.push("/board");
         } else {
-          router.push("/onboard/ticket");
+          router.push("/new-ticket");
         }
       } else {
         setStep(nextStep);
         resetForm();
       }
-    } catch {}
+    } catch (err) {
+      console.error("[handleHire] failed:", err);
+    }
     setSaving(false);
   }
 

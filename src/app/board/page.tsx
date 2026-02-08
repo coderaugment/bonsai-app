@@ -11,7 +11,7 @@ export default function BoardPage() {
 
   const project = getProject();
   if (!project) {
-    redirect("/onboard/welcome");
+    redirect("/onboard/github");
   }
 
   if (!isTeamComplete()) {

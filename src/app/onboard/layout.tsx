@@ -11,8 +11,15 @@ export default function OnboardLayout({
 }) {
   const user = getUser();
   const project = getProject();
+
+  // Fully onboarded → board
   if (user && project && isTeamComplete() && hasTickets()) {
     redirect("/board");
+  }
+
+  // Team complete but no tickets → create first ticket (with sidebar visible)
+  if (user && project && isTeamComplete()) {
+    redirect("/new-ticket");
   }
 
   return <Modal>{children}</Modal>;

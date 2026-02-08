@@ -27,21 +27,27 @@ export async function POST(req: Request) {
     if (roleRow) color = roleRow.color;
   }
 
-  const persona = createPersona({
-    name: name.trim(),
-    role,
-    color,
-    roleId: roleId ?? undefined,
-    personality: personality?.trim(),
-    skills: skills || [],
-    processes: processes || [],
-    goals: goals || [],
-    permissions: permissions || { tools: [], folders: [] },
-    projectId,
-    avatar,
-  });
+  try {
+    const persona = createPersona({
+      name: name.trim(),
+      role,
+      color,
+      roleId: roleId ?? undefined,
+      personality: personality?.trim(),
+      skills: skills || [],
+      processes: processes || [],
+      goals: goals || [],
+      permissions: permissions || { tools: [], folders: [] },
+      projectId,
+      avatar,
+    });
 
-  return NextResponse.json({ success: true, persona });
+    return NextResponse.json({ success: true, persona });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[POST /api/personas] createPersona failed:", msg, { roleId, projectId, role });
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
 
 export async function PUT(req: Request) {
