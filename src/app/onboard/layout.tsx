@@ -13,12 +13,12 @@ export default function OnboardLayout({
   const project = getProject();
 
   // Fully onboarded → board
-  if (user && project && isTeamComplete() && hasTickets()) {
+  if (user && project && isTeamComplete(Number(project.id)) && hasTickets()) {
     redirect("/board");
   }
 
-  // Team complete but no tickets → create first ticket (with sidebar visible)
-  if (user && project && isTeamComplete()) {
+  // Team done but no tickets → new ticket page (with sidebar visible)
+  if (user && project && isTeamComplete(Number(project.id))) {
     redirect("/new-ticket");
   }
 

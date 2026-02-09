@@ -1,34 +1,76 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { tickets, personas, comments, projects, ticketDocuments } from "@/db/schema";
-import { eq, or, and, isNull, desc } from "drizzle-orm";
-import { spawn } from "node:child_process";
+import { eq, and, isNull, desc } from "drizzle-orm";
+import { spawn, execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
-import { getSetting } from "@/db/queries";
+import { getSetting, logAuditEvent } from "@/db/queries";
 
 // ── Config ──────────────────────────────────────────
 const HOME = process.env.HOME || "~";
 const CLAUDE_CLI = path.join(HOME, ".local", "bin", "claude");
-const MODEL = "sonnet";
+const MODEL = "opus";
 const BONSAI_DIR = path.join(HOME, ".bonsai");
 const API_BASE = "http://localhost:3000";
 
 const TOOLS_READONLY = ["Read", "Grep", "Glob", "Bash"];
 const TOOLS_FULL = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
 
+const COMMENT_SKILL = fs.readFileSync(
+  path.join(process.cwd(), "skills", "_shared", "bonsai-comments.md"),
+  "utf-8"
+);
+
 function shellEscape(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
-function resolveMainRepo(project: { githubRepo: string | null; slug: string }): string {
-  if (project.githubRepo === "bonsai-app") {
-    return path.join(HOME, "development", "bonsai", "webapp");
+const PROJECTS_DIR = path.join(HOME, "development", "bonsai", "projects");
+
+function resolveMainRepo(project: { githubRepo: string | null; slug: string; localPath: string | null }): string {
+  if (project.localPath) return project.localPath;
+  return path.join(PROJECTS_DIR, project.githubRepo || project.slug);
+}
+
+const WORKTREES_DIR = path.join(BONSAI_DIR, "worktrees");
+
+function ensureWorktree(
+  project: { githubRepo: string | null; slug: string; localPath: string | null },
+  ticketId: string
+): string {
+  const mainRepo = resolveMainRepo(project);
+  if (!fs.existsSync(mainRepo)) return mainRepo;
+
+  const gitDir = path.join(mainRepo, ".git");
+  if (!fs.existsSync(gitDir)) return mainRepo;
+
+  const slug = project.slug || project.githubRepo || "unknown";
+  const worktreePath = path.join(WORKTREES_DIR, slug, ticketId);
+  const branchName = `ticket/${ticketId}`;
+
+  if (fs.existsSync(worktreePath)) return worktreePath;
+
+  fs.mkdirSync(path.join(WORKTREES_DIR, slug), { recursive: true });
+
+  try {
+    const opts = { cwd: mainRepo, encoding: "utf-8" as const, stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"] };
+
+    // Create branch if it doesn't exist
+    try {
+      execFileSync("git", ["rev-parse", "--verify", branchName], opts);
+    } catch {
+      execFileSync("git", ["branch", branchName], opts);
+    }
+
+    execFileSync("git", ["worktree", "add", worktreePath, branchName], opts);
+    console.log(`[dispatch] Created worktree at ${worktreePath}`);
+    return worktreePath;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[dispatch] Worktree creation failed: ${msg.slice(0, 200)}`);
+    return mainRepo;
   }
-  if (project.githubRepo === "bonsai-agent") {
-    return path.join(HOME, "development", "bonsai", "agent");
-  }
-  return path.join(HOME, "development", project.githubRepo || project.slug);
 }
 
 // ── Agent Spawn (fire-and-forget, posts back when done) ──
@@ -37,7 +79,8 @@ function spawnAgent(
   cwd: string,
   tools: string[],
   ticketId: string,
-  personaId: string
+  personaId: string,
+  opts?: { conversational?: boolean; documentId?: number }
 ) {
   const taskFile = path.join(sessionDir, "task.md");
   const outputFile = path.join(sessionDir, "output.md");
@@ -58,13 +101,30 @@ function spawnAgent(
   ].join("\n"));
   fs.chmodSync(reportScript, 0o755);
 
+  // Write check-criteria helper script
+  const checkCriteriaScript = path.join(sessionDir, "check-criteria.sh");
+  fs.writeFileSync(checkCriteriaScript, [
+    `#!/usr/bin/env node`,
+    `const idx = parseInt(process.argv[2], 10);`,
+    `if (isNaN(idx)) { console.error("Usage: check-criteria.sh <index>"); process.exit(1); }`,
+    `fetch("${API_BASE}/api/tickets/${ticketId}/check-criteria", {`,
+    `  method: "POST",`,
+    `  headers: { "Content-Type": "application/json" },`,
+    `  body: JSON.stringify({ index: idx }),`,
+    `}).then(r => r.json()).then(d => {`,
+    `  if (d.ok) console.log("Checked criterion " + idx);`,
+    `  else console.error("Failed:", d.error);`,
+    `}).catch(e => console.error(e));`,
+  ].join("\n"));
+  fs.chmodSync(checkCriteriaScript, 0o755);
+
   const claudeCmd = [
     `cat ${shellEscape(taskFile)} |`,
     shellEscape(CLAUDE_CLI),
     `-p`,
     `--model ${MODEL}`,
     `--allowedTools "${tools.join(",")}"`,
-    `--output-format text`,
+    `--output-format json`,
     `--no-session-persistence`,
     `--append-system-prompt "$(cat ${shellEscape(promptFile)})"`,
     `> ${shellEscape(outputFile)} 2> ${shellEscape(stderrFile)}`,
@@ -74,13 +134,29 @@ function spawnAgent(
   const postScriptFile = path.join(sessionDir, "post-output.mjs");
   fs.writeFileSync(postScriptFile, [
     `import fs from "fs";`,
-    `const output = fs.readFileSync(${JSON.stringify(outputFile)}, "utf-8").trim();`,
-    `if (!output) process.exit(0);`,
+    `const raw = fs.readFileSync(${JSON.stringify(outputFile)}, "utf-8").trim();`,
+    `if (!raw) {`,
+    `  fs.writeFileSync(${JSON.stringify(path.join(sessionDir, "post-error.log"))}, "Empty output file — agent produced no output");`,
+    `  process.exit(0);`,
+    `}`,
+    `let output;`,
+    `try {`,
+    `  const json = JSON.parse(raw);`,
+    `  output = json.result || "";`,
+    `  if (!output && !json.is_error && json.num_turns > 0) {`,
+    `    output = "I've completed my work on this task. Check the file changes for details.";`,
+    `  } else if (!output && json.is_error) {`,
+    `    output = "I encountered an error while working on this task: " + (json.result || "unknown error");`,
+    `  }`,
+    `} catch {`,
+    `  output = raw;`,
+    `}`,
+    `if (!output?.trim()) process.exit(0);`,
     `try {`,
     `  const res = await fetch(${JSON.stringify(`${API_BASE}/api/tickets/${ticketId}/agent-complete`)}, {`,
     `    method: "POST",`,
     `    headers: { "Content-Type": "application/json" },`,
-    `    body: JSON.stringify({ personaId: ${JSON.stringify(personaId)}, content: output }),`,
+    `    body: JSON.stringify({ personaId: ${JSON.stringify(personaId)}, content: output, conversational: ${!!opts?.conversational}, documentId: ${opts?.documentId ? opts.documentId : "null"} }),`,
     `  });`,
     `  const body = await res.text();`,
     `  fs.writeFileSync(${JSON.stringify(path.join(sessionDir, "post-result.log"))}, res.status + " " + body);`,
@@ -94,7 +170,7 @@ function spawnAgent(
     cwd,
     detached: true,
     stdio: "ignore",
-    env: { ...process.env, DISABLE_AUTOUPDATER: "1" },
+    env: { ...process.env, DISABLE_AUTOUPDATER: "1", GEMINI_API_KEY: process.env.GEMINI_API_KEY || "" },
   });
   child.unref();
 }
@@ -110,7 +186,7 @@ function postAgentComment(ticketId: string, personaId: string, content: string) 
 
 function toolsForRole(role: string): string[] {
   if (role === "researcher") return TOOLS_READONLY;
-  if (role === "designer") return TOOLS_READONLY;
+  if (role === "designer") return TOOLS_FULL;
   if (role === "critic") return TOOLS_READONLY;
   if (role === "lead") return TOOLS_READONLY;
   return TOOLS_FULL;
@@ -118,11 +194,14 @@ function toolsForRole(role: string): string[] {
 
 // Determine which role should handle based on ticket state
 function resolveTargetRole(ticket: typeof tickets.$inferSelect): string {
-  // Research not approved yet → researcher handles it
+  // Research phase → always researcher
   if (!ticket.researchApprovedAt) return "researcher";
-  // Research approved but plan not approved → developer builds the plan
-  if (!ticket.planApprovedAt) return "developer";
-  // Both approved → developer implements
+  // Planning phase → developer for code work, lead for everything else
+  if (!ticket.planApprovedAt) {
+    if (ticket.type === "feature" || ticket.type === "bug") return "developer";
+    return "lead";
+  }
+  // Implementation → developer
   return "developer";
 }
 
@@ -153,8 +232,10 @@ function getTicketContext(ticketId: string) {
 
   const researchDoc = docs.find((d) => d.type === "research");
   const implPlan = docs.find((d) => d.type === "implementation_plan");
+  const researchCritique = docs.find((d) => d.type === "research_critique");
+  const planCritique = docs.find((d) => d.type === "plan_critique");
 
-  return { enrichedComments, researchDoc, implPlan };
+  return { enrichedComments, researchDoc, implPlan, researchCritique, planCritique };
 }
 
 // ── POST /api/tickets/[id]/dispatch ──────────────────
@@ -163,7 +244,11 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: ticketId } = await params;
-  const { commentContent } = await req.json();
+  const { commentContent, targetRole: requestedRole, targetPersonaName, targetPersonaId, silent, conversational, documentId } = await req.json();
+
+  if (conversational) {
+    console.log(`[dispatch] Conversational dispatch for ${ticketId}, documentId=${documentId}, targetPersonaId=${targetPersonaId}`);
+  }
 
   const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
   if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
@@ -176,23 +261,68 @@ export async function POST(
   // Get all non-deleted personas for this project
   const projectPersonas = db.select().from(personas)
     .where(and(
-      or(eq(personas.projectId, project.id), isNull(personas.projectId)),
+      eq(personas.projectId, project.id),
       isNull(personas.deletedAt)
     ))
     .all();
 
-  // Route directly based on ticket phase — no PM triage
-  const targetRole = resolveTargetRole(ticket);
-  const targetPersona = projectPersonas.find((p) => p.role === targetRole)
-    || projectPersonas.find((p) => p.role === "developer")
-    || projectPersonas.find((p) => p.role !== "lead")
-    || projectPersonas[0];
+  // Cooldown: don't dispatch a new agent if one was just dispatched and no explicit target given
+  const hasExplicitTarget = targetPersonaName || targetPersonaId || requestedRole;
+  if (!hasExplicitTarget && ticket.lastAgentActivity) {
+    const elapsed = Date.now() - new Date(ticket.lastAgentActivity).getTime();
+    const COOLDOWN_MS = 120_000; // 2 minutes
+    if (elapsed < COOLDOWN_MS) {
+      console.log(`[dispatch] Skipping — agent active ${Math.round(elapsed / 1000)}s ago, no explicit target`);
+      const assignee = ticket.assigneeId
+        ? projectPersonas.find((p) => p.id === ticket.assigneeId)
+        : null;
+      return NextResponse.json({
+        skipped: true,
+        reason: "agent_active",
+        persona: assignee ? { id: assignee.id, name: assignee.name, role: assignee.role, color: assignee.color, avatarUrl: assignee.avatar || undefined } : null,
+      });
+    }
+  }
+
+  // Route: direct persona ID > @mention by name > explicit targetRole > auto-routing by ticket state
+  let targetPersona = targetPersonaId
+    ? projectPersonas.find((p) => p.id === targetPersonaId)
+    : targetPersonaName
+    ? projectPersonas.find((p) => p.name.toLowerCase() === targetPersonaName.toLowerCase())
+    : undefined;
+
+  // If @mention target not found in project, try all personas (handles cross-project scoping issues)
+  if (!targetPersona && targetPersonaName) {
+    const allPersonas = db.select().from(personas).where(isNull(personas.deletedAt)).all();
+    const globalMatch = allPersonas.find((p) => p.name.toLowerCase() === targetPersonaName.toLowerCase());
+    if (globalMatch) {
+      console.warn(`[dispatch] @${targetPersonaName} not in project ${project.id} personas (${projectPersonas.map(p => p.name).join(", ")}). Found globally as ${globalMatch.id} (project ${globalMatch.projectId}).`);
+      targetPersona = globalMatch;
+    } else {
+      console.warn(`[dispatch] @${targetPersonaName} not found anywhere. Falling back to role-based routing.`);
+    }
+  }
+
+  if (!targetPersona) {
+    const targetRole = requestedRole || resolveTargetRole(ticket);
+    console.log(`[dispatch] Role-based routing: ${targetRole} for ticket ${ticketId} (project personas: ${projectPersonas.map(p => `${p.name}/${p.role}`).join(", ")})`);
+    targetPersona = projectPersonas.find((p) => p.role === targetRole)
+      || projectPersonas.find((p) => p.role === "developer")
+      || projectPersonas.find((p) => p.role !== "lead")
+      || projectPersonas[0];
+  }
 
   if (!targetPersona) {
     return NextResponse.json({ error: "No personas available" }, { status: 400 });
   }
 
-  const cwd = resolveMainRepo(project);
+  const cwd = ensureWorktree(project, ticketId);
+
+  // Ensure workspace exists — create if missing so agent doesn't silently fail
+  if (!fs.existsSync(cwd)) {
+    fs.mkdirSync(cwd, { recursive: true });
+    console.warn(`[dispatch] Created missing workspace: ${cwd}`);
+  }
 
   // Create agent session
   const sessionDir = path.join(BONSAI_DIR, "sessions", `${ticketId}-agent-${Date.now()}`);
@@ -200,19 +330,30 @@ export async function POST(
 
   fs.writeFileSync(
     path.join(sessionDir, "system-prompt.txt"),
-    buildAgentSystemPrompt(targetPersona, project, ticket, sessionDir)
+    buildAgentSystemPrompt(targetPersona, project, ticket, sessionDir, projectPersonas)
   );
   fs.writeFileSync(
     path.join(sessionDir, "task.md"),
-    assembleAgentTask(commentContent, ticket, targetPersona)
+    assembleAgentTask(commentContent, ticket, targetPersona, { conversational })
   );
 
   // Spawn the agent (fire-and-forget, posts comment when done)
-  spawnAgent(sessionDir, cwd, toolsForRole(targetPersona.role || "developer"), ticketId, targetPersona.id);
+  spawnAgent(sessionDir, cwd, toolsForRole(targetPersona.role || "developer"), ticketId, targetPersona.id, { conversational, documentId });
 
-  // Post a brief "working on it" comment
+  // Post a brief "working on it" comment (skip for silent/auto dispatches)
   const ackMsg = `Looking into this now.`;
-  postAgentComment(ticketId, targetPersona.id, ackMsg);
+  if (!silent) {
+    postAgentComment(ticketId, targetPersona.id, ackMsg);
+  }
+
+  logAuditEvent({
+    ticketId,
+    event: "agent_dispatched",
+    actorType: "system",
+    actorName: "System",
+    detail: `Dispatched ${targetPersona.name} (${targetPersona.role})`,
+    metadata: { personaId: targetPersona.id, role: targetPersona.role },
+  });
 
   // Set last_agent_activity to prevent heartbeat overlap
   db.update(tickets)
@@ -225,6 +366,8 @@ export async function POST(
       id: targetPersona.id,
       name: targetPersona.name,
       role: targetPersona.role,
+      color: targetPersona.color,
+      avatarUrl: targetPersona.avatar || undefined,
     },
     pmComment: {
       id: Date.now(),
@@ -247,17 +390,35 @@ function buildAgentSystemPrompt(
   persona: typeof personas.$inferSelect,
   project: typeof projects.$inferSelect,
   ticket: typeof tickets.$inferSelect,
-  sessionDir: string
+  sessionDir: string,
+  teamMembers: (typeof personas.$inferSelect)[] = []
 ): string {
-  const workspace = resolveMainRepo(project);
+  const workspace = ensureWorktree(project, ticket.id);
   const reportScript = path.join(sessionDir, "report.sh");
 
   // Role prompts: read from settings (editable in Settings > Prompts), fall back to defaults
   const defaultRolePrompts: Record<string, string> = {
     researcher: "You are a researcher. Your stdout IS the research document — output ONLY structured markdown, no preamble or conversational wrapper.\n\n## How to research\nInvestigate the codebase: read files, search code, understand architecture. Reference specific file paths and line numbers.\n\n## What to include\nFor every finding, show your work:\n- **What you looked at**: which files, functions, patterns you examined and why\n- **What you found**: the relevant code, config, or architecture detail\n- **Why it matters**: how this finding affects the ticket's implementation\n\nStructure the document with a \"Research Log\" section that traces your investigation path — what you searched for, what you found, what led you to look deeper. The reader should be able to follow your reasoning and verify your conclusions.\n\n## Style\nBe concise — only include information a developer needs to start planning. Skip obvious architecture descriptions.\nNever say \"I've created a document\" or \"here's what I found.\" Just output the document directly.\nIf the user is answering questions you asked in the research document, incorporate their answers into your analysis.",
-    developer: "You are a developer. You can read, write, and edit code in the workspace.\nImplement changes, fix bugs, or prototype solutions as requested.\nMake targeted changes — don't refactor unrelated code.",
-    designer: "You are a designer. Review the UI/UX, suggest improvements, and analyze the design system.\nReference specific components, CSS variables, and layout patterns.",
-    critic: "You are a critic and devil's advocate. Challenge assumptions, find holes in reasoning, and stress-test proposals.\nYou NEVER edit files or write code. You only read and comment.\nBe direct, specific, and constructive. Don't just say 'this might fail' — explain HOW it could fail and what to do about it.",
+    developer: "You are a developer. You can read, write, and edit code in the workspace.\nImplement changes, fix bugs, or prototype solutions as requested.\nMake targeted changes — don't refactor unrelated code.\n\nWhen in PLANNING PHASE (research approved, no plan approved yet):\n- Your stdout IS the implementation plan — output ONLY structured markdown, no preamble.\n- Be DECISIVE. Make choices and document your reasoning. Do NOT ask questions or wait for clarification.\n- If users have answered questions in comments, incorporate those answers into the plan.\n- Cover: architecture, file structure, data models, API routes, dependencies, and step-by-step implementation order.\n- If information is ambiguous, state your assumption and move forward.",
+    designer: `You are a designer. You generate UI mockups and component code using the nano-banana CLI tool.
+
+## nano-banana CLI — YOU MUST USE THIS
+Tool path: ${path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs")}
+GEMINI_API_KEY is set in your environment.
+
+Generate an image:
+node ${path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs")} "A detailed description of the UI to generate" --output designs/mockup-name.png --ticket TICKET_ID --persona YOUR_PERSONA_ID
+
+Generate code:
+node ${path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs")} --text "Describe the React component to generate"
+
+RULES:
+- Your FIRST action must be a Bash call to nano-banana to generate an image. No exceptions.
+- Do NOT describe designs in text. Generate them as images using the tool.
+- Do NOT hallucinate or pretend you ran the tool. Actually run it via Bash.
+- If the tool fails, report the error. Do not fake success.
+- Every response MUST include at least one real Bash execution of nano-banana.`,
+    critic: "You are a critic and code reviewer. Your job is to improve the TEAM'S output — research docs, plans, and code.\nYou NEVER edit files or write code. You only read and comment.\n\n## CITATION REQUIREMENT — STRICT\nEvery critique MUST be backed by evidence you found in the actual codebase:\n- Read the relevant files BEFORE making any claims about them.\n- Cite file paths and line numbers for every technical assertion.\n- If you claim a library version is wrong, quote the actual version from package.json.\n- If you claim an API doesn't exist, show the grep/search that proves it.\n- NEVER assert facts about library versions, API behavior, or framework features from memory. Your training data is outdated. Verify everything against the project's actual files.\n- If you cannot verify a claim, prefix it with \"UNVERIFIED:\" and explain what you'd need to check.\n\n## What to critique\n- **Technical substance**: Are the architecture choices sound? Are there better alternatives? Missing edge cases?\n- **Gaps in research**: What wasn't investigated that should have been? What assumptions need validation?\n- **Risks**: What could go wrong in implementation? Performance, security, maintainability?\n- **Requirements**: Does the proposal actually address the ticket's acceptance criteria?\n\n## What NOT to critique\n- Don't critique the agent infrastructure, workspace rules, or system prompts — those are handled by Bonsai.\n- Don't raise concerns about things the system already enforces (workspace boundaries, tool permissions).\n- Don't pad your response with progress updates — get straight to the critique.\n- Don't make claims about what versions of frameworks exist or don't exist without checking package.json first.\n\n## Style\n- Be concise. Lead with your strongest point.\n- For each issue: state the problem, cite the evidence, explain why it matters, suggest a fix.\n- If the work is solid, say so briefly and focus on the 1-2 things that could be better.\n- Address other team members by name when responding to their work.",
     lead: "You are a team lead. Coordinate work, remove blockers, and keep the team aligned.\nFocus on planning, prioritization, and communication. Break down tasks and identify dependencies.",
     hacker: "You are a security-focused engineer. Find vulnerabilities, harden the codebase, and think like an attacker.\nYou can read, write, and edit code. Be specific about threats — explain the attack vector and provide a fix.",
   };
@@ -267,7 +428,31 @@ function buildAgentSystemPrompt(
   return [
     `You are ${persona.name}, working on project "${project.name}".`,
     `Workspace: ${workspace}`,
+    "",
+    "CRITICAL WORKSPACE RULES:",
+    `- Your workspace is: ${workspace}`,
+    "- ONLY read and modify files inside this directory.",
+    "- Do NOT navigate to parent directories. Do NOT use ../",
+    "- If your workspace is empty or has only a README, that is NORMAL — this is a new/greenfield project.",
+    "- You are managed by Bonsai (a separate ticketing/orchestration system). Bonsai's source code exists in a parent directory. IGNORE IT. It is NOT your project.",
+    "- If you find files like src/db/schema.ts, src/app/api/*, or package.json with 'next'/'drizzle' — that is Bonsai, NOT your project. Stop and re-orient.",
+    "",
+    "EVIDENCE-BASED WORK — MANDATORY:",
+    "- NEVER make claims about the codebase, technology versions, or project state without citing evidence from actual files you have read.",
+    "- For every factual claim, cite the source: file path, line number, or command output that proves it.",
+    "- If you haven't read a file, you don't know what's in it. Read it first, then make claims.",
+    "- Do NOT rely on training data for version numbers, API signatures, or library behavior. Check package.json, lock files, and actual source code.",
+    "- If you're unsure about something, say so explicitly rather than guessing. \"I did not verify this\" is better than a confident wrong answer.",
+    "- Your training data has a knowledge cutoff and WILL be wrong about recent releases. Always verify against the actual project files.",
     persona.personality ? `\nPersonality:\n${persona.personality}` : "",
+    "",
+    "## Your Team",
+    "These are the people on this project. Use @name in your chat messages to hand off or request help.",
+    ...teamMembers.map((p) => {
+      const you = p.id === persona.id ? " (you)" : "";
+      const skills = p.skills ? ` — skills: ${p.skills}` : "";
+      return `- **${p.name}** (${p.role || "member"})${you}${skills}`;
+    }),
     "",
     roleInstructions,
     "",
@@ -284,11 +469,19 @@ function buildAgentSystemPrompt(
     "- **Hit a blocker or uncertainty** (e.g. \"Not sure if we need to handle the legacy format — flagging for review\")",
     "Keep reports short (1-3 sentences). They form the audit trail of your work.",
     "",
-    "## Output",
-    "Your entire stdout output will be posted as a comment on the ticket thread.",
-    "Write your response as a clear, well-formatted markdown comment.",
-    "Address the user's message directly. Include code snippets, file references, or findings as appropriate.",
-    "Keep it focused — this is a comment in a conversation, not a dissertation.",
+    COMMENT_SKILL,
+    ticket.acceptanceCriteria ? [
+      "",
+      "## Acceptance Criteria Verification",
+      `Use the check-criteria tool to mark each criterion as done (0-indexed):`,
+      `\`${path.join(sessionDir, "check-criteria.sh")} 0\`  # checks off the first criterion`,
+      `\`${path.join(sessionDir, "check-criteria.sh")} 1\`  # checks off the second criterion`,
+      "",
+      "The acceptance criteria are:",
+      ticket.acceptanceCriteria,
+      "",
+      "For each criterion: verify it is met, then check it off. If NOT met, report what's missing.",
+    ].join("\n") : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -296,9 +489,10 @@ function buildAgentSystemPrompt(
 function assembleAgentTask(
   commentContent: string,
   ticket: typeof tickets.$inferSelect,
-  persona: typeof personas.$inferSelect
+  persona: typeof personas.$inferSelect,
+  opts?: { conversational?: boolean }
 ): string {
-  const { enrichedComments, researchDoc, implPlan } = getTicketContext(ticket.id);
+  const { enrichedComments, researchDoc, implPlan, researchCritique, planCritique } = getTicketContext(ticket.id);
 
   const sections: string[] = [
     `# Ticket: ${ticket.title}`,
@@ -313,16 +507,25 @@ function assembleAgentTask(
   }
 
   if (researchDoc) {
-    const content = researchDoc.content.length > 3000
-      ? researchDoc.content.slice(0, 3000) + "\n\n[...truncated]"
+    // Critics need the full doc — only truncate for other roles
+    const limit = persona.role === "critic" ? 12000 : 3000;
+    const content = researchDoc.content.length > limit
+      ? researchDoc.content.slice(0, limit) + "\n\n[...truncated]"
       : researchDoc.content;
     sections.push("", "## Research Document (v" + researchDoc.version + ")", content);
   }
   if (implPlan) {
-    const content = implPlan.content.length > 3000
-      ? implPlan.content.slice(0, 3000) + "\n\n[...truncated]"
+    const limit = persona.role === "critic" ? 12000 : 3000;
+    const content = implPlan.content.length > limit
+      ? implPlan.content.slice(0, limit) + "\n\n[...truncated]"
       : implPlan.content;
     sections.push("", "## Implementation Plan (v" + implPlan.version + ")", content);
+  }
+  if (researchCritique) {
+    sections.push("", "## Research Critique (v" + researchCritique.version + ")", researchCritique.content);
+  }
+  if (planCritique) {
+    sections.push("", "## Plan Critique (v" + planCritique.version + ")", planCritique.content);
   }
 
   if (enrichedComments.length > 0) {
@@ -330,13 +533,80 @@ function assembleAgentTask(
     sections.push(...enrichedComments.map((c) => c + "\n---"));
   }
 
+  // Phase-specific instructions (skip when conversational — agent should reply, not produce a document)
+  if (!opts?.conversational) {
+    const phase = !ticket.researchApprovedAt ? "research"
+      : !ticket.planApprovedAt ? "planning"
+      : "implementation";
+
+    if (phase === "planning" && (persona.role === "developer" || persona.role === "lead")) {
+      sections.push(
+        "",
+        "## PHASE: PLANNING",
+        "You are producing the IMPLEMENTATION PLAN. Your entire stdout will be saved as the plan document.",
+        "Do NOT ask questions. Be decisive — make assumptions and document them.",
+        "If previous comments contain answers to earlier questions, incorporate them into a COMPLETE revised plan.",
+      );
+    } else if (phase === "research" && persona.role === "researcher") {
+      sections.push(
+        "",
+        "## PHASE: RESEARCH",
+        "You are producing the RESEARCH DOCUMENT. Your entire stdout will be saved as the research document.",
+      );
+    } else if (phase === "implementation" && (persona.role === "developer" || persona.role === "lead")) {
+      sections.push(
+        "",
+        "## PHASE: IMPLEMENTATION",
+        "The research and implementation plan have BOTH been approved. You are now BUILDING.",
+        "Follow the implementation plan above step by step. Write real code — create files, install dependencies, build the feature.",
+        "Work inside your workspace directory ONLY. Do not modify files outside it.",
+        "After completing each major step, report progress using the report script.",
+      );
+    }
+
+    // Designer always gets explicit tool-use instructions
+    if (persona.role === "designer") {
+      const toolPath = path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs");
+      sections.push(
+        "",
+        "## ACTION REQUIRED: GENERATE IMAGES WITH NANO-BANANA",
+        `Your FIRST action MUST be a Bash tool call to generate an image. Run this exact command (fill in the prompt):`,
+        "",
+        `node ${toolPath} "DESCRIBE THE UI HERE IN DETAIL" --output designs/mockup.png --ticket ${ticket.id} --persona ${persona.id}`,
+        "",
+        "This will generate an image via Gemini AI, save it to designs/, and attach it to the ticket.",
+        "Do NOT write text describing designs. Do NOT skip this step. Do NOT pretend you ran it.",
+        "If the command fails, paste the error. Do not fabricate output.",
+      );
+    }
+  } else {
+    sections.push(
+      "",
+      "## CONVERSATIONAL MODE",
+      "A human left a comment on a document. Reply CONVERSATIONALLY — short, direct, under 500 characters.",
+      "Do NOT produce a full document. Do NOT output headers or structured markdown.",
+      "Just answer their question or acknowledge their feedback like a teammate would in a chat.",
+    );
+  }
+
   sections.push(
     "",
     "## New Comment (respond to this)",
     commentContent,
-    "",
-    `You are ${persona.name} (${persona.role}). Address the comment above.`,
   );
+
+  if (persona.role === "designer") {
+    const toolPath = path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs");
+    sections.push(
+      "",
+      `You are ${persona.name} (${persona.role}). Your FIRST action must be: Bash tool → node ${toolPath} "your prompt" --output designs/mockup.png --ticket ${ticket.id} --persona ${persona.id}`,
+    );
+  } else {
+    sections.push(
+      "",
+      `You are ${persona.name} (${persona.role}). Address the comment above.`,
+    );
+  }
 
   return sections.join("\n");
 }

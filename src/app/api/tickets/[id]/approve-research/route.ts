@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { tickets, users } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { tickets, users, comments, personas } from "@/db/schema";
+import { eq, sql, and, isNull } from "drizzle-orm";
+import { logAuditEvent } from "@/db/queries";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -41,16 +42,71 @@ export async function POST(req: Request, context: RouteContext) {
     .set({
       researchApprovedAt: now,
       researchApprovedBy: user.id,
-      state: "build",
+      state: "plan",
     })
     .where(eq(tickets.id, ticketId))
     .run();
+
+  // Post system comment for the transition
+  db.insert(comments)
+    .values({
+      ticketId,
+      authorType: "system",
+      content: `Moved from **research** to **plan** — research approved`,
+    })
+    .run();
+  db.update(tickets)
+    .set({ commentCount: sql`COALESCE(${tickets.commentCount}, 0) + 1` })
+    .where(eq(tickets.id, ticketId))
+    .run();
+
+  // Auto-dispatch developer to start implementation planning
+  const origin = new URL(req.url).origin;
+  fetch(`${origin}/api/tickets/${ticketId}/dispatch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      commentContent: "Research has been approved. Create the implementation plan now.",
+      targetRole: "developer",
+    }),
+  }).catch(() => {});
+
+  // Auto-dispatch designer if the project has one — generate mockups in parallel with planning
+  if (ticket.projectId) {
+    const designer = db.select().from(personas)
+      .where(and(
+        eq(personas.projectId, ticket.projectId),
+        eq(personas.role, "designer"),
+        isNull(personas.deletedAt),
+      ))
+      .get();
+    if (designer) {
+      fetch(`${origin}/api/tickets/${ticketId}/dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          commentContent: "Research has been approved. Generate UI mockups for this ticket based on the description and research findings. Use nano-banana to create the images and attach them to the ticket.",
+          targetPersonaId: designer.id,
+        }),
+      }).catch(() => {});
+    }
+  }
+
+  logAuditEvent({
+    ticketId,
+    event: "research_approved",
+    actorType: "human",
+    actorId: user.id,
+    actorName: user.name,
+    detail: "Approved research document",
+    metadata: { newState: "plan" },
+  });
 
   return NextResponse.json({
     ok: true,
     approvedAt: now,
     approvedBy: user.id,
-    state: "build",
+    state: "plan",
   });
 }
 
@@ -65,6 +121,16 @@ export async function DELETE(req: Request, context: RouteContext) {
     })
     .where(eq(tickets.id, ticketId))
     .run();
+
+  const user = db.select().from(users).limit(1).get();
+  logAuditEvent({
+    ticketId,
+    event: "research_approval_revoked",
+    actorType: "human",
+    actorId: user?.id,
+    actorName: user?.name ?? "Unknown",
+    detail: "Revoked research approval",
+  });
 
   return NextResponse.json({ ok: true });
 }

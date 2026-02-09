@@ -82,7 +82,7 @@ export function AddProjectModal({ open, onClose }: AddProjectModalProps) {
     setSaving(true);
     setError("");
     try {
-      const res = await fetch("/api/onboard/project", {
+      const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

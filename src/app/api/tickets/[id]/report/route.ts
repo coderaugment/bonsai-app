@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { comments, tickets, personas } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { logAuditEvent } from "@/db/queries";
 
 // Called by agents mid-run to post progress updates to the ticket thread.
 // Lighter than agent-complete — just posts a comment, no document logic.
@@ -39,6 +40,19 @@ export async function POST(
     })
     .where(eq(tickets.id, ticketId))
     .run();
+
+  const persona = personaId
+    ? db.select().from(personas).where(eq(personas.id, personaId)).get()
+    : null;
+
+  logAuditEvent({
+    ticketId,
+    event: "agent_progress",
+    actorType: "agent",
+    actorId: personaId,
+    actorName: persona?.name ?? "Agent",
+    detail: content.trim().slice(0, 200),
+  });
 
   return NextResponse.json({ ok: true });
 }

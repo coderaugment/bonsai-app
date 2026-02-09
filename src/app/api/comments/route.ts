@@ -1,20 +1,28 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { comments, users, personas, tickets } from "@/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, and, isNull } from "drizzle-orm";
+import { logAuditEvent } from "@/db/queries";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const ticketId = searchParams.get("ticketId");
+  const documentIdParam = searchParams.get("documentId");
 
   if (!ticketId) {
     return NextResponse.json({ error: "ticketId required" }, { status: 400 });
   }
 
+  // If documentId provided, return only comments for that document.
+  // If absent, return only ticket-level comments (documentId IS NULL).
+  const whereClause = documentIdParam
+    ? and(eq(comments.ticketId, ticketId), eq(comments.documentId, Number(documentIdParam)))
+    : and(eq(comments.ticketId, ticketId), isNull(comments.documentId));
+
   const rows = db
     .select()
     .from(comments)
-    .where(eq(comments.ticketId, ticketId))
+    .where(whereClause)
     .orderBy(asc(comments.createdAt))
     .all();
 
@@ -49,6 +57,7 @@ export async function GET(req: Request) {
       author,
       content: row.content,
       attachments,
+      documentId: row.documentId ?? undefined,
       createdAt: row.createdAt,
     };
   });
@@ -57,7 +66,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const { ticketId, content, attachments } = await req.json();
+  const { ticketId, content, attachments, documentId } = await req.json();
 
   if (!ticketId || (!content?.trim() && (!attachments || attachments.length === 0))) {
     return NextResponse.json({ error: "ticketId and content or attachments required" }, { status: 400 });
@@ -74,6 +83,7 @@ export async function POST(req: Request) {
       authorId: user?.id ?? null,
       content: content?.trim() || "",
       attachments: attachments ? JSON.stringify(attachments) : null,
+      documentId: documentId || null,
     })
     .returning()
     .get();
@@ -90,6 +100,15 @@ export async function POST(req: Request) {
       .run();
   }
 
+  logAuditEvent({
+    ticketId,
+    event: "comment_added",
+    actorType: "human",
+    actorId: user?.id,
+    actorName: user?.name ?? "Unknown",
+    detail: `Added a comment`,
+  });
+
   return NextResponse.json({
     success: true,
     comment: {
@@ -99,6 +118,7 @@ export async function POST(req: Request) {
       author: user ? { name: user.name, avatarUrl: user.avatarUrl || undefined } : undefined,
       content: comment.content,
       attachments,
+      documentId: comment.documentId ?? undefined,
       createdAt: comment.createdAt,
     },
   });

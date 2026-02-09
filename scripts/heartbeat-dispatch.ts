@@ -112,6 +112,7 @@ interface ProjectRow {
   slug: string;
   github_owner: string | null;
   github_repo: string | null;
+  local_path: string | null;
 }
 
 interface DocRow {
@@ -128,7 +129,8 @@ const getActionableTicketsStmt = db.prepare(`
          t.last_human_comment_at, t.returned_from_verification
   FROM tickets t
   WHERE t.state != 'done'
-    AND t.state != 'verification'
+    AND t.state != 'test'
+    AND t.state != 'ship'
     AND t.project_id = ?
     AND (t.last_agent_activity IS NULL OR datetime(t.last_agent_activity) < datetime('now', '-30 minutes'))
   ORDER BY
@@ -194,7 +196,7 @@ const getRoleStmt = db.prepare(`
 `);
 
 const getProject = db.prepare(`
-  SELECT id, name, slug, github_owner, github_repo
+  SELECT id, name, slug, github_owner, github_repo, local_path
   FROM projects WHERE id = ?
 `);
 
@@ -260,7 +262,7 @@ function postAgentComment(ticketId: string, personaId: string, content: string) 
  * Extract a useful summary from agent output (markdown).
  * Looks for a Summary/Overview heading first, falls back to first paragraph.
  */
-function extractSummary(markdown: string, maxLen: number = 500): string {
+function extractSummary(markdown: string, maxLen: number = 2000): string {
   // Try to find an explicit summary section
   const summaryMatch = markdown.match(
     /^#{1,3}\s*(?:Summary|Overview|Key Findings|TL;?DR)[^\n]*\n+([\s\S]*?)(?=\n#{1,3}\s|\n---|\Z)/im
@@ -274,26 +276,19 @@ function extractSummary(markdown: string, maxLen: number = 500): string {
     let buf = "";
     for (const line of lines) {
       if (line.startsWith("#") || line.startsWith("---")) {
-        if (buf.trim().length > 40) paragraphs.push(buf.trim());
+        if (buf.trim()) paragraphs.push(buf.trim());
         buf = "";
         continue;
       }
-      buf += line + " ";
+      buf += line + "\n";
     }
-    if (buf.trim().length > 40) paragraphs.push(buf.trim());
+    if (buf.trim()) paragraphs.push(buf.trim());
     text = paragraphs[0] || markdown.slice(0, maxLen);
   }
 
-  // Strip markdown formatting for cleaner comment display
-  text = text
-    .replace(/\*\*([^*]+)\*\*/g, "$1")    // bold
-    .replace(/\*([^*]+)\*/g, "$1")          // italic
-    .replace(/`([^`]+)`/g, "$1")            // inline code
-    .replace(/^\s*[-*]\s+/gm, "• ")         // bullet lists
-    .replace(/\n+/g, " ")                   // collapse newlines
-    .trim();
+  text = text.trim();
 
-  // Truncate at sentence boundary
+  // Truncate at sentence boundary if needed
   if (text.length > maxLen) {
     const truncated = text.slice(0, maxLen);
     const lastSentence = truncated.lastIndexOf(". ");
@@ -310,7 +305,10 @@ function markTicketPickedUp(ticketId: string) {
 }
 
 // ── Workspace resolution ────────────────────────
+const PROJECTS_DIR = path.join(process.env.HOME || "~", "development", "bonsai", "projects");
+
 function resolveMainRepo(project: ProjectRow): string {
+  if (project.local_path) return project.local_path;
   const home = process.env.HOME || "~";
   if (project.github_repo === "bonsai-app") {
     return path.join(home, "development", "bonsai", "webapp");
@@ -318,7 +316,7 @@ function resolveMainRepo(project: ProjectRow): string {
   if (project.github_repo === "bonsai-agent") {
     return path.join(home, "development", "bonsai", "agent");
   }
-  return path.join(home, "development", project.github_repo || project.slug);
+  return path.join(PROJECTS_DIR, project.github_repo || project.slug);
 }
 
 const WORKTREES_DIR = path.join(process.env.HOME || "~", ".bonsai", "worktrees");
@@ -414,7 +412,7 @@ async function loadVaultEnv(): Promise<Record<string, string>> {
 
 // ── Claude CLI ──────────────────────────────────
 const CLAUDE_CLI = path.join(process.env.HOME || "", ".local", "bin", "claude");
-const MODEL = "sonnet";
+const MODEL = "opus";
 const API_BASE = "http://localhost:3000";
 
 const TOOLS_READONLY = ["Read", "Grep", "Glob", "Bash"];
@@ -628,7 +626,42 @@ async function runAgentPhase(
     `\`\`\``,
   ].join("\n");
 
-  const fullPrompt = systemPrompt + reportInstructions + nanoBananaInstructions + attachFileInstructions;
+  // Inject acceptance criteria check-off tool
+  const checkCriteriaScript = path.join(sessionDir, "check-criteria.sh");
+  fs.writeFileSync(checkCriteriaScript, [
+    `#!/usr/bin/env node`,
+    `const idx = parseInt(process.argv[2], 10);`,
+    `if (isNaN(idx)) { console.error("Usage: check-criteria.sh <index>"); process.exit(1); }`,
+    `fetch("${API_BASE}/api/tickets/${ticket.id}/check-criteria", {`,
+    `  method: "POST",`,
+    `  headers: { "Content-Type": "application/json" },`,
+    `  body: JSON.stringify({ index: idx }),`,
+    `}).then(r => r.json()).then(d => {`,
+    `  if (d.ok) console.log("Checked criterion " + idx);`,
+    `  else console.error("Failed:", d.error);`,
+    `}).catch(e => console.error(e));`,
+  ].join("\n"));
+  fs.chmodSync(checkCriteriaScript, 0o755);
+
+  const checkCriteriaInstructions = ticket.acceptance_criteria ? [
+    `\n## Acceptance Criteria Verification`,
+    `This ticket has acceptance criteria. After implementing, you MUST verify each criterion and check it off.`,
+    `Use the check-criteria tool to mark each criterion as done (0-indexed):`,
+    `\`\`\``,
+    `${checkCriteriaScript} 0   # checks off the first criterion`,
+    `${checkCriteriaScript} 1   # checks off the second criterion`,
+    `\`\`\``,
+    ``,
+    `The acceptance criteria are:`,
+    ticket.acceptance_criteria,
+    ``,
+    `For each criterion:`,
+    `1. Verify it is actually met (run tests, check files exist, etc.)`,
+    `2. Only check it off after confirming it passes`,
+    `3. If a criterion is NOT met, report what's missing via report.sh`,
+  ].join("\n") : "";
+
+  const fullPrompt = systemPrompt + reportInstructions + nanoBananaInstructions + attachFileInstructions + checkCriteriaInstructions;
 
   fs.writeFileSync(path.join(sessionDir, "system-prompt.txt"), fullPrompt);
   fs.writeFileSync(path.join(sessionDir, "task.md"), taskContent);
@@ -947,10 +980,10 @@ async function dispatchImplementation(maxTickets: number): Promise<DispatchResul
 
     const result = await runAgentPhase(ticket, persona, project, "implement", systemPrompt, task, TOOLS_FULL, DEVELOPER_MAX_DURATION_MS);
     if (result) {
-      markTicketState.run("verification", ticket.id);
+      markTicketState.run("test", ticket.id);
       const summary = extractSummary(result);
-      postAgentComment(ticket.id, persona.id, `**Implementation complete** — moved to verification\n\n${summary}`);
-      log(`  COMPLETE: ${ticket.id} — implementation done, moved to verification`);
+      postAgentComment(ticket.id, persona.id, `**Implementation complete** — moved to test\n\n${summary}`);
+      log(`  COMPLETE: ${ticket.id} — implementation done, moved to test`);
       return true;
     }
     return false;
@@ -1134,10 +1167,10 @@ async function dispatch(maxTickets: number) {
           postAgentComment(ticket.id, persona.id, `**Implementation plan complete**\n\n${summary}`);
           log(`  COMPLETE: ${ticket.id} — implementation plan stored (${result.length} chars)`);
         } else if (phase === "implement") {
-          markTicketState.run("verification", ticket.id);
+          markTicketState.run("test", ticket.id);
           const summary = extractSummary(result);
-          postAgentComment(ticket.id, persona.id, `**Implementation complete** — moved to verification\n\n${summary}`);
-          log(`  COMPLETE: ${ticket.id} — implementation done, moved to verification`);
+          postAgentComment(ticket.id, persona.id, `**Implementation complete** — moved to test\n\n${summary}`);
+          log(`  COMPLETE: ${ticket.id} — implementation done, moved to test`);
         }
         completed++;
       } else {

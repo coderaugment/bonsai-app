@@ -67,7 +67,10 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
   const [type, setType] = useState<TicketType>("feature");
   const [acceptanceCriteria, setAcceptanceCriteria] = useState("");
   const [saving, setSaving] = useState(false);
+  const [generatingTitle, setGeneratingTitle] = useState(false);
+  const [generatingCriteria, setGeneratingCriteria] = useState(false);
   const descRef = useRef<HTMLTextAreaElement>(null);
+  const pendingVoiceBlurRef = useRef(false);
 
   // Speech-to-text state
   const [isRecording, setIsRecording] = useState(false);
@@ -108,6 +111,15 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
       }
     };
   }, []);
+
+  // Trigger title/criteria generation after voice transcript sets description
+  useEffect(() => {
+    if (pendingVoiceBlurRef.current && description.trim()) {
+      pendingVoiceBlurRef.current = false;
+      generateFromDescription({ skipEnhance: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [description]);
 
   if (!open) return null;
 
@@ -219,15 +231,64 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
         // AI failed - fallback to raw transcript
         setDescription(transcript);
       }
+      pendingVoiceBlurRef.current = true;
     } catch (error) {
       console.error('Failed to process transcript:', error);
       // Fallback: use raw transcript even if AI fails
       setDescription(transcript);
+      pendingVoiceBlurRef.current = true;
     } finally {
       setIsProcessingAI(false);
       setInterimTranscript('');
     }
   };
+
+  async function generateFromDescription(opts?: { skipEnhance?: boolean }) {
+    if (!description.trim()) return;
+    const jobs: Promise<void>[] = [];
+    if (!opts?.skipEnhance) {
+      jobs.push((async () => {
+        try {
+          const res = await fetch("/api/generate-title", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ description: description.trim(), field: "enhance" }),
+          });
+          const data = await res.json();
+          if (data.enhance) setDescription(data.enhance);
+        } catch {}
+      })());
+    }
+    if (!title.trim()) {
+      jobs.push((async () => {
+        setGeneratingTitle(true);
+        try {
+          const res = await fetch("/api/generate-title", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ description: description.trim(), field: "title" }),
+          });
+          const data = await res.json();
+          if (data.title) setTitle(data.title);
+        } catch {} finally { setGeneratingTitle(false); }
+      })());
+    }
+    if (!acceptanceCriteria.trim()) {
+      jobs.push((async () => {
+        setGeneratingCriteria(true);
+        try {
+          const res = await fetch("/api/generate-title", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ description: description.trim(), field: "criteria" }),
+          });
+          const data = await res.json();
+          if (data.criteria) setAcceptanceCriteria(data.criteria);
+        } catch {} finally { setGeneratingCriteria(false); }
+      })());
+    }
+    await Promise.all(jobs);
+  }
 
   async function handleCreate() {
     if (!title.trim()) return;
@@ -284,9 +345,20 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
           <div className="flex-1 flex flex-col px-8 py-6 gap-5 overflow-y-auto">
             {/* Title */}
             <div>
-              <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">
-                Title
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-[var(--text-secondary)]">
+                  Title
+                </label>
+                {generatingTitle && (
+                  <span className="text-xs flex items-center gap-1.5" style={{ color: "var(--text-muted)" }}>
+                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    generating...
+                  </span>
+                )}
+              </div>
               <input
                 type="text"
                 value={title}
@@ -355,6 +427,7 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
                   ref={descRef}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
+                  onBlur={() => generateFromDescription()}
                   placeholder={isRecording ? interimTranscript || "Listening..." : ticketTypes[type].placeholder}
                   className="flex-1 w-full h-full px-4 py-3 rounded-lg text-sm outline-none transition-all resize-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
                   style={{ "--accent": accent } as React.CSSProperties}
@@ -376,9 +449,20 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
 
             {/* Acceptance Criteria */}
             <div className="flex-1 flex flex-col min-h-0">
-              <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">
-                Acceptance criteria
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-[var(--text-secondary)]">
+                  Acceptance criteria
+                </label>
+                {generatingCriteria && (
+                  <span className="text-xs flex items-center gap-1.5" style={{ color: "var(--text-muted)" }}>
+                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    generating...
+                  </span>
+                )}
+              </div>
               <textarea
                 value={acceptanceCriteria}
                 onChange={(e) => setAcceptanceCriteria(e.target.value)}

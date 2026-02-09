@@ -23,7 +23,7 @@ export function BoardHeader({ project, allProjects }: BoardHeaderProps) {
 
       <div className="flex items-center gap-3">
         <button
-          onClick={() => router.push("/new-ticket")}
+          onClick={() => router.push(`/p/${project.slug}/new-ticket`)}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
           style={{ backgroundColor: "var(--accent-blue)" }}
         >

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { tickets, comments } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { logAuditEvent } from "@/db/queries";
 
 export async function POST(
   request: NextRequest,
@@ -62,6 +63,15 @@ export async function POST(
         .run();
     }
   }
+
+  logAuditEvent({
+    ticketId,
+    event: "returned_from_verification",
+    actorType: authorType === "agent" ? "agent" : "human",
+    actorName: authorType === "agent" ? "Agent" : "Human",
+    detail: reason ? `Returned from verification: ${reason.slice(0, 200)}` : "Returned from verification",
+    metadata: { from: "test", to: "build" },
+  });
 
   return NextResponse.json({ success: true });
 }

@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { ticketDocuments, tickets, personas } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { sql } from "drizzle-orm";
+import { logAuditEvent } from "@/db/queries";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -22,7 +23,7 @@ export async function GET(req: Request, context: RouteContext) {
   return NextResponse.json({ documents: docs });
 }
 
-// POST /api/tickets/[id]/documents - Create or update a document
+// POST /api/tickets/[id]/documents - Insert a new version of a document
 export async function POST(req: Request, context: RouteContext) {
   const { id: ticketId } = await context.params;
   const { type: typeParam, content, personaId } = await req.json();
@@ -43,9 +44,11 @@ export async function POST(req: Request, context: RouteContext) {
     );
   }
 
-  // Check if document of this type already exists
-  const existing = db
-    .select()
+  const now = new Date().toISOString();
+
+  // Get current max version for this (ticketId, type) pair
+  const maxRow = db
+    .select({ maxVersion: sql<number>`COALESCE(MAX(${ticketDocuments.version}), 0)` })
     .from(ticketDocuments)
     .where(
       and(
@@ -55,76 +58,36 @@ export async function POST(req: Request, context: RouteContext) {
     )
     .get();
 
-  const now = new Date().toISOString();
+  const nextVersion = (maxRow?.maxVersion ?? 0) + 1;
 
-  if (existing) {
-    // Update existing document, increment version
-    db.update(ticketDocuments)
-      .set({
-        content: content.trim(),
-        version: existing.version! + 1,
-        updatedAt: now,
-      })
-      .where(eq(ticketDocuments.id, existing.id))
-      .run();
-
-    const updated = db
-      .select()
-      .from(ticketDocuments)
-      .where(eq(ticketDocuments.id, existing.id))
-      .get();
-
-    // Update ticket tracking columns
-    if (type === "research" && personaId) {
-      db.update(tickets)
-        .set({
-          researchCompletedAt: now,
-          researchCompletedBy: personaId,
-          // Clear approval since content changed
-          researchApprovedAt: null,
-          researchApprovedBy: null,
-        })
-        .where(eq(tickets.id, ticketId))
-        .run();
-    } else if (type === "implementation_plan" && personaId) {
-      db.update(tickets)
-        .set({
-          planCompletedAt: now,
-          planCompletedBy: personaId,
-          // Clear approval since content changed
-          planApprovedAt: null,
-          planApprovedBy: null,
-        })
-        .where(eq(tickets.id, ticketId))
-        .run();
-    }
-
-    return NextResponse.json({ document: updated, updated: true });
-  }
-
-  // Create new document
+  // Always INSERT a new version row (append-only)
   const doc = db
     .insert(ticketDocuments)
     .values({
       ticketId,
       type,
       content: content.trim(),
-      version: 1,
+      version: nextVersion,
+      authorPersonaId: personaId || null,
       createdAt: now,
       updatedAt: now,
     })
     .returning()
     .get();
 
-  // Update ticket tracking columns
+  // Update ticket tracking columns based on version
   if (type === "research" && personaId) {
-    db.update(tickets)
-      .set({
-        researchCompletedAt: now,
-        researchCompletedBy: personaId,
-      })
-      .where(eq(tickets.id, ticketId))
-      .run();
+    if (nextVersion >= 3) {
+      // v3 = final revision, mark research as completed
+      db.update(tickets)
+        .set({
+          researchCompletedAt: now,
+          researchCompletedBy: personaId,
+        })
+        .where(eq(tickets.id, ticketId))
+        .run();
+    }
+    // v1 and v2: do NOT set researchCompletedAt — workflow still in progress
   } else if (type === "implementation_plan" && personaId) {
     db.update(tickets)
       .set({
@@ -135,7 +98,20 @@ export async function POST(req: Request, context: RouteContext) {
       .run();
   }
 
-  return NextResponse.json({ document: doc, created: true });
+  const authorPersona = personaId
+    ? db.select().from(personas).where(eq(personas.id, personaId)).get()
+    : null;
+  logAuditEvent({
+    ticketId,
+    event: "document_created",
+    actorType: personaId ? "agent" : "human",
+    actorId: personaId,
+    actorName: authorPersona?.name ?? "Unknown",
+    detail: `Created ${type === "research" ? "research document" : "implementation plan"} v${nextVersion}`,
+    metadata: { docType: type, version: nextVersion },
+  });
+
+  return NextResponse.json({ document: doc, created: true, version: nextVersion });
 }
 
 // DELETE /api/tickets/[id]/documents?type=research - Delete a document
@@ -162,7 +138,16 @@ export async function DELETE(req: Request, context: RouteContext) {
     )
     .run();
 
-  // Clear tracking columns
+  logAuditEvent({
+    ticketId,
+    event: "document_deleted",
+    actorType: "human",
+    actorName: "System",
+    detail: `Deleted ${type === "research" ? "research document" : "implementation plan"}`,
+    metadata: { docType: type },
+  });
+
+  // Clear tracking columns + agent activity guard so heartbeat re-dispatches immediately
   if (type === "research") {
     db.update(tickets)
       .set({
@@ -170,6 +155,8 @@ export async function DELETE(req: Request, context: RouteContext) {
         researchCompletedBy: null,
         researchApprovedAt: null,
         researchApprovedBy: null,
+        lastAgentActivity: null,
+        assigneeId: null,
       })
       .where(eq(tickets.id, ticketId))
       .run();
@@ -180,6 +167,8 @@ export async function DELETE(req: Request, context: RouteContext) {
         planCompletedBy: null,
         planApprovedAt: null,
         planApprovedBy: null,
+        lastAgentActivity: null,
+        assigneeId: null,
       })
       .where(eq(tickets.id, ticketId))
       .run();

@@ -138,7 +138,7 @@ export function ProjectInfoPanel({ project, personas, ticketStats }: ProjectInfo
           <div className="flex items-center gap-3 ml-auto flex-shrink-0">
             <div className="flex items-center gap-2 text-[10px]" style={{ color: "var(--text-muted)" }}>
               <span>{total} tickets</span>
-              <span>{ticketStats.done} done</span>
+              <span>{ticketStats.ship} done</span>
             </div>
             <div className="flex -space-x-1.5">
               {personas.slice(0, 5).map((p) => (

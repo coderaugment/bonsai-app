@@ -4,8 +4,10 @@ import { personas, roles } from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { createPersona, getPersonas } from "@/db/queries";
 
-export async function GET() {
-  const all = getPersonas();
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const projectId = searchParams.get("projectId");
+  const all = getPersonas(projectId ? Number(projectId) : undefined);
   return NextResponse.json(all);
 }
 

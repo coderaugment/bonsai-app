@@ -14,7 +14,7 @@ export default function BoardPage() {
     redirect("/onboard/github");
   }
 
-  if (!isTeamComplete()) {
+  if (!isTeamComplete(Number(project.id))) {
     redirect("/onboard/team");
   }
 

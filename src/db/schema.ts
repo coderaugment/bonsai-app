@@ -76,6 +76,7 @@ export const projects = sqliteTable("projects", {
   techStack: text("tech_stack"),
   githubOwner: text("github_owner"),
   githubRepo: text("github_repo"),
+  localPath: text("local_path"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   deletedAt: text("deleted_at"),
 });
@@ -136,25 +137,29 @@ export const tickets = sqliteTable("tickets", {
   // Merge tracking
   mergedAt: text("merged_at"),
   mergeCommit: text("merge_commit"),
+  // Soft delete
+  deletedAt: text("deleted_at"),
 });
 
 export const comments = sqliteTable("comments", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ticketId: text("ticket_id").notNull().references(() => tickets.id),
-  authorType: text("author_type", { enum: ["human", "agent"] }).notNull(),
+  authorType: text("author_type", { enum: ["human", "agent", "system"] }).notNull(),
   authorId: integer("author_id"), // user id if human
   personaId: text("persona_id").references(() => personas.id), // persona id if agent
   content: text("content").notNull(),
   attachments: text("attachments"), // JSON array of {name, type, data} objects
+  documentId: integer("document_id").references(() => ticketDocuments.id),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const ticketDocuments = sqliteTable("ticket_documents", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ticketId: text("ticket_id").notNull().references(() => tickets.id),
-  type: text("type", { enum: ["research", "implementation_plan"] }).notNull(),
+  type: text("type", { enum: ["research", "implementation_plan", "research_critique", "plan_critique", "design"] }).notNull(),
   content: text("content").notNull(),
   version: integer("version").default(1),
+  authorPersonaId: text("author_persona_id").references(() => personas.id),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
@@ -201,6 +206,23 @@ export const extractedItems = sqliteTable("extracted_items", {
     .default("pending"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
+
+// ============================================================================
+// TICKET AUDIT LOG - Immutable timeline of ticket events
+// ============================================================================
+export const ticketAuditLog = sqliteTable("ticket_audit_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  ticketId: text("ticket_id").notNull(), // No FK — audit survives ticket deletion
+  event: text("event").notNull(), // e.g. "ticket_created", "state_changed", "comment_added"
+  actorType: text("actor_type", { enum: ["human", "agent", "system"] }).notNull(),
+  actorId: text("actor_id"), // user.id or persona.id
+  actorName: text("actor_name").notNull(),
+  detail: text("detail").notNull(), // human-readable summary
+  metadata: text("metadata"), // JSON blob for event-specific data
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type TicketAuditLogRow = typeof ticketAuditLog.$inferSelect;
 
 // ── Type exports for prompt builder ──────────────
 

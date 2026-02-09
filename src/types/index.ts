@@ -44,7 +44,7 @@ export interface Ticket {
   participants?: Persona[];
 }
 
-export type TicketDocumentType = "research" | "implementation_plan";
+export type TicketDocumentType = "research" | "implementation_plan" | "research_critique" | "plan_critique";
 
 export interface TicketDocument {
   id: number;
@@ -52,6 +52,7 @@ export interface TicketDocument {
   type: TicketDocumentType;
   content: string;
   version: number;
+  authorPersonaId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -136,6 +137,7 @@ export interface Project {
   ticketCount: number;
   githubOwner?: string;
   githubRepo?: string;
+  localPath?: string;
 }
 
 export interface CommentAttachment {
@@ -158,7 +160,7 @@ export interface TicketAttachment {
 export interface Comment {
   id: number;
   ticketId: string;
-  authorType: "human" | "agent";
+  authorType: "human" | "agent" | "system";
   author?: {
     name: string;
     avatarUrl?: string;
@@ -167,6 +169,7 @@ export interface Comment {
   };
   content: string;
   attachments?: CommentAttachment[];
+  documentId?: number;
   createdAt: string;
 }
 

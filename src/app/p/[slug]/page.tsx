@@ -1,10 +1,17 @@
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { BoardHeader } from "@/components/board/board-header";
 import { BoardView } from "@/components/board/board-view";
 import { ProjectInfoPanel } from "@/components/board/project-info-panel";
-import { getProjectBySlug, getProjects, getTickets, getPersonas, getUser, setSetting, isTeamComplete, hasTickets } from "@/db/queries";
+import { getProjectBySlug, getProjects, getTickets, getPersonas, getUser, setSetting, isTeamComplete } from "@/db/queries";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const project = getProjectBySlug(slug);
+  return { title: project ? `Bonsai — ${project.name}` : "Bonsai" };
+}
 
 export default async function ProjectBoardPage({
   params,
@@ -23,19 +30,20 @@ export default async function ProjectBoardPage({
     redirect("/board");
   }
 
-  if (!isTeamComplete()) {
+  // Remember this as the active project BEFORE redirect guards,
+  // so any downstream redirect (e.g. /new-ticket) knows which project is active
+  setSetting("active_project_id", project.id);
+
+  if (!isTeamComplete(Number(project.id))) {
     redirect("/onboard/team");
   }
 
-  if (!hasTickets()) {
-    redirect("/onboard/ticket");
+  const tickets = getTickets(Number(project.id));
+  if (tickets.length === 0) {
+    redirect(`/p/${slug}/new-ticket`);
   }
 
-  // Remember this as the active project for /board redirect
-  setSetting("active_project_id", project.id);
-
   const allProjects = getProjects();
-  const tickets = getTickets(Number(project.id));
   const personas = getPersonas(Number(project.id));
 
   const ticketStats = {

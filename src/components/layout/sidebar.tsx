@@ -7,11 +7,15 @@ import { SettingsPanel } from "./settings-panel";
 import { ProjectsPanel } from "./projects-panel";
 import { CompanyModal } from "../board/company-modal";
 
-const navItems = [
-  { icon: "ideas", label: "Ideas", href: "/ideas", matchPaths: ["/ideas"] },
-  { icon: "board", label: "Project kanban board", href: "/board", matchPaths: ["/board", "/p/"] },
-  { icon: "workers", label: "Workers", href: "/workers", matchPaths: ["/workers"] },
-];
+function getNavItems(projectSlug?: string) {
+  const boardHref = projectSlug ? `/p/${projectSlug}` : "/board";
+  const workersHref = projectSlug ? `/p/${projectSlug}/workers` : "/workers";
+  return [
+    { icon: "ideas", label: "Ideas", href: "/ideas", matchPaths: ["/ideas"] },
+    { icon: "board", label: "Project kanban board", href: boardHref, matchPaths: ["/board", "/p/"], excludePaths: ["/workers"] },
+    { icon: "workers", label: "Workers", href: workersHref, matchPaths: ["/workers"] },
+  ];
+}
 
 function NavIcon({ icon, active }: { icon: string; active?: boolean }) {
   const base = active
@@ -71,8 +75,9 @@ export function Sidebar({ userName }: { userName?: string }) {
   const [companyPersonas, setCompanyPersonas] = useState<import("@/types").Persona[]>([]);
   const [clientName, setClientName] = useState(userName ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [activeProjectSlug, setActiveProjectSlug] = useState<string | undefined>(undefined);
 
-  // Fetch fresh user data client-side
+  // Fetch fresh user data + active project slug client-side
   useEffect(() => {
     fetch("/api/onboard/user")
       .then((r) => r.json())
@@ -81,20 +86,25 @@ export function Sidebar({ userName }: { userName?: string }) {
         if (data.user?.avatarUrl) setAvatarUrl(data.user.avatarUrl);
       })
       .catch(() => {});
+    fetch("/api/settings/project")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.slug) setActiveProjectSlug(data.slug);
+      })
+      .catch(() => {});
   }, []);
 
   const displayName = clientName || userName || "User";
 
   async function openCompany() {
     try {
-      const [projRes, personasRes] = await Promise.all([
-        fetch("/api/projects"),
-        fetch("/api/personas"),
-      ]);
-      const projects = await projRes.json();
-      const personas = await personasRes.json();
-      const activeProject = Array.isArray(projects) && projects.length > 0 ? projects[0] : null;
+      const projRes = await fetch("/api/settings/project");
+      const activeProject = await projRes.json();
       setCompanyProjectSlug(activeProject?.slug || "");
+      const pid = activeProject?.id;
+      const personasUrl = pid ? `/api/personas?projectId=${pid}` : "/api/personas";
+      const personasRes = await fetch(personasUrl);
+      const personas = await personasRes.json();
       setCompanyPersonas(Array.isArray(personas) ? personas : []);
     } catch {}
     setShowCompany(true);
@@ -123,8 +133,10 @@ export function Sidebar({ userName }: { userName?: string }) {
         </div>
 
         {/* Nav items */}
-        {navItems.map((item) => {
-          const isActive = item.matchPaths.some((p) => pathname.startsWith(p));
+        {getNavItems(activeProjectSlug).map((item) => {
+          const matchesPath = item.matchPaths.some((p) => pathname.startsWith(p) || pathname.includes(p));
+          const excluded = item.excludePaths?.some((p) => pathname.includes(p));
+          const isActive = matchesPath && !excluded;
           return (
             <button
               key={item.icon}

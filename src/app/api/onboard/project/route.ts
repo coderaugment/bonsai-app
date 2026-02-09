@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createProject } from "@/db/queries";
 import { getGithubToken } from "@/lib/vault";
+import path from "node:path";
+
+const HOME = process.env.HOME || "~";
+const PROJECTS_DIR = path.join(HOME, "development", "bonsai", "projects");
 
 async function githubFetch(path: string, token: string, options?: RequestInit) {
   return fetch(`https://api.github.com${path}`, {
@@ -75,6 +79,7 @@ export async function POST(req: Request) {
   }
 
   // 4. Save project locally (upserts on slug conflict)
+  const localPath = path.join(PROJECTS_DIR, repoName);
   const project = createProject({
     name: name.trim(),
     slug: repoName,
@@ -82,6 +87,7 @@ export async function POST(req: Request) {
     description: description?.trim() || undefined,
     githubOwner: owner,
     githubRepo: repoName,
+    localPath,
   });
 
   return NextResponse.json({ success: true, project });

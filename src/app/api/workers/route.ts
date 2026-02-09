@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { personas, tickets, comments, ticketDocuments } from "@/db/schema";
-import { eq, desc, inArray, or, isNull } from "drizzle-orm";
+import { eq, desc, inArray, or, isNull, and } from "drizzle-orm";
 
-// Returns all personas with activity data for the workers view.
-export async function GET() {
-  const allPersonas = db.select().from(personas).where(isNull(personas.deletedAt)).all();
+// Returns personas with activity data for the workers view, scoped by project.
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const projectId = searchParams.get("projectId");
+
+  const allPersonas = projectId
+    ? db.select().from(personas).where(
+        and(eq(personas.projectId, Number(projectId)), isNull(personas.deletedAt))
+      ).all()
+    : db.select().from(personas).where(isNull(personas.deletedAt)).all();
   const personaMap = new Map(allPersonas.map((p) => [p.id, p]));
   const now = new Date();
   const thirtyMinAgo = new Date(now.getTime() - 30 * 60 * 1000).toISOString();

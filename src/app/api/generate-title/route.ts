@@ -24,7 +24,27 @@ export async function POST(req: Request) {
       text: `Generate acceptance criteria for this task as a markdown checklist. Each item should be a concrete, testable condition. Use "- [ ]" format. Return 3-6 items, ONLY the checklist, no other text.\n\nDescription:\n${description.trim()}`,
     },
     enhance: {
-      text: `Fix typos and grammar in this task description. Do NOT change the length, add markdown, add headers, add bullet points, add quotes around it, or rewrite it. Keep the exact same words and structure — only fix obvious errors. If it's already fine, return it unchanged. Return ONLY the raw text with no wrapping quotes.\n\nText:\n${description.trim()}`,
+      text: `You are a copy editor for kanban tickets. Reorganize and clean up the messy text below into a well-structured ticket description.
+
+What to fix:
+- Turn bare word lists into inline comma-separated mentions within sentences
+- Turn sentence fragments into complete sentences
+- Group related ideas into short paragraphs
+- Fix typos, spelling, grammar
+- Strip filler words ("so basically", "like", "I think", "right")
+
+What to keep:
+- ALL details, requirements, and specifics — never drop information
+- The author's casual/developer voice — don't make it sound corporate
+- No "please", "utilize", "including but not limited to", or other formal padding
+- Plain text only, no markdown, no headers, no bullet points, no quotes
+
+The goal is: messy notes in, organized readable ticket out. Same info, same voice, better structure.
+
+Return ONLY the cleaned text, nothing else.
+
+Raw input:
+${description.trim()}`,
     },
     massage: {
       text: `Fix any typos, spelling errors, grammar issues, and bad formatting in this text. Keep the meaning, tone, and length exactly the same — only correct obvious mistakes. If the text is already clean, return it unchanged. Return ONLY the corrected text, nothing else.\n\nText:\n${description.trim()}`,
@@ -38,6 +58,8 @@ export async function POST(req: Request) {
   if (!config) {
     return NextResponse.json({ error: "invalid field" }, { status: 400 });
   }
+
+  console.log(`[generate-title] field=${field}, description length=${description.trim().length}`);
 
   try {
     const res = await fetch(`${ENDPOINT}?key=${GEMINI_API_KEY}`, {
@@ -59,6 +81,7 @@ export async function POST(req: Request) {
     if ((field === "enhance" || field === "massage") && text.startsWith('"') && text.endsWith('"')) {
       text = text.slice(1, -1);
     }
+    console.log(`[generate-title] field=${field}, result length=${text.length}, result=${text.slice(0, 100)}`);
     return NextResponse.json({ [field || "title"]: text });
   } catch {
     return NextResponse.json({ error: "Generation failed" }, { status: 500 });

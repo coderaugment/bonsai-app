@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Ticket, TicketState } from "@/types";
 import { TicketCard } from "./ticket-card";
 
+
 const columnConfig: Record<
   TicketState,
   { label: string; color: string }
@@ -18,26 +19,29 @@ const columnConfig: Record<
 interface ColumnProps {
   state: TicketState;
   tickets: Ticket[];
-  defaultCollapsed?: boolean;
+  collapsed: boolean;
+  onToggleCollapse: (collapsed: boolean) => void;
   draggingId: string | null;
   onDragStart: (ticketId: string) => void;
   onDragEnd: () => void;
   onDrop: (targetState: TicketState) => void;
   onEdit?: (ticket: Ticket) => void;
+  onViewDocument?: (ticket: Ticket, docType: "research" | "implementation_plan") => void;
 }
 
 export function Column({
   state,
   tickets,
-  defaultCollapsed = false,
+  collapsed,
+  onToggleCollapse,
   draggingId,
   onDragStart,
   onDragEnd,
   onDrop,
   onEdit,
+  onViewDocument,
 }: ColumnProps) {
   const config = columnConfig[state];
-  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const [dragOver, setDragOver] = useState(false);
 
   const isDragging = draggingId !== null;
@@ -46,7 +50,7 @@ export function Column({
   if (collapsed) {
     return (
       <button
-        onClick={() => setCollapsed(false)}
+        onClick={() => onToggleCollapse(false)}
         className="flex flex-col items-center gap-3 py-3 px-2 rounded-xl flex-shrink-0 cursor-pointer transition-colors hover:bg-white/5 h-fit"
         style={{ border: "1px solid var(--border-subtle)" }}
       >
@@ -113,7 +117,7 @@ export function Column({
 
         {/* Collapse button */}
         <button
-          onClick={() => setCollapsed(true)}
+          onClick={() => onToggleCollapse(true)}
           className="ml-auto w-6 h-6 rounded flex items-center justify-center transition-colors hover:bg-white/10"
           style={{ color: "var(--text-muted)" }}
           title="Collapse column"
@@ -133,6 +137,7 @@ export function Column({
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
             onEdit={onEdit}
+            onViewDocument={onViewDocument}
           />
         ))}
 

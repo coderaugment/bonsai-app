@@ -1,6 +1,6 @@
 import { db } from ".";
 import { eq, or, sql, desc, and, isNull, lt, asc } from "drizzle-orm";
-import { projects, personas, tickets, settings, users, comments, ticketDocuments, roles } from "./schema";
+import { projects, personas, tickets, settings, users, comments, ticketDocuments, roles, ticketAuditLog } from "./schema";
 import type { Ticket, Persona, Project, WorkerRole } from "@/types";
 import { workerRoles } from "@/lib/worker-types";
 
@@ -31,6 +31,7 @@ function projectFromRow(row: typeof projects.$inferSelect): Project {
     ticketCount: count,
     githubOwner: row.githubOwner ?? undefined,
     githubRepo: row.githubRepo ?? undefined,
+    localPath: row.localPath ?? undefined,
   };
 }
 
@@ -60,13 +61,12 @@ export function getProjects(): Project[] {
 }
 
 export function getPersonas(projectId?: number): Persona[] {
-  // Personas are company-wide (projectId = NULL) — always include them.
-  // If a projectId is given, also include any project-specific personas.
+  // Personas are project-scoped. If a projectId is given, only return that project's personas.
   // Always exclude soft-deleted personas.
   const rows = projectId
     ? db.select().from(personas).where(
         and(
-          or(eq(personas.projectId, projectId), isNull(personas.projectId)),
+          eq(personas.projectId, projectId),
           isNull(personas.deletedAt)
         )
       ).all()
@@ -94,8 +94,8 @@ export function getPersonas(projectId?: number): Persona[] {
 
 export function getTickets(projectId?: number): Ticket[] {
   const rows = projectId
-    ? db.select().from(tickets).where(eq(tickets.projectId, projectId)).all()
-    : db.select().from(tickets).all();
+    ? db.select().from(tickets).where(and(eq(tickets.projectId, projectId), isNull(tickets.deletedAt))).all()
+    : db.select().from(tickets).where(isNull(tickets.deletedAt)).all();
 
   const personaMap = new Map(
     getPersonas(projectId).map((p) => [p.id, p])
@@ -179,6 +179,7 @@ export function createProject(data: {
   description?: string;
   githubOwner?: string;
   githubRepo?: string;
+  localPath?: string;
 }) {
   return db
     .insert(projects)
@@ -191,6 +192,7 @@ export function createProject(data: {
         description: data.description,
         githubOwner: data.githubOwner,
         githubRepo: data.githubRepo,
+        localPath: data.localPath,
       },
     })
     .returning()
@@ -254,7 +256,7 @@ export function getCommentsByTicket(ticketId: string, limit: number = 10) {
   return db
     .select()
     .from(comments)
-    .where(eq(comments.ticketId, ticketId))
+    .where(and(eq(comments.ticketId, ticketId), isNull(comments.documentId)))
     .orderBy(desc(comments.createdAt))
     .limit(limit)
     .all();
@@ -377,15 +379,18 @@ export function getNextTicket(personaId?: string): typeof tickets.$inferSelect |
   return backlog || null;
 }
 
-export function isTeamComplete(): boolean {
+export function isTeamComplete(projectId?: number): boolean {
   const allRoles = db.select({ id: roles.id }).from(roles).all();
   if (allRoles.length === 0) return false;
+  const personaQuery = projectId
+    ? db.select({ roleId: personas.roleId }).from(personas)
+        .where(and(eq(personas.projectId, projectId), isNull(personas.deletedAt)))
+        .all()
+    : db.select({ roleId: personas.roleId }).from(personas)
+        .where(isNull(personas.deletedAt))
+        .all();
   const filledRoleIds = new Set(
-    db.select({ roleId: personas.roleId }).from(personas)
-      .where(isNull(personas.deletedAt))
-      .all()
-      .map((r) => r.roleId)
-      .filter(Boolean)
+    personaQuery.map((r) => r.roleId).filter(Boolean)
   );
   return allRoles.every((r) => filledRoleIds.has(r.id));
 }
@@ -393,4 +398,37 @@ export function isTeamComplete(): boolean {
 export function hasTickets(): boolean {
   const row = db.select({ count: sql<number>`count(*)` }).from(tickets).get();
   return (row?.count ?? 0) > 0;
+}
+
+// ── Audit Log ──────────────────────────────
+
+export function logAuditEvent(params: {
+  ticketId: string;
+  event: string;
+  actorType: "human" | "agent" | "system";
+  actorId?: string | number | null;
+  actorName: string;
+  detail: string;
+  metadata?: Record<string, unknown>;
+}) {
+  db.insert(ticketAuditLog)
+    .values({
+      ticketId: params.ticketId,
+      event: params.event,
+      actorType: params.actorType,
+      actorId: params.actorId != null ? String(params.actorId) : null,
+      actorName: params.actorName,
+      detail: params.detail,
+      metadata: params.metadata ? JSON.stringify(params.metadata) : null,
+    })
+    .run();
+}
+
+export function getAuditLog(ticketId: string) {
+  return db
+    .select()
+    .from(ticketAuditLog)
+    .where(eq(ticketAuditLog.ticketId, ticketId))
+    .orderBy(asc(ticketAuditLog.createdAt))
+    .all();
 }
