@@ -57,7 +57,16 @@ export default async function ProjectBoardPage({
   return (
     <div className="flex flex-col h-full">
       <BoardHeader project={project} allProjects={allProjects} />
-      <ProjectInfoPanel project={project} personas={personas} ticketStats={ticketStats} />
+      <ProjectInfoPanel
+        project={project}
+        personas={personas}
+        ticketStats={ticketStats}
+        awakePersonaIds={new Set(
+          tickets
+            .filter((t) => t.assignee && t.lastAgentActivity && (Date.now() - new Date(t.lastAgentActivity).getTime()) < 30 * 60 * 1000)
+            .map((t) => t.assignee!.id)
+        )}
+      />
       <BoardView tickets={tickets} projectId={project.id} />
     </div>
   );

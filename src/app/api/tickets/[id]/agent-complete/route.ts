@@ -22,6 +22,12 @@ export async function POST(
     return NextResponse.json({ error: "ticket not found" }, { status: 404 });
   }
 
+  // If this agent is not the current assignee, only allow conversational replies (not doc saves)
+  const isCurrentAssignee = !ticket.assigneeId || ticket.assigneeId === personaId;
+  if (!isCurrentAssignee && !conversational) {
+    console.log(`[agent-complete] Agent ${personaId} was replaced by ${ticket.assigneeId} — treating as conversational`);
+  }
+
   const trimmed = content.trim();
   const now = new Date().toISOString();
 
@@ -35,8 +41,9 @@ export async function POST(
 
   // ── Research phase: versioned workflow (v1→v2→v3) ──────
   // Skip document saving for conversational replies (e.g. document comment responses)
+  // Skip document saving if agent was replaced by another agent
   // Cap at 3 versions — anything beyond v3 is treated as a chat comment
-  const researchMaxRow = !conversational && !ticket.researchApprovedAt ? db
+  const researchMaxRow = !conversational && isCurrentAssignee && !ticket.researchApprovedAt ? db
     .select({ maxVersion: sql<number>`COALESCE(MAX(${ticketDocuments.version}), 0)` })
     .from(ticketDocuments)
     .where(
@@ -49,7 +56,7 @@ export async function POST(
   const currentResearchMax = researchMaxRow?.maxVersion ?? 0;
 
   const isResearchRole = completingRole === "researcher" || completingRole === "critic";
-  if (!conversational && isResearchRole && !ticket.researchApprovedAt && trimmed.length > 200 && currentResearchMax < 3) {
+  if (!conversational && isCurrentAssignee && isResearchRole && !ticket.researchApprovedAt && currentResearchMax < 3) {
     const nextVersion = currentResearchMax + 1;
 
     // Insert new version row
@@ -75,7 +82,7 @@ export async function POST(
         .where(eq(tickets.id, ticketId))
         .run();
     }
-  } else if (!conversational && completingRole === "designer" && trimmed.length > 200) {
+  } else if (!conversational && isCurrentAssignee && completingRole === "designer") {
     // Designer output → save as design doc (separate from research pipeline)
     const existingDesign = db.select().from(ticketDocuments)
       .where(and(eq(ticketDocuments.ticketId, ticketId), eq(ticketDocuments.type, "design")))
@@ -94,7 +101,7 @@ export async function POST(
       savedVersion = 1;
     }
     savedDocType = "design";
-  } else if (!conversational && ticket.researchApprovedAt && !ticket.planApprovedAt && trimmed.length > 200) {
+  } else if (!conversational && isCurrentAssignee && ticket.researchApprovedAt && !ticket.planApprovedAt) {
     // Planning phase — save/update implementation plan (unchanged logic)
     const existing = db.select().from(ticketDocuments)
       .where(and(eq(ticketDocuments.ticketId, ticketId), eq(ticketDocuments.type, "implementation_plan")))

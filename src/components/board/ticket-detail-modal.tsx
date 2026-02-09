@@ -20,6 +20,70 @@ interface TicketDetailModalProps {
 const typeOptions: TicketType[] = ["feature", "bug", "chore"];
 const stateOptions: TicketState[] = ["research", "plan", "build", "test", "ship"];
 
+// Board state mentions — referenceable via @research, @plan, etc.
+const BOARD_STATES = [
+  { name: "research", label: "Research", color: "var(--column-research)", icon: "🔍" },
+  { name: "plan", label: "Plan", color: "var(--column-plan)", icon: "📋" },
+  { name: "build", label: "Build", color: "var(--column-build)", icon: "🔨" },
+  { name: "test", label: "Test", color: "var(--column-test)", icon: "🧪" },
+  { name: "ship", label: "Ship", color: "var(--column-ship)", icon: "🚀" },
+] as const;
+type MentionItem = { kind: "persona"; persona: Persona } | { kind: "board"; name: string; label: string; color: string; icon: string } | { kind: "team" };
+
+// Render comment text with highlighted @mentions (personas + board states + team)
+function renderCommentContent(text: string, personas: Persona[]) {
+  const parts = text.split(/(@[\w\p{L}-]+)/gu);
+  return parts.map((part, i) => {
+    if (!part.startsWith("@")) return part;
+    const name = part.slice(1).toLowerCase();
+    if (name === "team") {
+      return (
+        <span key={i} style={{
+          backgroundColor: "color-mix(in srgb, #10b981 20%, transparent)",
+          color: "#10b981",
+          padding: "1px 6px",
+          borderRadius: "4px",
+          fontSize: "0.8em",
+          fontWeight: 600,
+        }}>
+          👥 @team
+        </span>
+      );
+    }
+    const board = BOARD_STATES.find((b) => b.name === name);
+    if (board) {
+      return (
+        <span key={i} style={{
+          backgroundColor: `color-mix(in srgb, ${board.color} 20%, transparent)`,
+          color: board.color,
+          padding: "1px 6px",
+          borderRadius: "4px",
+          fontSize: "0.8em",
+          fontWeight: 600,
+        }}>
+          {board.icon} {board.label}
+        </span>
+      );
+    }
+    const persona = personas.find((p) => p.name.toLowerCase() === name);
+    if (persona) {
+      return (
+        <span key={i} style={{
+          backgroundColor: `color-mix(in srgb, ${persona.color || "#6366f1"} 20%, transparent)`,
+          color: persona.color || "#a78bfa",
+          padding: "1px 6px",
+          borderRadius: "4px",
+          fontSize: "0.8em",
+          fontWeight: 600,
+        }}>
+          @{persona.name}
+        </span>
+      );
+    }
+    return part;
+  });
+}
+
 export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, onDelete }: TicketDetailModalProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -145,6 +209,13 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     state !== baselineRef.current.state
   ) : false;
 
+  // Clear document view when modal closes
+  useEffect(() => {
+    if (!ticket) {
+      setExpandedDoc(null);
+    }
+  }, [ticket]);
+
   // Initialize form when a *different* ticket is opened (by ID, not reference)
   const ticketId = ticket?.id;
   useEffect(() => {
@@ -192,11 +263,17 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   useEffect(() => {
     if (!ticket) return;
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (expandedDoc) {
+          setExpandedDoc(null);
+        } else {
+          onClose();
+        }
+      }
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [ticket, onClose]);
+  }, [ticket, onClose, expandedDoc]);
 
   // Poll comments every 10s while modal is open (doesn't touch form state)
   useEffect(() => {
@@ -423,10 +500,17 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     if (!ticket) return;
     setApprovingResearch(true);
     try {
-      await fetch(`/api/tickets/${ticket.id}/approve-research`, { method: "POST" });
-      setResearchApprovedAt(new Date().toISOString());
-      router.refresh();
-      onClose();
+      // Move ticket to plan state (PATCH handles approval + state change + dispatch)
+      const response = await fetch(`/api/tickets`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticketId: ticket.id, state: "plan" }),
+      });
+      if (response.ok) {
+        setResearchApprovedAt(new Date().toISOString());
+        router.refresh();
+        onClose();
+      }
     } finally {
       setApprovingResearch(false);
     }
@@ -436,16 +520,23 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     if (!ticket) return;
     setApprovingPlan(true);
     try {
-      await fetch(`/api/tickets/${ticket.id}/approve-plan`, { method: "POST" });
-      setPlanApprovedAt(new Date().toISOString());
-      router.refresh();
-      onClose();
+      // Move ticket to build state (PATCH handles approval + state change + dispatch)
+      const response = await fetch(`/api/tickets`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticketId: ticket.id, state: "build" }),
+      });
+      if (response.ok) {
+        setPlanApprovedAt(new Date().toISOString());
+        router.refresh();
+        onClose();
+      }
     } finally {
       setApprovingPlan(false);
     }
   }
 
-  async function handleDeleteDocument(docType: "research" | "implementation_plan") {
+  async function handleDeleteDocument(docType: "research" | "implementation_plan" | "design") {
     if (!ticket) return;
     setDeletingDoc(docType);
     try {
@@ -495,12 +586,19 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
-  // @mention autocomplete: compute filtered personas from mentionQuery
+  // @mention autocomplete: compute filtered items (personas + board states)
   // Also support @role mentions (e.g., @designer, @lead, @researcher)
   const ROLE_SLUGS = ["lead", "designer", "developer", "critic", "researcher", "hacker"];
-  const filteredPersonas = mentionQuery !== null
+  const filteredMentions: MentionItem[] = mentionQuery !== null
     ? (() => {
         const q = mentionQuery.toLowerCase();
+        // Team match
+        const teamMatch: MentionItem[] = "team".startsWith(q) ? [{ kind: "team" }] : [];
+        // Board state matches
+        const boardMatches: MentionItem[] = BOARD_STATES
+          .filter((b) => b.name.startsWith(q))
+          .map((b) => ({ kind: "board", ...b }));
+        // Persona matches by name
         const byName = personasList.filter((p) =>
           p.name.toLowerCase().startsWith(q)
         );
@@ -509,7 +607,8 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
           .filter((r) => r.startsWith(q) && q.length > 0)
           .flatMap((r) => personasList.filter((p) => p.role === r))
           .filter((p) => !byName.some((n) => n.id === p.id));
-        return [...byName, ...byRole].slice(0, 6);
+        const personaMatches: MentionItem[] = [...byName, ...byRole].map((p) => ({ kind: "persona", persona: p }));
+        return [...teamMatch, ...boardMatches, ...personaMatches].slice(0, 8);
       })()
     : [];
 
@@ -520,7 +619,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     // Detect @mention trigger
     const pos = e.target.selectionStart;
     const textBefore = val.slice(0, pos);
-    const atMatch = textBefore.match(/@(\w*)$/);
+    const atMatch = textBefore.match(/@([\w\p{L}-]*)$/u);
     if (atMatch) {
       setMentionQuery(atMatch[1]);
       setMentionStart(pos - atMatch[0].length);
@@ -530,12 +629,13 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
-  function insertMention(persona: Persona) {
+  function insertMention(item: MentionItem) {
     const before = newComment.slice(0, mentionStart);
     const after = newComment.slice(
       mentionStart + 1 + (mentionQuery?.length || 0)
     );
-    const inserted = `${before}@${persona.name} ${after}`;
+    const mentionName = item.kind === "team" ? "team" : item.kind === "persona" ? item.persona.name : item.name;
+    const inserted = `${before}@${mentionName} ${after}`;
     setNewComment(inserted);
     setMentionQuery(null);
 
@@ -544,7 +644,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
       const ta = commentInputRef.current;
       if (ta) {
         ta.focus();
-        const cursorPos = before.length + 1 + persona.name.length + 1;
+        const cursorPos = before.length + 1 + mentionName.length + 1;
         ta.setSelectionRange(cursorPos, cursorPos);
       }
     }, 0);
@@ -552,20 +652,20 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
 
   function handleCommentKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     // @mention navigation
-    if (mentionQuery !== null && filteredPersonas.length > 0) {
+    if (mentionQuery !== null && filteredMentions.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setMentionIndex((i) => (i + 1) % filteredPersonas.length);
+        setMentionIndex((i) => (i + 1) % filteredMentions.length);
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        setMentionIndex((i) => (i - 1 + filteredPersonas.length) % filteredPersonas.length);
+        setMentionIndex((i) => (i - 1 + filteredMentions.length) % filteredMentions.length);
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        insertMention(filteredPersonas[mentionIndex]);
+        insertMention(filteredMentions[mentionIndex]);
         return;
       }
       if (e.key === "Escape") {
@@ -621,7 +721,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
         const dispatchRes = await fetch(`/api/tickets/${tid}/dispatch`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ commentContent: combined, targetPersonaName: mention.name, targetRole: mention.role, targetPersonaId: opts?.targetPersonaId, conversational: opts?.conversational, documentId: opts?.documentId, silent: true }),
+          body: JSON.stringify({ commentContent: combined, targetPersonaName: mention.name, targetRole: mention.role, targetPersonaId: opts?.targetPersonaId, team: mention.team, conversational: opts?.conversational, documentId: opts?.documentId, silent: true }),
         });
         const dispatchData = await dispatchRes.json();
         if (dispatchData.persona) {
@@ -815,7 +915,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
         setDocCommentAttachments([]);
         setTimeout(() => docCommentsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
         // Dispatch agent — conversational mode so they reply in the doc comment thread
-        const docLabel = expandedDoc.type === "research" ? "research document" : "implementation plan";
+        const docLabel = expandedDoc.type === "research" ? "research document" : expandedDoc.type === "design" ? "design document" : "implementation plan";
         queueDispatch(`[Comment on ${docLabel}] ${commentText}`, {
           conversational: true,
           documentId: expandedDoc.id,
@@ -828,10 +928,14 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
-  // Doc-comment @mention filtered list (also supports @role)
-  const docFilteredPersonas = docMentionQuery !== null
+  // Doc-comment @mention filtered list (personas + board states + @role + @team)
+  const docFilteredMentions: MentionItem[] = docMentionQuery !== null
     ? (() => {
         const q = docMentionQuery.toLowerCase();
+        const teamMatch: MentionItem[] = "team".startsWith(q) ? [{ kind: "team" }] : [];
+        const boardMatches: MentionItem[] = BOARD_STATES
+          .filter((b) => b.name.startsWith(q))
+          .map((b) => ({ kind: "board", ...b }));
         const byName = personasList.filter((p) =>
           p.name.toLowerCase().startsWith(q)
         );
@@ -839,7 +943,8 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
           .filter((r) => r.startsWith(q) && q.length > 0)
           .flatMap((r) => personasList.filter((p) => p.role === r))
           .filter((p) => !byName.some((n) => n.id === p.id));
-        return [...byName, ...byRole].slice(0, 6);
+        const personaMatches: MentionItem[] = [...byName, ...byRole].map((p) => ({ kind: "persona", persona: p }));
+        return [...teamMatch, ...boardMatches, ...personaMatches].slice(0, 8);
       })()
     : [];
 
@@ -848,7 +953,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     setNewDocComment(val);
     const pos = e.target.selectionStart;
     const textBefore = val.slice(0, pos);
-    const atMatch = textBefore.match(/@(\w*)$/);
+    const atMatch = textBefore.match(/@([\w\p{L}-]*)$/u);
     if (atMatch) {
       setDocMentionQuery(atMatch[1]);
       setDocMentionStart(pos - atMatch[0].length);
@@ -858,37 +963,38 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
-  function insertDocMention(persona: Persona) {
+  function insertDocMention(item: MentionItem) {
     const before = newDocComment.slice(0, docMentionStart);
     const after = newDocComment.slice(docMentionStart + 1 + (docMentionQuery?.length || 0));
-    const inserted = `${before}@${persona.name} ${after}`;
+    const mentionName = item.kind === "team" ? "team" : item.kind === "persona" ? item.persona.name : item.name;
+    const inserted = `${before}@${mentionName} ${after}`;
     setNewDocComment(inserted);
     setDocMentionQuery(null);
     setTimeout(() => {
       const ta = docCommentInputRef.current;
       if (ta) {
         ta.focus();
-        const cursorPos = before.length + 1 + persona.name.length + 1;
+        const cursorPos = before.length + 1 + mentionName.length + 1;
         ta.setSelectionRange(cursorPos, cursorPos);
       }
     }, 0);
   }
 
   function handleDocCommentKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (docMentionQuery !== null && docFilteredPersonas.length > 0) {
+    if (docMentionQuery !== null && docFilteredMentions.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setDocMentionIndex((i) => (i + 1) % docFilteredPersonas.length);
+        setDocMentionIndex((i) => (i + 1) % docFilteredMentions.length);
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        setDocMentionIndex((i) => (i - 1 + docFilteredPersonas.length) % docFilteredPersonas.length);
+        setDocMentionIndex((i) => (i - 1 + docFilteredMentions.length) % docFilteredMentions.length);
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        insertDocMention(docFilteredPersonas[docMentionIndex]);
+        insertDocMention(docFilteredMentions[docMentionIndex]);
         return;
       }
       if (e.key === "Escape") {
@@ -1151,7 +1257,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   onFocus={() => { descOnFocusRef.current = description; }}
-                  onBlur={() => { if (description !== descOnFocusRef.current) enhanceDescription(); }}
+                  onBlur={() => { if (description !== descOnFocusRef.current && !descVoice.isRecording && !descVoice.isProcessingAI) enhanceDescription(); }}
                   rows={10}
                   disabled={descVoice.isProcessingAI || enhancingDescription}
                   className="w-full rounded-xl p-5 text-[15px] leading-relaxed resize-y min-h-[220px]"
@@ -1237,186 +1343,54 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                 </div>
               ) : (documents.length > 0 || ticket?.researchCompletedAt || ticket?.planCompletedAt) ? (
                 <div className="space-y-4">
-                  {/* Research Document (versioned) */}
-                  {(ticket?.researchCompletedAt || researchDocs.length > 0) && (() => {
-                    const workflowState = getResearchWorkflowState();
-                    return (
-                      <div
-                        className="rounded-xl p-5"
-                        style={{
-                          backgroundColor: researchApprovedAt ? "rgba(34, 197, 94, 0.08)" : `rgba(${workflowState.color === "#ef4444" ? "239, 68, 68" : workflowState.color === "#8b5cf6" ? "139, 92, 246" : "245, 158, 11"}, 0.08)`,
-                          border: `1px solid ${researchApprovedAt ? "rgba(34, 197, 94, 0.3)" : `color-mix(in srgb, ${workflowState.color} 30%, transparent)`}`,
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="flex items-center gap-2">
-                            <svg className="w-5 h-5" style={{ color: workflowState.color }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                            </svg>
-                            <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                              Research
-                            </span>
-                            {maxResearchVersion > 0 && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono" style={{ backgroundColor: "rgba(255,255,255,0.08)", color: "var(--text-secondary)" }}>
-                                v{maxResearchVersion} ({researchDocs.length} version{researchDocs.length !== 1 ? "s" : ""})
-                              </span>
-                            )}
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: `color-mix(in srgb, ${workflowState.color} 20%, transparent)`, color: workflowState.color }}>
-                              {workflowState.label}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {latestResearchDoc?.content && (
-                              <button
-                                onClick={() => { setExpandedDoc(latestResearchDoc); setSelectedVersion(null); }}
-                                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/10"
-                                style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-secondary)" }}
-                              >
-                                View Full
-                              </button>
-                            )}
-                            {!researchApprovedAt && maxResearchVersion >= 3 && (
-                              <button
-                                onClick={handleApproveResearch}
-                                disabled={approvingResearch}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:opacity-90"
-                                style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingResearch ? 0.5 : 1 }}
-                              >
-                                {approvingResearch ? "Approving..." : "Approve"}
-                              </button>
-                            )}
-                            <button
-                              onClick={() => handleDeleteDocument("research")}
-                              disabled={deletingDoc === "research"}
-                              className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-red-500/15"
-                              style={{ color: "var(--text-muted)" }}
-                              title="Delete all research versions — agents will re-research"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                              </svg>
-                            </button>
-                          </div>
-                        </div>
-                        {latestResearchDoc?.content && (
-                          <div
-                            className="text-sm leading-relaxed max-h-[120px] overflow-hidden relative cursor-pointer"
-                            style={{ color: "rgba(255, 255, 255, 0.8)" }}
-                            onClick={() => { setExpandedDoc(latestResearchDoc); setSelectedVersion(null); }}
-                          >
-                            <div className="prose-sm">
-                              <ReactMarkdown
-                                components={{
-                                  h1: ({ children }) => <h1 className="text-base font-bold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h1>,
-                                  h2: ({ children }) => <h2 className="text-sm font-bold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h2>,
-                                  h3: ({ children }) => <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h3>,
-                                  p: ({ children }) => <p className="mb-1.5">{children}</p>,
-                                  strong: ({ children }) => <strong className="font-semibold text-white/90">{children}</strong>,
-                                  code: ({ children }) => <code className="bg-white/10 px-1 rounded text-[12px]">{children}</code>,
-                                  ul: ({ children }) => <ul className="list-disc list-inside mb-1.5 space-y-0.5">{children}</ul>,
-                                  ol: ({ children }) => <ol className="list-decimal list-inside mb-1.5 space-y-0.5">{children}</ol>,
-                                }}
-                              >
-                                {latestResearchDoc.content}
-                              </ReactMarkdown>
-                            </div>
-                            <div className="absolute bottom-0 left-0 right-0 h-10" style={{ background: `linear-gradient(transparent, rgba(15, 15, 26, 0.95))` }} />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                  {["research", "design", "implementation_plan"].map((docType) => {
+                    const doc = documents.find(d => d.type === docType);
+                    if (!doc && !(docType === "research" && ticket?.researchCompletedAt)) return null;
 
-                  {/* Implementation Plan Document */}
-                  {(ticket?.planCompletedAt || documents.some(d => d.type === "implementation_plan")) && (() => {
-                    const planDoc = documents.find(d => d.type === "implementation_plan");
+                    const isResearch = docType === "research";
+                    const isPlan = docType === "implementation_plan";
+                    const isDesign = docType === "design";
+                    const approved = isResearch ? researchApprovedAt : isPlan ? planApprovedAt : false;
+                    const title = isResearch ? "Research Document" : isDesign ? "Design Document" : "Implementation Plan";
+                    const color = isResearch ? "#f59e0b" : isDesign ? "#8b5cf6" : "#8b5cf6";
+                    const icon = isResearch ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                    ) : isDesign ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
+                    );
+
                     return (
-                      <div
-                        className="rounded-xl p-5"
-                        style={{
-                          backgroundColor: planApprovedAt ? "rgba(34, 197, 94, 0.08)" : "rgba(245, 158, 11, 0.08)",
-                          border: `1px solid ${planApprovedAt ? "rgba(34, 197, 94, 0.3)" : "rgba(245, 158, 11, 0.3)"}`,
-                        }}
-                      >
+                      <div key={docType} className="rounded-xl p-5" style={{
+                        backgroundColor: approved ? "rgba(34, 197, 94, 0.08)" : `color-mix(in srgb, ${color} 8%, transparent)`,
+                        border: `1px solid ${approved ? "rgba(34, 197, 94, 0.3)" : `color-mix(in srgb, ${color} 30%, transparent)`}`,
+                      }}>
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
-                            <svg className="w-5 h-5" style={{ color: planApprovedAt ? "#22c55e" : "#f59e0b" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
-                            </svg>
-                            <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                              Implementation Plan
-                            </span>
-                            {planApprovedAt ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(34, 197, 94, 0.2)", color: "#22c55e" }}>
-                                Approved
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(245, 158, 11, 0.2)", color: "#f59e0b" }}>
-                                Awaiting Approval
-                              </span>
-                            )}
+                            <svg className="w-5 h-5" style={{ color }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>{icon}</svg>
+                            <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{title}</span>
+                            {doc && <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: `color-mix(in srgb, ${color} 20%, transparent)`, color }}>v{doc.version || 1}</span>}
+                            {approved && <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(34, 197, 94, 0.2)", color: "#22c55e" }}>Approved</span>}
                           </div>
                           <div className="flex items-center gap-2">
-                            {planDoc?.content && (
-                              <button
-                                onClick={() => setExpandedDoc(planDoc)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/10"
-                                style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-secondary)" }}
-                              >
-                                View Full
-                              </button>
-                            )}
-                            {!planApprovedAt && (
-                              <button
-                                onClick={handleApprovePlan}
-                                disabled={approvingPlan}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:opacity-90"
-                                style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingPlan ? 0.5 : 1 }}
-                              >
-                                {approvingPlan ? "Approving..." : "Approve"}
-                              </button>
-                            )}
-                            <button
-                              onClick={() => handleDeleteDocument("implementation_plan")}
-                              disabled={deletingDoc === "implementation_plan"}
-                              className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-red-500/15"
-                              style={{ color: "var(--text-muted)" }}
-                              title="Delete plan — agents will re-plan"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                              </svg>
+                            {doc?.content && <button onClick={() => setExpandedDoc(doc)} className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/10" style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-secondary)" }}>View Full</button>}
+                            {isResearch && !approved && researchDocs.length >= 3 && <button onClick={handleApproveResearch} disabled={approvingResearch} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:opacity-90" style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingResearch ? 0.5 : 1 }}>{approvingResearch ? "Moving..." : "Move to Plan"}</button>}
+                            {isPlan && !approved && <button onClick={handleApprovePlan} disabled={approvingPlan} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:opacity-90" style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingPlan ? 0.5 : 1 }}>{approvingPlan ? "Moving..." : "Move to Build"}</button>}
+                            <button onClick={() => handleDeleteDocument(docType as any)} disabled={deletingDoc === docType} className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-red-500/15" style={{ color: "var(--text-muted)" }} title={`Delete ${title.toLowerCase()}`}>
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
                             </button>
                           </div>
                         </div>
-                        {planDoc?.content && (
-                          <div
-                            className="text-sm leading-relaxed max-h-[120px] overflow-hidden relative cursor-pointer"
-                            style={{ color: "rgba(255, 255, 255, 0.8)" }}
-                            onClick={() => setExpandedDoc(planDoc)}
-                          >
-                            <div className="prose-sm">
-                              <ReactMarkdown
-                                components={{
-                                  h1: ({ children }) => <h1 className="text-base font-bold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h1>,
-                                  h2: ({ children }) => <h2 className="text-sm font-bold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h2>,
-                                  h3: ({ children }) => <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h3>,
-                                  p: ({ children }) => <p className="mb-1.5">{children}</p>,
-                                  strong: ({ children }) => <strong className="font-semibold text-white/90">{children}</strong>,
-                                  code: ({ children }) => <code className="bg-white/10 px-1 rounded text-[12px]">{children}</code>,
-                                  ul: ({ children }) => <ul className="list-disc list-inside mb-1.5 space-y-0.5">{children}</ul>,
-                                  ol: ({ children }) => <ol className="list-decimal list-inside mb-1.5 space-y-0.5">{children}</ol>,
-                                }}
-                              >
-                                {planDoc.content}
-                              </ReactMarkdown>
-                            </div>
-                            <div className="absolute bottom-0 left-0 right-0 h-10" style={{ background: `linear-gradient(transparent, ${planApprovedAt ? "rgba(10, 30, 15, 0.95)" : "rgba(30, 22, 8, 0.95)"})` }} />
+                        {doc?.content && (
+                          <div className="relative max-h-32 overflow-hidden cursor-pointer" style={{ color: "rgba(255, 255, 255, 0.8)" }} onClick={() => setExpandedDoc(doc)}>
+                            <div className="prose-sm"><ReactMarkdown components={{ h1: ({ children }) => <h1 className="text-base font-bold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h1>, h2: ({ children }) => <h2 className="text-sm font-bold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h2>, h3: ({ children }) => <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h3>, p: ({ children }) => <p className="mb-1.5">{children}</p>, strong: ({ children }) => <strong className="font-semibold text-white/90">{children}</strong>, code: ({ children }) => <code className="bg-white/10 px-1 rounded text-[12px]">{children}</code>, ul: ({ children }) => <ul className="list-disc list-inside mb-1.5 space-y-0.5">{children}</ul>, ol: ({ children }) => <ol className="list-decimal list-inside mb-1.5 space-y-0.5">{children}</ol> }}>{doc.content}</ReactMarkdown></div>
+                            <div className="absolute bottom-0 left-0 right-0 h-10" style={{ background: `linear-gradient(transparent, ${approved ? "rgba(10, 30, 15, 0.95)" : "rgba(20, 15, 30, 0.95)"})` }} />
                           </div>
                         )}
                       </div>
                     );
-                  })()}
+                  })}
                 </div>
               ) : (
                 <div
@@ -1775,6 +1749,26 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
             >
               {saving ? "Saving..." : "Save Changes"}
             </button>
+            {ticket?.state === "research" && !researchApprovedAt && (
+              <button
+                onClick={handleApproveResearch}
+                disabled={approvingResearch}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors hover:opacity-90"
+                style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingResearch ? 0.5 : 1 }}
+              >
+                {approvingResearch ? "Approving..." : "Approve & Move to Plan"}
+              </button>
+            )}
+            {ticket?.state === "plan" && !planApprovedAt && (
+              <button
+                onClick={handleApprovePlan}
+                disabled={approvingPlan}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors hover:opacity-90"
+                style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingPlan ? 0.5 : 1 }}
+              >
+                {approvingPlan ? "Approving..." : "Approve & Move to Build"}
+              </button>
+            )}
           </div>
         </div>
 
@@ -1891,7 +1885,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                             className="text-sm leading-relaxed whitespace-pre-wrap"
                             style={{ color: "rgba(255,255,255,0.8)" }}
                           >
-                            {comment.content}
+                            {renderCommentContent(comment.content, personasList)}
                           </div>
                         )
                       )}
@@ -1999,7 +1993,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                   onKeyDown={handleCommentKeyDown}
                 />
                 {/* @mention autocomplete dropdown */}
-                {mentionQuery !== null && filteredPersonas.length > 0 && (
+                {mentionQuery !== null && filteredMentions.length > 0 && (
                   <div
                     className="absolute left-4 bottom-full mb-1 rounded-lg shadow-xl overflow-hidden"
                     style={{
@@ -2009,34 +2003,64 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                       zIndex: 10,
                     }}
                   >
-                    {filteredPersonas.map((p, i) => (
+                    {filteredMentions.map((item, i) => (
                       <div
-                        key={p.id}
+                        key={item.kind === "team" ? "team" : item.kind === "persona" ? item.persona.id : item.name}
                         className="flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors"
                         style={{
                           backgroundColor: i === mentionIndex ? "rgba(255,255,255,0.08)" : "transparent",
                         }}
                         onMouseEnter={() => setMentionIndex(i)}
                         onMouseDown={(e) => {
-                          e.preventDefault(); // keep textarea focus
-                          insertMention(p);
+                          e.preventDefault();
+                          insertMention(item);
                         }}
                       >
-                        <div
-                          className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold text-white flex-shrink-0 overflow-hidden"
-                          style={{ backgroundColor: p.color || "var(--accent-indigo)" }}
-                        >
-                          {p.avatar ? (
-                            <img src={p.avatar} alt={p.name} className="w-full h-full object-cover" />
-                          ) : (
-                            p.name[0]?.toUpperCase()
-                          )}
-                        </div>
-                        <span className="text-sm" style={{ color: "var(--text-primary)" }}>{p.name}</span>
-                        {p.role && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(139, 92, 246, 0.15)", color: "#a78bfa" }}>
-                            {p.role}
-                          </span>
+                        {item.kind === "team" ? (
+                          <>
+                            <div
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0"
+                              style={{ backgroundColor: "rgba(16, 185, 129, 0.2)" }}
+                            >
+                              👥
+                            </div>
+                            <span className="text-sm" style={{ color: "#10b981" }}>team</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981" }}>
+                              all agents
+                            </span>
+                          </>
+                        ) : item.kind === "board" ? (
+                          <>
+                            <div
+                              className="w-6 h-6 rounded flex items-center justify-center text-xs flex-shrink-0"
+                              style={{ backgroundColor: `color-mix(in srgb, ${item.color} 25%, transparent)` }}
+                            >
+                              {item.icon}
+                            </div>
+                            <span className="text-sm" style={{ color: item.color }}>{item.label}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
+                              board
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <div
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold text-white flex-shrink-0 overflow-hidden"
+                              style={{ backgroundColor: item.persona.color || "var(--accent-indigo)" }}
+                            >
+                              {item.persona.avatar ? (
+                                <img src={item.persona.avatar} alt={item.persona.name} className="w-full h-full object-cover" />
+                              ) : (
+                                item.persona.name[0]?.toUpperCase()
+                              )}
+                            </div>
+                            <span className="text-sm" style={{ color: "var(--text-primary)" }}>{item.persona.name}</span>
+                            {item.persona.role && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(139, 92, 246, 0.15)", color: "#a78bfa" }}>
+                                {item.persona.role}
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
                     ))}
@@ -2159,11 +2183,11 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
         style={{ borderColor: "var(--border-subtle)", backgroundColor: "#0f0f1a" }}
       >
         <div className="flex items-center gap-3">
-          <svg className="w-5 h-5" style={{ color: expandedDoc.type === "research" ? "#f59e0b" : "#8b5cf6" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <svg className="w-5 h-5" style={{ color: expandedDoc.type === "research" ? "#f59e0b" : expandedDoc.type === "design" ? "#8b5cf6" : "#8b5cf6" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
           </svg>
           <span className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
-            {expandedDoc.type === "research" ? "Research Document" : "Implementation Plan"}
+            {expandedDoc.type === "research" ? "Research Document" : expandedDoc.type === "design" ? "Design Document" : "Implementation Plan"}
           </span>
           <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
             {ticket?.id}
@@ -2195,7 +2219,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
               className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors hover:opacity-90"
               style={{ backgroundColor: "#22c55e", color: "#fff" }}
             >
-              Approve Research
+              Move to Plan
             </button>
           )}
           {expandedDoc.type === "implementation_plan" && !planApprovedAt && (
@@ -2204,15 +2228,15 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
               className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors hover:opacity-90"
               style={{ backgroundColor: "#22c55e", color: "#fff" }}
             >
-              Approve Plan
+              Move to Build
             </button>
           )}
           <button
-            onClick={() => handleDeleteDocument(expandedDoc.type as "research" | "implementation_plan")}
+            onClick={() => handleDeleteDocument(expandedDoc.type as "research" | "implementation_plan" | "design")}
             disabled={!!deletingDoc}
             className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-red-500/15"
             style={{ color: "#ef4444" }}
-            title={`Delete ${expandedDoc.type === "research" ? "research" : "plan"} — agents will redo`}
+            title={`Delete ${expandedDoc.type === "research" ? "research" : expandedDoc.type === "design" ? "design" : "plan"} — agents will redo`}
           >
             {deletingDoc ? "Deleting..." : "Delete"}
           </button>
@@ -2270,7 +2294,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
             {/* Document title */}
             <div className="mb-10">
               <h1 className="text-[28px] font-bold tracking-tight leading-tight" style={{ color: "#fff" }}>
-                {expandedDoc.type === "research" ? "Research Document" : "Implementation Plan"}
+                {expandedDoc.type === "research" ? "Research Document" : expandedDoc.type === "design" ? "Design Document" : "Implementation Plan"}
               </h1>
               <div className="flex items-center gap-3 mt-3">
                 <span className="text-xs font-mono px-2 py-0.5 rounded" style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
@@ -2463,7 +2487,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                             className="text-sm leading-relaxed whitespace-pre-wrap"
                             style={{ color: "rgba(255,255,255,0.8)" }}
                           >
-                            {comment.content}
+                            {renderCommentContent(comment.content, personasList)}
                           </div>
                         )
                       )}
@@ -2560,7 +2584,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                   onKeyDown={handleDocCommentKeyDown}
                 />
                 {/* Doc @mention autocomplete dropdown */}
-                {docMentionQuery !== null && docFilteredPersonas.length > 0 && (
+                {docMentionQuery !== null && docFilteredMentions.length > 0 && (
                   <div
                     className="absolute left-4 bottom-full mb-1 rounded-lg shadow-xl overflow-hidden"
                     style={{
@@ -2570,9 +2594,9 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                       zIndex: 10,
                     }}
                   >
-                    {docFilteredPersonas.map((p, i) => (
+                    {docFilteredMentions.map((item, i) => (
                       <div
-                        key={p.id}
+                        key={item.kind === "team" ? "team" : item.kind === "persona" ? item.persona.id : item.name}
                         className="flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors"
                         style={{
                           backgroundColor: i === docMentionIndex ? "rgba(255,255,255,0.08)" : "transparent",
@@ -2580,24 +2604,54 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                         onMouseEnter={() => setDocMentionIndex(i)}
                         onMouseDown={(e) => {
                           e.preventDefault();
-                          insertDocMention(p);
+                          insertDocMention(item);
                         }}
                       >
-                        <div
-                          className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold text-white flex-shrink-0 overflow-hidden"
-                          style={{ backgroundColor: p.color || "var(--accent-indigo)" }}
-                        >
-                          {p.avatar ? (
-                            <img src={p.avatar} alt={p.name} className="w-full h-full object-cover" />
-                          ) : (
-                            p.name[0]?.toUpperCase()
-                          )}
-                        </div>
-                        <span className="text-sm" style={{ color: "var(--text-primary)" }}>{p.name}</span>
-                        {p.role && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(139, 92, 246, 0.15)", color: "#a78bfa" }}>
-                            {p.role}
-                          </span>
+                        {item.kind === "team" ? (
+                          <>
+                            <div
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0"
+                              style={{ backgroundColor: "rgba(16, 185, 129, 0.2)" }}
+                            >
+                              👥
+                            </div>
+                            <span className="text-sm" style={{ color: "#10b981" }}>team</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981" }}>
+                              all agents
+                            </span>
+                          </>
+                        ) : item.kind === "board" ? (
+                          <>
+                            <div
+                              className="w-6 h-6 rounded flex items-center justify-center text-xs flex-shrink-0"
+                              style={{ backgroundColor: `color-mix(in srgb, ${item.color} 25%, transparent)` }}
+                            >
+                              {item.icon}
+                            </div>
+                            <span className="text-sm" style={{ color: item.color }}>{item.label}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
+                              board
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <div
+                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold text-white flex-shrink-0 overflow-hidden"
+                              style={{ backgroundColor: item.persona.color || "var(--accent-indigo)" }}
+                            >
+                              {item.persona.avatar ? (
+                                <img src={item.persona.avatar} alt={item.persona.name} className="w-full h-full object-cover" />
+                              ) : (
+                                item.persona.name[0]?.toUpperCase()
+                              )}
+                            </div>
+                            <span className="text-sm" style={{ color: "var(--text-primary)" }}>{item.persona.name}</span>
+                            {item.persona.role && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(139, 92, 246, 0.15)", color: "#a78bfa" }}>
+                                {item.persona.role}
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
                     ))}

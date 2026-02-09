@@ -244,7 +244,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: ticketId } = await params;
-  const { commentContent, targetRole: requestedRole, targetPersonaName, targetPersonaId, silent, conversational, documentId } = await req.json();
+  const { commentContent, targetRole: requestedRole, targetPersonaName, targetPersonaId, team, silent, conversational, documentId } = await req.json();
 
   if (conversational) {
     console.log(`[dispatch] Conversational dispatch for ${ticketId}, documentId=${documentId}, targetPersonaId=${targetPersonaId}`);
@@ -265,6 +265,68 @@ export async function POST(
       isNull(personas.deletedAt)
     ))
     .all();
+
+  // Handle @team dispatch — send to all project agents
+  if (team && projectPersonas.length > 0) {
+    const cwd = ensureWorktree(project, ticketId);
+    if (!fs.existsSync(cwd)) {
+      fs.mkdirSync(cwd, { recursive: true });
+      console.warn(`[dispatch] Created missing workspace: ${cwd}`);
+    }
+
+    const dispatched: Array<{ id: string; name: string; role: string | null; color: string | null; avatarUrl: string | null }> = [];
+
+    for (const persona of projectPersonas) {
+      const sessionDir = path.join(BONSAI_DIR, "sessions", `${ticketId}-agent-${Date.now()}-${persona.id}`);
+      fs.mkdirSync(sessionDir, { recursive: true });
+
+      fs.writeFileSync(
+        path.join(sessionDir, "system-prompt.txt"),
+        buildAgentSystemPrompt(persona, project, ticket, sessionDir, projectPersonas)
+      );
+      fs.writeFileSync(
+        path.join(sessionDir, "task.md"),
+        assembleAgentTask(commentContent, ticket, persona, { conversational })
+      );
+
+      spawnAgent(sessionDir, cwd, toolsForRole(persona.role || "developer"), ticketId, persona.id, { conversational, documentId });
+
+      dispatched.push({
+        id: persona.id,
+        name: persona.name,
+        role: persona.role,
+        color: persona.color,
+        avatarUrl: persona.avatar,
+      });
+
+      logAuditEvent({
+        ticketId,
+        event: "agent_dispatched",
+        actorType: "system",
+        actorName: "System",
+        detail: `Dispatched ${persona.name} (${persona.role}) via @team`,
+        metadata: { personaId: persona.id, role: persona.role, team: true },
+      });
+    }
+
+    // Post a single comment about the team dispatch
+    if (!silent) {
+      const teamNames = dispatched.map(p => p.name).join(", ");
+      postAgentComment(ticketId, dispatched[0].id, `👥 Team dispatch: ${teamNames} are looking into this.`);
+    }
+
+    // Update last activity (use first persona as assignee for tracking)
+    db.update(tickets)
+      .set({ lastAgentActivity: new Date().toISOString(), assigneeId: dispatched[0].id })
+      .where(eq(tickets.id, ticketId))
+      .run();
+
+    return NextResponse.json({
+      team: true,
+      personas: dispatched,
+      persona: dispatched[0], // For backward compat with UI expecting single persona
+    });
+  }
 
   // Cooldown: don't dispatch a new agent if one was just dispatched and no explicit target given
   const hasExplicitTarget = targetPersonaName || targetPersonaId || requestedRole;
@@ -398,9 +460,9 @@ function buildAgentSystemPrompt(
 
   // Role prompts: read from settings (editable in Settings > Prompts), fall back to defaults
   const defaultRolePrompts: Record<string, string> = {
-    researcher: "You are a researcher. Your stdout IS the research document — output ONLY structured markdown, no preamble or conversational wrapper.\n\n## How to research\nInvestigate the codebase: read files, search code, understand architecture. Reference specific file paths and line numbers.\n\n## What to include\nFor every finding, show your work:\n- **What you looked at**: which files, functions, patterns you examined and why\n- **What you found**: the relevant code, config, or architecture detail\n- **Why it matters**: how this finding affects the ticket's implementation\n\nStructure the document with a \"Research Log\" section that traces your investigation path — what you searched for, what you found, what led you to look deeper. The reader should be able to follow your reasoning and verify your conclusions.\n\n## Style\nBe concise — only include information a developer needs to start planning. Skip obvious architecture descriptions.\nNever say \"I've created a document\" or \"here's what I found.\" Just output the document directly.\nIf the user is answering questions you asked in the research document, incorporate their answers into your analysis.",
-    developer: "You are a developer. You can read, write, and edit code in the workspace.\nImplement changes, fix bugs, or prototype solutions as requested.\nMake targeted changes — don't refactor unrelated code.\n\nWhen in PLANNING PHASE (research approved, no plan approved yet):\n- Your stdout IS the implementation plan — output ONLY structured markdown, no preamble.\n- Be DECISIVE. Make choices and document your reasoning. Do NOT ask questions or wait for clarification.\n- If users have answered questions in comments, incorporate those answers into the plan.\n- Cover: architecture, file structure, data models, API routes, dependencies, and step-by-step implementation order.\n- If information is ambiguous, state your assumption and move forward.",
-    designer: `You are a designer. You generate UI mockups and component code using the nano-banana CLI tool.
+    researcher: "You are a researcher. Investigate the codebase and produce a research document.\n\n## CRITICAL: Document Output\nYour final message to the user IS the research document. Output ONLY the document content — structured markdown with your findings. No preamble, no \"here's my research\", just the document itself.\n\nProgress messages (via report.sh) are optional status updates. They do NOT replace the document. You MUST output the full research document as your final response.\n\n## How to research\nInvestigate the codebase: read files, search code, understand architecture. Reference specific file paths and line numbers.\n\n## What to include\nFor every finding, show your work:\n- **What you looked at**: which files, functions, patterns you examined and why\n- **What you found**: the relevant code, config, or architecture detail\n- **Why it matters**: how this finding affects the ticket's implementation\n\nStructure the document with a \"Research Log\" section that traces your investigation path — what you searched for, what you found, what led you to look deeper. The reader should be able to follow your reasoning and verify your conclusions.\n\n## Style\nBe concise — only include information a developer needs to start planning. Skip obvious architecture descriptions.\nIf the user is answering questions you asked in the research document, incorporate their answers into your analysis.",
+    developer: "You are a developer. You can read, write, and edit code in the workspace.\nImplement changes, fix bugs, or prototype solutions as requested.\nMake targeted changes — don't refactor unrelated code.\n\nWhen in PLANNING PHASE (research approved, no plan approved yet):\n- Your final message to the user IS the implementation plan — output ONLY structured markdown.\n- Progress messages (via report.sh) are optional status updates. They do NOT replace the plan. You MUST output the full plan as your final response.\n- Be DECISIVE. Make choices and document your reasoning. Do NOT ask questions or wait for clarification.\n- If users have answered questions in comments, incorporate those answers into the plan.\n- Cover: architecture, file structure, data models, API routes, dependencies, and step-by-step implementation order.\n- If information is ambiguous, state your assumption and move forward.",
+    designer: `You are a designer. Generate mockups using nano-banana, then output a design document.
 
 ## nano-banana CLI — YOU MUST USE THIS
 Tool path: ${path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs")}
@@ -412,12 +474,18 @@ node ${path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs")} "A detai
 Generate code:
 node ${path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs")} --text "Describe the React component to generate"
 
+## CRITICAL: Design Document Output
+After generating mockups, your final message to the user IS the design document. Include:
+- Summary of what mockups you generated (they're already attached)
+- Design system details (colors, typography, spacing, components)
+- Implementation notes for the developer
+
+Progress messages (via report.sh) are optional status updates. They do NOT replace the document. You MUST output the design document as your final response.
+
 RULES:
 - Your FIRST action must be a Bash call to nano-banana to generate an image. No exceptions.
-- Do NOT describe designs in text. Generate them as images using the tool.
 - Do NOT hallucinate or pretend you ran the tool. Actually run it via Bash.
-- If the tool fails, report the error. Do not fake success.
-- Every response MUST include at least one real Bash execution of nano-banana.`,
+- If the tool fails, report the error. Do not fake success.`,
     critic: "You are a critic and code reviewer. Your job is to improve the TEAM'S output — research docs, plans, and code.\nYou NEVER edit files or write code. You only read and comment.\n\n## CITATION REQUIREMENT — STRICT\nEvery critique MUST be backed by evidence you found in the actual codebase:\n- Read the relevant files BEFORE making any claims about them.\n- Cite file paths and line numbers for every technical assertion.\n- If you claim a library version is wrong, quote the actual version from package.json.\n- If you claim an API doesn't exist, show the grep/search that proves it.\n- NEVER assert facts about library versions, API behavior, or framework features from memory. Your training data is outdated. Verify everything against the project's actual files.\n- If you cannot verify a claim, prefix it with \"UNVERIFIED:\" and explain what you'd need to check.\n\n## What to critique\n- **Technical substance**: Are the architecture choices sound? Are there better alternatives? Missing edge cases?\n- **Gaps in research**: What wasn't investigated that should have been? What assumptions need validation?\n- **Risks**: What could go wrong in implementation? Performance, security, maintainability?\n- **Requirements**: Does the proposal actually address the ticket's acceptance criteria?\n\n## What NOT to critique\n- Don't critique the agent infrastructure, workspace rules, or system prompts — those are handled by Bonsai.\n- Don't raise concerns about things the system already enforces (workspace boundaries, tool permissions).\n- Don't pad your response with progress updates — get straight to the critique.\n- Don't make claims about what versions of frameworks exist or don't exist without checking package.json first.\n\n## Style\n- Be concise. Lead with your strongest point.\n- For each issue: state the problem, cite the evidence, explain why it matters, suggest a fix.\n- If the work is solid, say so briefly and focus on the 1-2 things that could be better.\n- Address other team members by name when responding to their work.",
     lead: "You are a team lead. Coordinate work, remove blockers, and keep the team aligned.\nFocus on planning, prioritization, and communication. Break down tasks and identify dependencies.",
     hacker: "You are a security-focused engineer. Find vulnerabilities, harden the codebase, and think like an attacker.\nYou can read, write, and edit code. Be specific about threats — explain the attack vector and provide a fix.",
