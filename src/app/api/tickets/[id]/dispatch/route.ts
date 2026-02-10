@@ -464,15 +464,15 @@ function buildAgentSystemPrompt(
     developer: "You are a developer. You can read, write, and edit code in the workspace.\nImplement changes, fix bugs, or prototype solutions as requested.\nMake targeted changes — don't refactor unrelated code.\n\nWhen in PLANNING PHASE (research approved, no plan approved yet):\n- Your final message to the user IS the implementation plan — output ONLY structured markdown.\n- Progress messages (via report.sh) are optional status updates. They do NOT replace the plan. You MUST output the full plan as your final response.\n- Be DECISIVE. Make choices and document your reasoning. Do NOT ask questions or wait for clarification.\n- If users have answered questions in comments, incorporate those answers into the plan.\n- Cover: architecture, file structure, data models, API routes, dependencies, and step-by-step implementation order.\n- If information is ambiguous, state your assumption and move forward.",
     designer: `You are a designer. Generate mockups using nano-banana, then output a design document.
 
-## nano-banana CLI — YOU MUST USE THIS
-Tool path: ${path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs")}
-GEMINI_API_KEY is set in your environment.
+## Available Tools
 
-Generate an image:
+**nano-banana** (AI image generation):
 node ${path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs")} "A detailed description of the UI to generate" --output designs/mockup-name.png --ticket TICKET_ID --persona YOUR_PERSONA_ID
 
-Generate code:
-node ${path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs")} --text "Describe the React component to generate"
+**apply_transparency** (remove grey backgrounds from generated images):
+node ${path.join(process.cwd(), "scripts", "tools", "apply-transparency.mjs")} <attachment-id> --ticket <ticket-id> [--tolerance 50] [--grey 128]
+
+Use apply_transparency after nano-banana generates an image to remove the grey background.
 
 ## CRITICAL: Design Document Output
 After generating mockups, your final message to the user IS the design document. Include:
@@ -493,9 +493,54 @@ RULES:
   const role = persona.role || "developer";
   const roleInstructions = getSetting(`prompt_role_${role}`) || defaultRolePrompts[role] || defaultRolePrompts.developer;
 
+  // Tool/capability mappings by role
+  const roleCapabilities: Record<string, string[]> = {
+    researcher: [
+      "Read, Grep, Glob (read-only file access)",
+      "Bash (read-only commands)",
+      "report.sh (post progress updates)",
+    ],
+    developer: [
+      "Read, Write, Edit, Grep, Glob (full file access)",
+      "Bash (full command access)",
+      "Git (status, diff, commit, push)",
+      "report.sh (post progress updates)",
+      "apply_transparency (remove grey backgrounds from images)",
+    ],
+    designer: [
+      "Read, Write, Edit, Grep, Glob (full file access)",
+      "Bash (full command access)",
+      "nano_banana (AI image generation via Gemini)",
+      "apply_transparency (remove grey backgrounds from images)",
+      "report.sh (post progress updates)",
+    ],
+    hacker: [
+      "Read, Write, Edit, Grep, Glob (full file access)",
+      "Bash (full command access)",
+      "Git (status, diff, commit, push)",
+      "report.sh (post progress updates)",
+      "apply_transparency (remove grey backgrounds from images)",
+    ],
+    critic: [
+      "Read, Grep, Glob (read-only file access)",
+      "Bash (read-only commands)",
+      "report.sh (post progress updates)",
+    ],
+    lead: [
+      "Read, Grep, Glob (read-only file access)",
+      "Bash (read-only commands)",
+      "report.sh (post progress updates)",
+    ],
+  };
+
+  const capabilities = roleCapabilities[role] || roleCapabilities.developer;
+
+  const timestamp = new Date().toISOString();
+
   return [
     `You are ${persona.name}, working on project "${project.name}".`,
     `Workspace: ${workspace}`,
+    `Session started: ${timestamp}`,
     "",
     "CRITICAL WORKSPACE RULES:",
     `- Your workspace is: ${workspace}`,
@@ -521,6 +566,10 @@ RULES:
       const skills = p.skills ? ` — skills: ${p.skills}` : "";
       return `- **${p.name}** (${p.role || "member"})${you}${skills}`;
     }),
+    "",
+    "## Your Capabilities",
+    "When asked what tools or capabilities you have, here is what you can do:",
+    ...capabilities.map(cap => `- ${cap}`),
     "",
     roleInstructions,
     "",

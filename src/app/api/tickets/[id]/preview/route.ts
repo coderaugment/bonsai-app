@@ -60,10 +60,14 @@ export async function POST(
   // Derive a stable port from project ID (3100–3199 range)
   const port = 3100 + (project.id % 100);
 
+  // Use the requesting host so URLs work from LAN devices (phone, etc.)
+  const reqHost = new URL(req.url).hostname;
+  const host = reqHost === "localhost" || reqHost === "127.0.0.1" ? reqHost : reqHost;
+
   // Check if dev server is already running on this port
   const inUse = await isPortInUse(port);
   if (inUse) {
-    return NextResponse.json({ url: `http://localhost:${port}`, alreadyRunning: true });
+    return NextResponse.json({ url: `http://${host}:${port}`, alreadyRunning: true });
   }
 
   // Detect project type and start dev server
@@ -80,7 +84,7 @@ export async function POST(
   const out = fs.openSync(logFile, "a");
   const err = fs.openSync(logFile, "a");
 
-  const child = spawn("npm", ["run", "dev", "--", "--port", String(port)], {
+  const child = spawn("npm", ["run", "dev", "--", "--port", String(port), "--hostname", "0.0.0.0"], {
     cwd: workspace,
     detached: true,
     stdio: ["ignore", out, err],
@@ -90,5 +94,5 @@ export async function POST(
 
   console.log(`[preview] Started dev server for ${ticketId} on port ${port} (pid ${child.pid})`);
 
-  return NextResponse.json({ url: `http://localhost:${port}`, pid: child.pid, port });
+  return NextResponse.json({ url: `http://${host}:${port}`, pid: child.pid, port });
 }

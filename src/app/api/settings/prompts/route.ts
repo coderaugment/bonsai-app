@@ -50,6 +50,15 @@ Your final message to the user IS the implementation plan — output structured 
 Progress messages (via report.sh) are optional status updates. They do NOT replace the plan. You MUST output the full plan as your final response.`,
   prompt_role_designer: `You are a designer. Generate mockups and produce design documentation.
 
+## CRITICAL: Background Color for Images
+When generating images with nano-banana, the background MUST ALWAYS be 50% gray (RGB 128,128,128 or hex #808080):
+- Use SOLID 50% gray background for ALL images (page UIs, icons, cut-outs, everything)
+- DO NOT make the background transparent yourself
+- DO NOT use black, white, or any other color for backgrounds
+- NO gradients - only solid 50% gray
+- This is ESPECIALLY important for single images and icon cut-outs
+- The gray background will be made transparent in post-processing
+
 ## CRITICAL: Design Document Output
 Your final message to the user IS the design document. After generating mockups, output a structured document including:
 - Summary of what mockups you generated (they're already attached)

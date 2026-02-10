@@ -101,7 +101,10 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   // Attachments state
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [lightboxAttachmentId, setLightboxAttachmentId] = useState<number | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [processingTransparency, setProcessingTransparency] = useState(false);
+  const [processingAttachmentId, setProcessingAttachmentId] = useState<number | null>(null);
 
   // Comments state
   const [comments, setComments] = useState<Comment[]>([]);
@@ -140,8 +143,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   const descOnFocusRef = useRef<string>("");
 
   // Local lifecycle state (from ticket prop, refreshed after actions)
-  const [researchApprovedAt, setResearchApprovedAt] = useState<string | undefined>();
-  const [planApprovedAt, setPlanApprovedAt] = useState<string | undefined>();
   const [deletingDoc, setDeletingDoc] = useState<string | null>(null);
 
   // Audit log state
@@ -209,10 +210,11 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     state !== baselineRef.current.state
   ) : false;
 
-  // Clear document view when modal closes
+  // Clear document view and lightbox when modal closes
   useEffect(() => {
     if (!ticket) {
       setExpandedDoc(null);
+      setLightboxImage(null);
     }
   }, [ticket]);
 
@@ -232,8 +234,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
         type: ticket.type,
         state: ticket.state,
       };
-      setResearchApprovedAt(ticket.researchApprovedAt);
-      setPlanApprovedAt(ticket.planApprovedAt);
       loadComments(ticket.id);
       loadDocuments(ticket.id, initialDocType);
       loadAttachments(ticket.id);
@@ -264,7 +264,9 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     if (!ticket) return;
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (expandedDoc) {
+        if (lightboxImage) {
+          setLightboxImage(null);
+        } else if (expandedDoc) {
           setExpandedDoc(null);
         } else {
           onClose();
@@ -273,7 +275,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [ticket, onClose, expandedDoc]);
+  }, [ticket, onClose, expandedDoc, lightboxImage]);
 
   // Poll comments every 10s while modal is open (doesn't touch form state)
   useEffect(() => {
@@ -318,6 +320,24 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
             .filter((d) => d.type === prev.type)
             .sort((a, b) => (b.version || 0) - (a.version || 0))[0];
           if (latest && latest.version !== prev.version) return latest;
+          return prev;
+        });
+      } catch { /* skip cycle */ }
+    }, 10_000);
+    return () => clearInterval(poll);
+  }, [ticketId]);
+
+  // Poll attachments every 10s while modal is open (for designer-generated images)
+  useEffect(() => {
+    if (!ticketId) return;
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/tickets/${ticketId}/attachments`);
+        const data = await res.json();
+        const fresh = data || [];
+        setAttachments((prev) => {
+          // Only update if count changed (new attachments added or deleted)
+          if (fresh.length !== prev.length) return fresh;
           return prev;
         });
       } catch { /* skip cycle */ }
@@ -448,8 +468,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
 
   // Workflow state badge
   function getResearchWorkflowState(): { label: string; color: string } {
-    if (researchApprovedAt) return { label: "Approved", color: "#22c55e" };
-    if (maxResearchVersion >= 3) return { label: "Awaiting Approval", color: "#f59e0b" };
+    if (maxResearchVersion >= 3) return { label: "Ready", color: "#f59e0b" };
     if (maxResearchVersion === 2) return { label: "Researcher Finalizing", color: "#8b5cf6" };
     if (maxResearchVersion === 1) return { label: "Critic Reviewing", color: "#ef4444" };
     if (ticket?.researchCompletedBy || documents.some(d => d.type === "research")) return { label: "Researching", color: "#3b82f6" };
@@ -500,14 +519,13 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     if (!ticket) return;
     setApprovingResearch(true);
     try {
-      // Move ticket to plan state (PATCH handles approval + state change + dispatch)
+      // Move ticket to plan state
       const response = await fetch(`/api/tickets`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticketId: ticket.id, state: "plan" }),
       });
       if (response.ok) {
-        setResearchApprovedAt(new Date().toISOString());
         router.refresh();
         onClose();
       }
@@ -520,14 +538,13 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     if (!ticket) return;
     setApprovingPlan(true);
     try {
-      // Move ticket to build state (PATCH handles approval + state change + dispatch)
+      // Move ticket to build state
       const response = await fetch(`/api/tickets`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticketId: ticket.id, state: "build" }),
       });
       if (response.ok) {
-        setPlanApprovedAt(new Date().toISOString());
         router.refresh();
         onClose();
       }
@@ -543,7 +560,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
       await fetch(`/api/tickets/${ticket.id}/documents?type=${docType}`, { method: "DELETE" });
       setDocuments((prev) => prev.filter((d) => d.type !== docType));
       if (docType === "research") setResearchApprovedAt(undefined);
-      if (docType === "implementation_plan") setPlanApprovedAt(undefined);
       if (expandedDoc?.type === docType) setExpandedDoc(null);
       router.refresh();
     } finally {
@@ -698,6 +714,23 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     return {};
   }
 
+  // Detect if comment is conversational (short question/chat) vs. a work directive
+  function isConversationalComment(text: string): boolean {
+    const trimmed = text.trim();
+
+    // Short comments (under 200 chars) are likely conversational
+    if (trimmed.length < 200) {
+      // Question patterns
+      if (/\?$/.test(trimmed)) return true;
+      if (/^(what|how|why|when|where|who|can|could|would|should|do|does|did|is|are|was|were)/i.test(trimmed)) return true;
+      // Greeting/acknowledgment patterns
+      if (/^(thanks|thank you|got it|ok|okay|sure|yes|no|lgtm|approved)/i.test(trimmed)) return true;
+    }
+
+    // Long detailed requests are not conversational (work directives)
+    return false;
+  }
+
   // Debounced dispatch: batches multiple rapid comments into a single agent dispatch
   function queueDispatch(commentContent: string, opts?: { conversational?: boolean; documentId?: number; isDocComment?: boolean; targetPersonaId?: string }) {
     if (!ticket) return;
@@ -768,7 +801,10 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
         setNewComment("");
         setCommentAttachments([]);
         setTimeout(() => commentsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-        queueDispatch(commentText);
+
+        // Detect if this is a conversational comment (short question or chat-like)
+        const isConversational = isConversationalComment(commentText);
+        queueDispatch(commentText, { conversational: isConversational });
       }
     } finally {
       setPostingComment(false);
@@ -1136,6 +1172,89 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
+  async function applyTransparencyToAttachment(attachmentId: number) {
+    if (!ticket) return;
+    setProcessingAttachmentId(attachmentId);
+
+    try {
+      // Get the attachment URL
+      const attachmentUrl = `/api/tickets/${ticket.id}/attachments/${attachmentId}`;
+
+      // Load the image
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = reject;
+        img.src = attachmentUrl;
+      });
+
+      // Create canvas and get pixel data
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) {
+        throw new Error("Failed to get canvas context");
+      }
+
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+
+      // Process pixels: make 50% grey transparent
+      const tolerance = 50; // Increased tolerance to catch more greys
+      const greyTarget = 128;
+      let pixelsChanged = 0;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+
+        // Check if pixel is close to 50% grey
+        const isGrey =
+          Math.abs(r - greyTarget) < tolerance &&
+          Math.abs(g - greyTarget) < tolerance &&
+          Math.abs(b - greyTarget) < tolerance &&
+          Math.abs(r - g) < tolerance &&
+          Math.abs(g - b) < tolerance;
+
+        if (isGrey) {
+          // Make it transparent
+          data[i + 3] = 0;
+          pixelsChanged++;
+        }
+      }
+
+      console.log(`Made ${pixelsChanged} pixels transparent`);
+
+      // Put the modified pixel data back
+      ctx.putImageData(imageData, 0, 0);
+
+      // Convert to PNG data URL
+      const processedDataUrl = canvas.toDataURL("image/png");
+
+      // Send to server to save
+      const res = await fetch(`/api/tickets/${ticket.id}/attachments/${attachmentId}/transparency`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ processedDataUrl }),
+      });
+
+      if (res.ok) {
+        // Reload attachments to get the updated image
+        await loadAttachments(ticket.id);
+      }
+    } catch (err) {
+      console.error("Failed to apply transparency:", err);
+    } finally {
+      setProcessingAttachmentId(null);
+    }
+  }
+
   function formatTime(dateStr: string) {
     const date = new Date(dateStr);
     const now = new Date();
@@ -1342,7 +1461,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                   Loading documents...
                 </div>
               ) : (documents.length > 0 || ticket?.researchCompletedAt || ticket?.planCompletedAt) ? (
-                <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-4">
                   {["research", "design", "implementation_plan"].map((docType) => {
                     const doc = documents.find(d => d.type === docType);
                     if (!doc && !(docType === "research" && ticket?.researchCompletedAt)) return null;
@@ -1350,7 +1469,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                     const isResearch = docType === "research";
                     const isPlan = docType === "implementation_plan";
                     const isDesign = docType === "design";
-                    const approved = isResearch ? researchApprovedAt : isPlan ? planApprovedAt : false;
                     const title = isResearch ? "Research Document" : isDesign ? "Design Document" : "Implementation Plan";
                     const color = isResearch ? "#f59e0b" : isDesign ? "#8b5cf6" : "#8b5cf6";
                     const icon = isResearch ? (
@@ -1362,30 +1480,28 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                     );
 
                     return (
-                      <div key={docType} className="rounded-xl p-5" style={{
-                        backgroundColor: approved ? "rgba(34, 197, 94, 0.08)" : `color-mix(in srgb, ${color} 8%, transparent)`,
-                        border: `1px solid ${approved ? "rgba(34, 197, 94, 0.3)" : `color-mix(in srgb, ${color} 30%, transparent)`}`,
+                      <div key={docType} className="rounded-xl p-5 flex flex-col" style={{
+                        aspectRatio: '8.5 / 11',
+                        backgroundColor: `color-mix(in srgb, ${color} 8%, transparent)`,
+                        border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`,
                       }}>
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
                             <svg className="w-5 h-5" style={{ color }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>{icon}</svg>
                             <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{title}</span>
                             {doc && <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: `color-mix(in srgb, ${color} 20%, transparent)`, color }}>v{doc.version || 1}</span>}
-                            {approved && <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{ backgroundColor: "rgba(34, 197, 94, 0.2)", color: "#22c55e" }}>Approved</span>}
                           </div>
                           <div className="flex items-center gap-2">
                             {doc?.content && <button onClick={() => setExpandedDoc(doc)} className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/10" style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-secondary)" }}>View Full</button>}
-                            {isResearch && !approved && researchDocs.length >= 3 && <button onClick={handleApproveResearch} disabled={approvingResearch} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:opacity-90" style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingResearch ? 0.5 : 1 }}>{approvingResearch ? "Moving..." : "Move to Plan"}</button>}
-                            {isPlan && !approved && <button onClick={handleApprovePlan} disabled={approvingPlan} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:opacity-90" style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingPlan ? 0.5 : 1 }}>{approvingPlan ? "Moving..." : "Move to Build"}</button>}
                             <button onClick={() => handleDeleteDocument(docType as any)} disabled={deletingDoc === docType} className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-red-500/15" style={{ color: "var(--text-muted)" }} title={`Delete ${title.toLowerCase()}`}>
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
                             </button>
                           </div>
                         </div>
                         {doc?.content && (
-                          <div className="relative max-h-32 overflow-hidden cursor-pointer" style={{ color: "rgba(255, 255, 255, 0.8)" }} onClick={() => setExpandedDoc(doc)}>
-                            <div className="prose-sm"><ReactMarkdown components={{ h1: ({ children }) => <h1 className="text-base font-bold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h1>, h2: ({ children }) => <h2 className="text-sm font-bold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h2>, h3: ({ children }) => <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h3>, p: ({ children }) => <p className="mb-1.5">{children}</p>, strong: ({ children }) => <strong className="font-semibold text-white/90">{children}</strong>, code: ({ children }) => <code className="bg-white/10 px-1 rounded text-[12px]">{children}</code>, ul: ({ children }) => <ul className="list-disc list-inside mb-1.5 space-y-0.5">{children}</ul>, ol: ({ children }) => <ol className="list-decimal list-inside mb-1.5 space-y-0.5">{children}</ol> }}>{doc.content}</ReactMarkdown></div>
-                            <div className="absolute bottom-0 left-0 right-0 h-10" style={{ background: `linear-gradient(transparent, ${approved ? "rgba(10, 30, 15, 0.95)" : "rgba(20, 15, 30, 0.95)"})` }} />
+                          <div className="relative flex-1 overflow-hidden cursor-pointer" style={{ color: "rgba(255, 255, 255, 0.8)" }} onClick={() => setExpandedDoc(doc)}>
+                            <div className="prose-sm"><ReactMarkdown components={{ h1: ({ children }) => <h1 className="text-base font-bold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h1>, h2: ({ children }) => <h2 className="text-sm font-bold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h2>, h3: ({ children }) => <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{children}</h3>, p: ({ children }) => <p className="mb-1.5 text-xs">{children}</p>, strong: ({ children }) => <strong className="font-semibold text-white/90">{children}</strong>, code: ({ children }) => <code className="bg-white/10 px-1 rounded text-[11px]">{children}</code>, ul: ({ children }) => <ul className="list-disc list-inside mb-1.5 space-y-0.5 text-xs">{children}</ul>, ol: ({ children }) => <ol className="list-decimal list-inside mb-1.5 space-y-0.5 text-xs">{children}</ol> }}>{doc.content}</ReactMarkdown></div>
+                            <div className="absolute bottom-0 left-0 right-0 h-16" style={{ background: "linear-gradient(transparent, rgba(20, 15, 30, 0.98))" }} />
                           </div>
                         )}
                       </div>
@@ -1453,7 +1569,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                   <span className="text-xs">Drop files or click to upload</span>
                 </div>
               ) : (
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 gap-3">
                   {attachments.map((att) => {
                     const isImage = att.mimeType.startsWith("image/");
                     const attachmentUrl = `/api/tickets/${ticket?.id}/attachments/${att.id}`;
@@ -1462,15 +1578,60 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                       return (
                         <div
                           key={att.id}
-                          className="relative group aspect-square rounded-lg overflow-hidden cursor-pointer"
-                          style={{ backgroundColor: "rgba(0,0,0,0.3)" }}
-                          onClick={() => setLightboxImage(attachmentUrl)}
+                          className="relative group rounded-lg overflow-hidden cursor-pointer"
+                          style={{
+                            aspectRatio: '8.5 / 11',
+                            backgroundImage: 'linear-gradient(45deg, #808080 25%, transparent 25%), linear-gradient(-45deg, #808080 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #808080 75%), linear-gradient(-45deg, transparent 75%, #808080 75%)',
+                            backgroundSize: '20px 20px',
+                            backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
+                            backgroundColor: '#404040'
+                          }}
+                          onClick={() => { setLightboxImage(`${attachmentUrl}?t=${Date.now()}`); setLightboxAttachmentId(att.id); }}
                         >
-                          <img src={attachmentUrl} alt={att.filename} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                          <img src={`${attachmentUrl}?t=${Date.now()}`} alt={att.filename} className="w-full h-full object-contain transition-transform group-hover:scale-105" />
+
+                          {/* Transparency button */}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); applyTransparencyToAttachment(att.id); }}
+                            disabled={processingAttachmentId === att.id}
+                            className="absolute top-1 left-1 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ backgroundColor: "rgba(0,0,0,0.7)", opacity: processingAttachmentId === att.id ? 0.5 : undefined }}
+                            title="Make 50% gray transparent"
+                          >
+                            {processingAttachmentId === att.id ? (
+                              <svg className="w-3 h-3 text-white animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                            ) : (
+                              <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M16 10.5C16 11.3284 15.5523 12 15 12C14.4477 12 14 11.3284 14 10.5C14 9.67157 14.4477 9 15 9C15.5523 9 16 9.67157 16 10.5Z" fill="currentColor"/>
+                                <ellipse cx="9" cy="10.5" rx="1" ry="1.5" fill="currentColor"/>
+                                <path opacity="0.8" d="M22 19.723V12.3006C22 6.61173 17.5228 2 12 2C6.47715 2 2 6.61173 2 12.3006V19.723C2 21.0453 3.35098 21.9054 4.4992 21.314C5.42726 20.836 6.5328 20.9069 7.39614 21.4998C8.36736 22.1667 9.63264 22.1667 10.6039 21.4998L10.9565 21.2576C11.5884 20.8237 12.4116 20.8237 13.0435 21.2576L13.3961 21.4998C14.3674 22.1667 15.6326 22.1667 16.6039 21.4998C17.4672 20.9069 18.5727 20.836 19.5008 21.314C20.649 21.9054 22 21.0453 22 19.723Z" stroke="currentColor" strokeWidth="1.5"/>
+                              </svg>
+                            )}
+                          </button>
+
+                          {/* Download button */}
+                          <a
+                            href={attachmentUrl}
+                            download={att.filename}
+                            onClick={(e) => { e.stopPropagation(); }}
+                            className="absolute top-1 left-8 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ backgroundColor: "rgba(0,0,0,0.7)" }}
+                            title="Download image"
+                          >
+                            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                            </svg>
+                          </a>
+
+                          {/* Delete button */}
                           <button
                             onClick={(e) => { e.stopPropagation(); removeAttachment(att.id); }}
-                            className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                             style={{ backgroundColor: "rgba(0,0,0,0.7)" }}
+                            title="Remove attachment"
                           >
                             <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1749,24 +1910,24 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
             >
               {saving ? "Saving..." : "Save Changes"}
             </button>
-            {ticket?.state === "research" && !researchApprovedAt && (
+            {ticket?.state === "research" && (
               <button
                 onClick={handleApproveResearch}
                 disabled={approvingResearch}
                 className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors hover:opacity-90"
                 style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingResearch ? 0.5 : 1 }}
               >
-                {approvingResearch ? "Approving..." : "Approve & Move to Plan"}
+                {approvingResearch ? "Moving..." : "Move to Plan"}
               </button>
             )}
-            {ticket?.state === "plan" && !planApprovedAt && (
+            {ticket?.state === "plan" && (
               <button
                 onClick={handleApprovePlan}
                 disabled={approvingPlan}
                 className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors hover:opacity-90"
                 style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingPlan ? 0.5 : 1 }}
               >
-                {approvingPlan ? "Approving..." : "Approve & Move to Build"}
+                {approvingPlan ? "Moving..." : "Move to Build"}
               </button>
             )}
           </div>
@@ -2145,15 +2306,60 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     </div>
   );
 
+  // Handle transparency tool
+  async function applyTransparency() {
+    if (!lightboxAttachmentId || !ticket) return;
+    setProcessingTransparency(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}/attachments/${lightboxAttachmentId}/transparency`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        // Reload attachments to get the updated image
+        await loadAttachments(ticket.id);
+        // Update lightbox with new image
+        const attachment = attachments.find(a => a.id === lightboxAttachmentId);
+        if (attachment) {
+          setLightboxImage(`/api/tickets/${ticket.id}/attachments/${lightboxAttachmentId}/file?t=${Date.now()}`);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to apply transparency:", err);
+    } finally {
+      setProcessingTransparency(false);
+    }
+  }
+
+  async function undoTransparency() {
+    if (!lightboxAttachmentId || !ticket) return;
+    setProcessingTransparency(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}/attachments/${lightboxAttachmentId}/transparency/undo`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        await loadAttachments(ticket.id);
+        const attachment = attachments.find(a => a.id === lightboxAttachmentId);
+        if (attachment) {
+          setLightboxImage(`/api/tickets/${ticket.id}/attachments/${lightboxAttachmentId}/file?t=${Date.now()}`);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to undo transparency:", err);
+    } finally {
+      setProcessingTransparency(false);
+    }
+  }
+
   // Lightbox for full-size image viewing
   const lightbox = lightboxImage && (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-8"
       style={{ backgroundColor: "rgba(0, 0, 0, 0.95)" }}
-      onClick={() => setLightboxImage(null)}
+      onClick={() => { setLightboxImage(null); setLightboxAttachmentId(null); }}
     >
       <button
-        onClick={() => setLightboxImage(null)}
+        onClick={() => { setLightboxImage(null); setLightboxAttachmentId(null); }}
         className="absolute top-6 right-6 w-10 h-10 rounded-full flex items-center justify-center transition-colors hover:bg-white/10"
         style={{ color: "var(--text-muted)" }}
       >
@@ -2161,12 +2367,23 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
-      <img
-        src={lightboxImage}
-        alt="Full size"
-        className="max-w-full max-h-full object-contain rounded-lg"
+      <div
+        className="max-w-full max-h-full flex items-center justify-center rounded-lg overflow-hidden"
+        style={{
+          backgroundImage: 'linear-gradient(45deg, #808080 25%, transparent 25%), linear-gradient(-45deg, #808080 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #808080 75%), linear-gradient(-45deg, transparent 75%, #808080 75%)',
+          backgroundSize: '20px 20px',
+          backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
+          backgroundColor: '#404040'
+        }}
         onClick={(e) => e.stopPropagation()}
-      />
+      >
+        <img
+          src={lightboxImage}
+          alt="Full size"
+          className="max-w-full max-h-full object-contain"
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
     </div>
   );
 
@@ -2213,24 +2430,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
           )}
         </div>
         <div className="flex items-center gap-3">
-          {expandedDoc.type === "research" && !researchApprovedAt && maxResearchVersion >= 3 && (
-            <button
-              onClick={() => { handleApproveResearch(); setExpandedDoc(null); }}
-              className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors hover:opacity-90"
-              style={{ backgroundColor: "#22c55e", color: "#fff" }}
-            >
-              Move to Plan
-            </button>
-          )}
-          {expandedDoc.type === "implementation_plan" && !planApprovedAt && (
-            <button
-              onClick={() => { handleApprovePlan(); setExpandedDoc(null); }}
-              className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors hover:opacity-90"
-              style={{ backgroundColor: "#22c55e", color: "#fff" }}
-            >
-              Move to Build
-            </button>
-          )}
           <button
             onClick={() => handleDeleteDocument(expandedDoc.type as "research" | "implementation_plan" | "design")}
             disabled={!!deletingDoc}

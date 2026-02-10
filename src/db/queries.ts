@@ -92,6 +92,35 @@ export function getPersonas(projectId?: number): Persona[] {
   }));
 }
 
+export function getPersona(personaId: string): Persona | null {
+  const row = db
+    .select()
+    .from(personas)
+    .where(and(eq(personas.id, personaId), isNull(personas.deletedAt)))
+    .get();
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    color: row.color,
+    avatar: row.avatar ?? undefined,
+    roleId: row.roleId ?? undefined,
+    role: row.role ?? "developer",
+    personality: row.personality ?? undefined,
+    skills: safeJsonParse<string[]>(row.skills, []),
+    processes: safeJsonParse<string[]>(row.processes, []),
+    goals: safeJsonParse<string[]>(row.goals, []),
+    permissions: safeJsonParse<{ tools: string[]; folders: string[] }>(
+      row.permissions,
+      { tools: [], folders: [] }
+    ),
+    projectId: row.projectId ?? undefined,
+  };
+}
+
 export function getTickets(projectId?: number): Ticket[] {
   const rows = projectId
     ? db.select().from(tickets).where(and(eq(tickets.projectId, projectId), isNull(tickets.deletedAt))).all()

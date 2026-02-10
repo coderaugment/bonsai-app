@@ -5,6 +5,7 @@
  *
  * Image generation (default):
  *   nano-banana "iPhone contacts list UI, dark theme"
+ *   nano-banana "sombrero icon" --transparent
  *   nano-banana "dashboard mockup" --output designs/dash.png
  *   nano-banana "login screen" --ticket tkt_04 --persona p01
  *
@@ -12,17 +13,19 @@
  *   nano-banana --text "React component for a contact card with hover effects"
  *
  * Flags:
- *   --output FILE   Save image to specific path (default: designs/nano-{timestamp}.png)
- *   --text PROMPT    Generate code/text instead of an image
- *   --ticket ID      Auto-attach generated image to a Bonsai ticket
- *   --persona ID     Tag attachment with persona ID
- *   --help           Show this help
+ *   --output FILE      Save image to specific path (default: designs/nano-{timestamp}.png)
+ *   --transparent      Make 50% gray background transparent (for cut-out images)
+ *   --text PROMPT      Generate code/text instead of an image
+ *   --ticket ID        Auto-attach generated image to a Bonsai ticket
+ *   --persona ID       Tag attachment with persona ID
+ *   --help             Show this help
  *
  * Requires GEMINI_API_KEY environment variable.
  */
 
 import fs from "fs";
 import path from "path";
+import { spawn } from "child_process";
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 const IMAGE_MODEL = "gemini-3-pro-image-preview";
@@ -31,11 +34,12 @@ const API_BASE = process.env.BONSAI_API_BASE || "http://localhost:3000";
 
 // ── Parse CLI args ──────────────────────────────
 function parseArgs(argv) {
-  const a = { imagePrompt: null, textPrompt: null, output: null, ticket: null, persona: null, help: false };
+  const a = { imagePrompt: null, textPrompt: null, output: null, ticket: null, persona: null, transparent: false, help: false };
   const rest = argv.slice(2);
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     if (arg === "--help" || arg === "-h") { a.help = true; }
+    else if (arg === "--transparent" || arg === "-t") { a.transparent = true; }
     else if (arg === "--text" && rest[i + 1]) { a.textPrompt = rest[++i]; }
     else if (arg === "--output" && rest[i + 1]) { a.output = rest[++i]; }
     else if (arg === "--ticket" && rest[i + 1]) { a.ticket = rest[++i]; }
@@ -55,6 +59,7 @@ Code/text:        nano-banana --text "prompt for code generation"
 
 Options:
   --output FILE     Save image path (default: designs/nano-<ts>.png)
+  --transparent     Make 50% gray background transparent (for cut-outs)
   --ticket ID       Auto-attach image to Bonsai ticket
   --persona ID      Tag the attachment with a persona
   --help            Show this help`);
@@ -70,6 +75,36 @@ const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) {
   console.error("Error: GEMINI_API_KEY environment variable not set");
   process.exit(1);
+}
+
+// ── Make 50% gray transparent ───────────────────
+async function makeGrayTransparent(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    // Use ImageMagick to convert 50% gray (#808080, rgb(128,128,128)) to transparent
+    // -fuzz allows for slight variations in the gray color
+    const magick = spawn("magick", [
+      inputPath,
+      "-fuzz", "5%",
+      "-transparent", "rgb(128,128,128)",
+      outputPath
+    ]);
+
+    let stderr = "";
+    magick.stderr.on("data", (data) => { stderr += data.toString(); });
+
+    magick.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`ImageMagick failed (${code}): ${stderr}`));
+      } else {
+        console.log(`Transparency applied: ${path.resolve(outputPath)}`);
+        resolve(outputPath);
+      }
+    });
+
+    magick.on("error", (err) => {
+      reject(new Error(`Failed to run ImageMagick (is it installed?): ${err.message}`));
+    });
+  });
 }
 
 // ── Attach image to ticket ──────────────────────
@@ -97,14 +132,20 @@ async function attachToTicket(filePath, ticketId, personaId) {
 }
 
 // ── Generate image ──────────────────────────────
-async function generateImage(prompt, outputPath) {
+async function generateImage(prompt, outputPath, makeTransparent = false) {
+  // Enforce 50% gray background for all images
+  const enhancedPrompt = `${prompt}\n\nIMPORTANT: The background MUST be a solid 50% gray color (RGB 128,128,128 or hex #808080). No gradients, no other colors in the background.`;
+
   console.log(`Generating image: "${prompt.slice(0, 80)}${prompt.length > 80 ? "..." : ""}"`);
+  if (makeTransparent) {
+    console.log("Note: 50% gray background will be made transparent");
+  }
 
   const res = await fetch(`${ENDPOINT}/${IMAGE_MODEL}:generateContent?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ parts: [{ text: enhancedPrompt }] }],
       generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
     }),
   });
@@ -168,7 +209,20 @@ async function generateText(prompt) {
 // ── Main ────────────────────────────────────────
 if (args.imagePrompt) {
   const outputPath = args.output || `designs/nano-${Date.now()}.png`;
-  const saved = await generateImage(args.imagePrompt, outputPath);
+  let saved = await generateImage(args.imagePrompt, outputPath, args.transparent);
+
+  // Apply transparency if requested
+  if (args.transparent && saved) {
+    const transparentPath = outputPath.replace(/\.(png|jpg|jpeg)$/i, "-transparent.png");
+    try {
+      await makeGrayTransparent(saved, transparentPath);
+      saved = transparentPath;
+    } catch (err) {
+      console.error(`Transparency processing failed: ${err.message}`);
+      console.log("Continuing with original image (with gray background)");
+    }
+  }
+
   if (args.ticket && saved) {
     await attachToTicket(saved, args.ticket, args.persona);
   }

@@ -102,29 +102,34 @@ export async function POST(
     }
     savedDocType = "design";
   } else if (!conversational && isCurrentAssignee && ticket.researchApprovedAt && !ticket.planApprovedAt) {
-    // Planning phase — save/update implementation plan (unchanged logic)
-    const existing = db.select().from(ticketDocuments)
-      .where(and(eq(ticketDocuments.ticketId, ticketId), eq(ticketDocuments.type, "implementation_plan")))
-      .get();
+    // Planning phase — save/update implementation plan
+    // IMPORTANT: Critics should NOT save implementation plans, only comment
+    const canCreatePlan = completingRole !== "critic";
 
-    if (existing) {
-      db.update(ticketDocuments)
-        .set({ content: trimmed, version: (existing.version || 0) + 1, updatedAt: now })
-        .where(eq(ticketDocuments.id, existing.id))
-        .run();
-    } else {
-      db.insert(ticketDocuments)
-        .values({ ticketId, type: "implementation_plan", content: trimmed, version: 1, authorPersonaId: personaId || null, createdAt: now, updatedAt: now })
-        .run();
-    }
+    if (canCreatePlan) {
+      const existing = db.select().from(ticketDocuments)
+        .where(and(eq(ticketDocuments.ticketId, ticketId), eq(ticketDocuments.type, "implementation_plan")))
+        .get();
 
-    savedDocType = "implementation_plan";
+      if (existing) {
+        db.update(ticketDocuments)
+          .set({ content: trimmed, version: (existing.version || 0) + 1, updatedAt: now })
+          .where(eq(ticketDocuments.id, existing.id))
+          .run();
+      } else {
+        db.insert(ticketDocuments)
+          .values({ ticketId, type: "implementation_plan", content: trimmed, version: 1, authorPersonaId: personaId || null, createdAt: now, updatedAt: now })
+          .run();
+      }
 
-    if (!ticket.planCompletedAt) {
-      db.update(tickets)
-        .set({ planCompletedAt: now, planCompletedBy: personaId || null })
-        .where(eq(tickets.id, ticketId))
-        .run();
+      savedDocType = "implementation_plan";
+
+      if (!ticket.planCompletedAt) {
+        db.update(tickets)
+          .set({ planCompletedAt: now, planCompletedBy: personaId || null })
+          .where(eq(tickets.id, ticketId))
+          .run();
+      }
     }
   }
 
@@ -179,13 +184,16 @@ export async function POST(
     // v3: no auto-dispatch — human reviews
   } else if (savedDocType === "implementation_plan") {
     // Dispatch critic to review the implementation plan
-    const planAuthor = completingPersona?.name || "A developer";
-    const criticPrompt = `${planAuthor} just completed the implementation plan. Review it critically — check feasibility, missing edge cases, architectural risks, and whether it fully addresses the acceptance criteria.`;
-    fetch(`http://localhost:3000/api/tickets/${ticketId}/dispatch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ commentContent: criticPrompt, targetRole: "critic" }),
-    }).catch(() => {});
+    // IMPORTANT: Don't auto-dispatch if a critic just completed (prevents infinite loop)
+    if (completingRole !== "critic") {
+      const planAuthor = completingPersona?.name || "A developer";
+      const criticPrompt = `${planAuthor} just completed the implementation plan. Review it critically — check feasibility, missing edge cases, architectural risks, and whether it fully addresses the acceptance criteria.`;
+      fetch(`http://localhost:3000/api/tickets/${ticketId}/dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commentContent: criticPrompt, targetRole: "critic" }),
+      }).catch(() => {});
+    }
   }
 
   const agentName = completingPersona?.name ?? "Agent";
