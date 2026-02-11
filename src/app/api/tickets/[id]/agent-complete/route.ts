@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { comments, tickets, personas, ticketDocuments } from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, isNull } from "drizzle-orm";
 import { logAuditEvent } from "@/db/queries";
 
 // Called by the agent wrapper script when claude -p finishes.
@@ -219,6 +219,39 @@ export async function POST(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ commentContent: criticPrompt, targetRole: "critic" }),
       }).catch(() => {});
+    }
+  }
+
+  // ── Agent @mention dispatch ─────────────────────────────
+  // When an agent @mentions other agents in their output, dispatch those agents
+  // Skip if a document was saved (the auto-dispatch chain handles that)
+  // Skip self-mentions
+  if (!savedDocType) {
+    const projectPersonas = ticket.projectId
+      ? db.select().from(personas).where(and(eq(personas.projectId, ticket.projectId), isNull(personas.deletedAt))).all()
+      : [];
+
+    // Sort by name length desc so "Seo-yoon" matches before "Seo"
+    const sorted = [...projectPersonas].sort((a, b) => b.name.length - a.name.length);
+    const mentioned = new Set<string>();
+
+    for (const p of sorted) {
+      if (p.id === personaId) continue; // skip self
+      const pattern = new RegExp(`@${p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (pattern.test(trimmed) && !mentioned.has(p.id)) {
+        mentioned.add(p.id);
+        console.log(`[agent-complete] Agent ${personaId} mentioned @${p.name} — dispatching`);
+        fetch(`http://localhost:3000/api/tickets/${ticketId}/dispatch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            commentContent: trimmed,
+            targetPersonaId: p.id,
+            conversational: true,
+            silent: true,
+          }),
+        }).catch(() => {});
+      }
     }
   }
 

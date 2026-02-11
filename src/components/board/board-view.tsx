@@ -14,6 +14,56 @@ const columnOrder: TicketState[] = [
   "ship",
 ];
 
+const AGENT_ACTIVE_MS = 30 * 60 * 1000;
+
+// Sort tickets within a column: "needs your attention" first, "agent working" last
+function sortTickets(tickets: Ticket[]): Ticket[] {
+  return [...tickets].sort((a, b) => scoreTicket(b) - scoreTicket(a));
+}
+
+function scoreTicket(t: Ticket): number {
+  const now = Date.now();
+  const agentActive = t.lastAgentActivity && (now - new Date(t.lastAgentActivity).getTime()) < AGENT_ACTIVE_MS;
+
+  // Agent actively working = sink to bottom (nothing for human to do)
+  if (agentActive) return -1000;
+
+  let score = 0;
+
+  // Progress through the pipeline — further along = closer to needing human action
+  if (t.researchCompletedAt) score += 100;
+  if (t.researchApprovedAt) score += 100;
+  if (t.planCompletedAt) score += 100;
+  if (t.planApprovedAt) score += 100;
+
+  // Completed but not approved = needs human review NOW (highest priority)
+  if (t.researchCompletedAt && !t.researchApprovedAt) score += 200;
+  if (t.planCompletedAt && !t.planApprovedAt) score += 200;
+
+  // Returned from verification = needs attention
+  if (t.returnedFromVerification) score += 150;
+
+  // Bugs above features above chores
+  if (t.type === "bug") score += 50;
+  else if (t.type === "chore") score -= 10;
+
+  // Recent human comment = human is engaged with this ticket
+  if (t.lastHumanCommentAt) {
+    const humanAge = now - new Date(t.lastHumanCommentAt).getTime();
+    if (humanAge < 3600_000) score += 80; // commented in last hour
+    else if (humanAge < 86400_000) score += 30; // commented today
+  }
+
+  // Ship column: recently merged first
+  if (t.mergedAt) {
+    score += 50;
+    const mergeAge = now - new Date(t.mergedAt).getTime();
+    if (mergeAge < 86400_000) score += 50; // merged today
+  }
+
+  return score;
+}
+
 interface BoardViewProps {
   tickets: Ticket[];
   projectId: string;
@@ -75,7 +125,7 @@ export function BoardView({ tickets: initialTickets, projectId }: BoardViewProps
 
   const grouped = columnOrder.reduce(
     (acc, state) => {
-      acc[state] = tickets.filter((t) => t.state === state);
+      acc[state] = sortTickets(tickets.filter((t) => t.state === state));
       return acc;
     },
     {} as Record<TicketState, Ticket[]>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
@@ -35,52 +35,71 @@ function renderCommentContent(text: string, personas: Persona[]) {
   const parts = text.split(/(@[\w\p{L}-]+)/gu);
   return parts.map((part, i) => {
     if (!part.startsWith("@")) return part;
-    const name = part.slice(1).toLowerCase();
-    if (name === "team") {
-      return (
-        <span key={i} style={{
-          backgroundColor: "color-mix(in srgb, #10b981 20%, transparent)",
-          color: "#10b981",
-          padding: "1px 6px",
-          borderRadius: "4px",
-          fontSize: "0.8em",
-          fontWeight: 600,
-        }}>
-          👥 @team
-        </span>
-      );
+    return renderMentionSpan(part, i, personas);
+  });
+}
+
+function renderMentionSpan(part: string, key: number | string, personas: Persona[]) {
+  const name = part.slice(1).toLowerCase();
+  if (name === "team") {
+    return (
+      <span key={key} style={{
+        backgroundColor: "color-mix(in srgb, #10b981 20%, transparent)",
+        color: "#10b981",
+        padding: "1px 6px",
+        borderRadius: "4px",
+        fontSize: "0.8em",
+        fontWeight: 600,
+      }}>
+        👥 @team
+      </span>
+    );
+  }
+  const board = BOARD_STATES.find((b) => b.name === name);
+  if (board) {
+    return (
+      <span key={key} style={{
+        backgroundColor: `color-mix(in srgb, ${board.color} 20%, transparent)`,
+        color: board.color,
+        padding: "1px 6px",
+        borderRadius: "4px",
+        fontSize: "0.8em",
+        fontWeight: 600,
+      }}>
+        {board.icon} {board.label}
+      </span>
+    );
+  }
+  const persona = personas.find((p) => p.name.toLowerCase() === name);
+  if (persona) {
+    return (
+      <span key={key} style={{
+        backgroundColor: `color-mix(in srgb, ${persona.color || "#6366f1"} 20%, transparent)`,
+        color: persona.color || "#a78bfa",
+        padding: "1px 6px",
+        borderRadius: "4px",
+        fontSize: "0.8em",
+        fontWeight: 600,
+      }}>
+        @{persona.name}
+      </span>
+    );
+  }
+  return part;
+}
+
+// Process React children recursively to highlight @mentions inside ReactMarkdown output
+function highlightMentionsInChildren(children: React.ReactNode, personas: Persona[]): React.ReactNode {
+  return React.Children.map(children, (child) => {
+    if (typeof child === "string") {
+      const parts = child.split(/(@[\w\p{L}-]+)/gu);
+      if (parts.length === 1) return child;
+      return parts.map((part, i) => {
+        if (!part.startsWith("@")) return part;
+        return renderMentionSpan(part, `m${i}`, personas);
+      });
     }
-    const board = BOARD_STATES.find((b) => b.name === name);
-    if (board) {
-      return (
-        <span key={i} style={{
-          backgroundColor: `color-mix(in srgb, ${board.color} 20%, transparent)`,
-          color: board.color,
-          padding: "1px 6px",
-          borderRadius: "4px",
-          fontSize: "0.8em",
-          fontWeight: 600,
-        }}>
-          {board.icon} {board.label}
-        </span>
-      );
-    }
-    const persona = personas.find((p) => p.name.toLowerCase() === name);
-    if (persona) {
-      return (
-        <span key={i} style={{
-          backgroundColor: `color-mix(in srgb, ${persona.color || "#6366f1"} 20%, transparent)`,
-          color: persona.color || "#a78bfa",
-          padding: "1px 6px",
-          borderRadius: "4px",
-          fontSize: "0.8em",
-          fontWeight: 600,
-        }}>
-          @{persona.name}
-        </span>
-      );
-    }
-    return part;
+    return child;
   });
 }
 
@@ -2019,8 +2038,8 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                                 h1: ({ children }) => <h1 className="text-base font-bold mt-3 mb-1.5" style={{ color: "#fff" }}>{children}</h1>,
                                 h2: ({ children }) => <h2 className="text-[15px] font-bold mt-2.5 mb-1" style={{ color: "#fff" }}>{children}</h2>,
                                 h3: ({ children }) => <h3 className="text-sm font-semibold mt-2 mb-1" style={{ color: "rgba(255,255,255,0.95)" }}>{children}</h3>,
-                                p: ({ children }) => <p className="mb-2 text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>{children}</p>,
-                                strong: ({ children }) => <strong className="font-semibold" style={{ color: "rgba(255,255,255,0.95)" }}>{children}</strong>,
+                                p: ({ children }) => <p className="mb-2 text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>{highlightMentionsInChildren(children, personasList)}</p>,
+                                strong: ({ children }) => <strong className="font-semibold" style={{ color: "rgba(255,255,255,0.95)" }}>{highlightMentionsInChildren(children, personasList)}</strong>,
                                 em: ({ children }) => <em style={{ color: "rgba(255,255,255,0.65)" }}>{children}</em>,
                                 code: ({ children, className }) => {
                                   const isBlock = className?.includes("language-");
@@ -2032,7 +2051,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                                 pre: ({ children }) => <pre className="mb-2 rounded-lg overflow-hidden">{children}</pre>,
                                 ul: ({ children }) => <ul className="list-disc ml-4 mb-2 space-y-0.5 text-sm" style={{ color: "rgba(255,255,255,0.8)" }}>{children}</ul>,
                                 ol: ({ children }) => <ol className="list-decimal ml-4 mb-2 space-y-0.5 text-sm" style={{ color: "rgba(255,255,255,0.8)" }}>{children}</ol>,
-                                li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                                li: ({ children }) => <li className="leading-relaxed">{highlightMentionsInChildren(children, personasList)}</li>,
                                 blockquote: ({ children }) => <blockquote className="border-l-2 pl-3 my-2" style={{ borderColor: "rgba(99,102,241,0.5)", color: "rgba(255,255,255,0.65)" }}>{children}</blockquote>,
                                 hr: () => <hr className="my-3" style={{ borderColor: "rgba(255,255,255,0.06)" }} />,
                                 a: ({ href, children }) => <a href={href} className="underline" style={{ color: "#818cf8" }}>{children}</a>,
@@ -2659,8 +2678,8 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                                 h1: ({ children }) => <h1 className="text-base font-bold mt-3 mb-1.5" style={{ color: "#fff" }}>{children}</h1>,
                                 h2: ({ children }) => <h2 className="text-[15px] font-bold mt-2.5 mb-1" style={{ color: "#fff" }}>{children}</h2>,
                                 h3: ({ children }) => <h3 className="text-sm font-semibold mt-2 mb-1" style={{ color: "rgba(255,255,255,0.95)" }}>{children}</h3>,
-                                p: ({ children }) => <p className="mb-2 text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>{children}</p>,
-                                strong: ({ children }) => <strong className="font-semibold" style={{ color: "rgba(255,255,255,0.95)" }}>{children}</strong>,
+                                p: ({ children }) => <p className="mb-2 text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>{highlightMentionsInChildren(children, personasList)}</p>,
+                                strong: ({ children }) => <strong className="font-semibold" style={{ color: "rgba(255,255,255,0.95)" }}>{highlightMentionsInChildren(children, personasList)}</strong>,
                                 em: ({ children }) => <em style={{ color: "rgba(255,255,255,0.65)" }}>{children}</em>,
                                 code: ({ children, className }) => {
                                   const isBlock = className?.includes("language-");
@@ -2672,7 +2691,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                                 pre: ({ children }) => <pre className="mb-2 rounded-lg overflow-hidden">{children}</pre>,
                                 ul: ({ children }) => <ul className="list-disc ml-4 mb-2 space-y-0.5 text-sm" style={{ color: "rgba(255,255,255,0.8)" }}>{children}</ul>,
                                 ol: ({ children }) => <ol className="list-decimal ml-4 mb-2 space-y-0.5 text-sm" style={{ color: "rgba(255,255,255,0.8)" }}>{children}</ol>,
-                                li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                                li: ({ children }) => <li className="leading-relaxed">{highlightMentionsInChildren(children, personasList)}</li>,
                                 blockquote: ({ children }) => <blockquote className="border-l-2 pl-3 my-2" style={{ borderColor: "rgba(99,102,241,0.5)", color: "rgba(255,255,255,0.65)" }}>{children}</blockquote>,
                                 hr: () => <hr className="my-3" style={{ borderColor: "rgba(255,255,255,0.06)" }} />,
                                 a: ({ href, children }) => <a href={href} className="underline" style={{ color: "#818cf8" }}>{children}</a>,
