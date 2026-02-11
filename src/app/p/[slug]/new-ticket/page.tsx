@@ -24,7 +24,7 @@ export default async function NewTicketPage({
 
   return (
     <div className="flex flex-col h-full">
-      <BoardHeader project={project} allProjects={allProjects} />
+      <BoardHeader project={project} allProjects={allProjects} shippedCount={0} hasCommands={!!(project.buildCommand && project.runCommand)} />
       <NewTicketForm projectId={project.id} projectSlug={slug} />
     </div>
   );

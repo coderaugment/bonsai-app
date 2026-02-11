@@ -14,7 +14,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   const body = await req.json();
-  const { name, githubOwner, githubRepo } = body;
+  const { name, githubOwner, githubRepo, buildCommand, runCommand } = body;
 
   const project = getProject();
   if (!project) {
@@ -35,6 +35,12 @@ export async function POST(req: Request) {
   }
   if (githubRepo !== undefined) {
     updates.githubRepo = githubRepo || null;
+  }
+  if (buildCommand !== undefined) {
+    updates.buildCommand = buildCommand?.trim() || null;
+  }
+  if (runCommand !== undefined) {
+    updates.runCommand = runCommand?.trim() || null;
   }
 
   if (Object.keys(updates).length === 0) {

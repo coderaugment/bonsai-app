@@ -138,6 +138,8 @@ export interface Project {
   githubOwner?: string;
   githubRepo?: string;
   localPath?: string;
+  buildCommand?: string;
+  runCommand?: string;
 }
 
 export interface CommentAttachment {

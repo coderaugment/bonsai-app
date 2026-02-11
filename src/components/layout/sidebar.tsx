@@ -6,6 +6,8 @@ import Image from "next/image";
 import { SettingsPanel } from "./settings-panel";
 import { ProjectsPanel } from "./projects-panel";
 import { CompanyModal } from "../board/company-modal";
+import { ProjectSettingsModal } from "../board/project-settings-modal";
+import type { Project } from "@/types";
 
 function getNavItems(projectSlug?: string) {
   const boardHref = projectSlug ? `/p/${projectSlug}` : "/board";
@@ -73,6 +75,8 @@ export function Sidebar({ userName }: { userName?: string }) {
   const [showCompany, setShowCompany] = useState(false);
   const [companyProjectSlug, setCompanyProjectSlug] = useState("");
   const [companyPersonas, setCompanyPersonas] = useState<import("@/types").Persona[]>([]);
+  const [showProjectSettings, setShowProjectSettings] = useState(false);
+  const [projectSettingsData, setProjectSettingsData] = useState<Project | null>(null);
   const [clientName, setClientName] = useState(userName ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [activeProjectSlug, setActiveProjectSlug] = useState<string | undefined>(undefined);
@@ -95,6 +99,17 @@ export function Sidebar({ userName }: { userName?: string }) {
   }, []);
 
   const displayName = clientName || userName || "User";
+
+  async function openProjectSettings() {
+    try {
+      const res = await fetch("/api/settings/project");
+      const data = await res.json();
+      if (data?.id) {
+        setProjectSettingsData(data);
+        setShowProjectSettings(true);
+      }
+    } catch {}
+  }
 
   async function openCompany() {
     try {
@@ -173,6 +188,16 @@ export function Sidebar({ userName }: { userName?: string }) {
         >
           <NavIcon icon="projects" active={showProjects} />
         </button>
+
+        {/* Project Settings */}
+        <button
+          onClick={openProjectSettings}
+          className="group relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/5"
+          style={showProjectSettings ? { backgroundColor: "rgba(91, 141, 249, 0.1)" } : undefined}
+          title="Project Settings"
+        >
+          <NavIcon icon="settings" active={showProjectSettings} />
+        </button>
       </div>
 
       <div className="flex flex-col items-center gap-1">
@@ -208,6 +233,13 @@ export function Sidebar({ userName }: { userName?: string }) {
         projectSlug={companyProjectSlug}
         personas={companyPersonas}
       />
+      {projectSettingsData && (
+        <ProjectSettingsModal
+          open={showProjectSettings}
+          onClose={() => setShowProjectSettings(false)}
+          project={projectSettingsData}
+        />
+      )}
     </aside>
   );
 }

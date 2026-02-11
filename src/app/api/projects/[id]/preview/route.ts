@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { tickets, projects } from "@/db/schema";
+import { projects } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { spawn, execSync } from "node:child_process";
 import * as path from "node:path";
@@ -8,22 +8,6 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 
 const BONSAI_DIR = path.join(process.env.HOME || "~", ".bonsai");
-const PROJECTS_DIR = path.join(process.env.HOME || "~", "development", "bonsai", "projects");
-const WORKTREES_DIR = path.join(BONSAI_DIR, "worktrees");
-
-function resolveWorkspace(
-  project: { githubRepo: string | null; slug: string; localPath: string | null },
-  ticketId: string
-): string {
-  // Check for existing worktree first
-  const slug = project.slug || project.githubRepo || "unknown";
-  const worktreePath = path.join(WORKTREES_DIR, slug, ticketId);
-  if (fs.existsSync(worktreePath)) return worktreePath;
-
-  // Fall back to main repo
-  if (project.localPath) return project.localPath;
-  return path.join(PROJECTS_DIR, project.githubRepo || project.slug);
-}
 
 function isPortInUse(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -37,30 +21,25 @@ function isPortInUse(port: number): Promise<boolean> {
   });
 }
 
-// POST /api/tickets/[id]/preview — start dev server and return URL
+// POST /api/projects/[id]/preview — start dev server on main branch and return URL
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: ticketId } = await params;
+  const { id } = await params;
 
-  const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
-  if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
-
-  const project = ticket.projectId
-    ? db.select().from(projects).where(eq(projects.id, ticket.projectId)).get()
-    : null;
+  const project = db.select().from(projects).where(eq(projects.id, Number(id))).get();
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  const workspace = resolveWorkspace(project, ticketId);
-  if (!fs.existsSync(workspace)) {
-    return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  const workspace = project.localPath;
+  if (!workspace || !fs.existsSync(workspace)) {
+    return NextResponse.json({ error: "Project local path not found" }, { status: 404 });
   }
 
   // Derive a stable port from project ID (3100–3199 range)
   const port = 3100 + (project.id % 100);
 
-  // Use the requesting host so URLs work from LAN devices (phone, etc.)
+  // Use the requesting host so URLs work from LAN devices
   const reqHost = new URL(req.url).hostname;
   const host = reqHost === "localhost" || reqHost === "127.0.0.1" ? reqHost : reqHost;
 
@@ -70,14 +49,14 @@ export async function POST(
     return NextResponse.json({ url: `http://${host}:${port}`, alreadyRunning: true });
   }
 
-  // Detect project type and start dev server
+  // Ensure package.json exists
   const pkgPath = path.join(workspace, "package.json");
   if (!fs.existsSync(pkgPath)) {
     return NextResponse.json({ error: "No package.json found in workspace" }, { status: 400 });
   }
 
   // Spawn dev server in background
-  const logFile = path.join(BONSAI_DIR, "sessions", `preview-${ticketId}.log`);
+  const logFile = path.join(BONSAI_DIR, "sessions", `preview-project-${id}.log`);
   const logDir = path.dirname(logFile);
   if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
@@ -85,7 +64,7 @@ export async function POST(
 
   // Run build command synchronously before starting the dev server
   if (project.buildCommand) {
-    console.log(`[preview] Running build command for ${ticketId}: ${project.buildCommand}`);
+    console.log(`[preview] Running build command for project ${id}: ${project.buildCommand}`);
     try {
       execSync(project.buildCommand, {
         cwd: workspace,
@@ -93,9 +72,13 @@ export async function POST(
         env: envVars,
         stdio: ["ignore", fs.openSync(logFile, "a"), fs.openSync(logFile, "a")],
       });
-    } catch (buildErr) {
-      console.error(`[preview] Build command failed for ${ticketId}:`, buildErr);
-      return NextResponse.json({ error: "Build command failed" }, { status: 500 });
+    } catch {
+      let details = "";
+      try {
+        const lines = fs.readFileSync(logFile, "utf-8").trim().split("\n");
+        details = lines.slice(-10).join("\n");
+      } catch {}
+      return NextResponse.json({ error: "Build failed", details }, { status: 500 });
     }
   }
 
@@ -123,7 +106,7 @@ export async function POST(
   });
   child.unref();
 
-  console.log(`[preview] Started dev server for ${ticketId} on port ${port} (pid ${child.pid})`);
+  console.log(`[preview] Started dev server for project ${id} on port ${port} (pid ${child.pid})`);
 
   return NextResponse.json({ url: `http://${host}:${port}`, pid: child.pid, port });
 }

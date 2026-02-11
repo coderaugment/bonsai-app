@@ -9,13 +9,16 @@ interface ProjectSettingsModalProps {
   open: boolean;
   onClose: () => void;
   project: Project;
+  notice?: string;
 }
 
-export function ProjectSettingsModal({ open, onClose, project }: ProjectSettingsModalProps) {
+export function ProjectSettingsModal({ open, onClose, project, notice }: ProjectSettingsModalProps) {
   const router = useRouter();
   const [name, setName] = useState(project.name);
   const [repoName, setRepoName] = useState(project.githubRepo ?? "");
   const [githubUser, setGithubUser] = useState(project.githubOwner ?? "");
+  const [buildCommand, setBuildCommand] = useState(project.buildCommand ?? "");
+  const [runCommand, setRunCommand] = useState(project.runCommand ?? "");
   const [repoExists, setRepoExists] = useState<boolean | null>(
     project.githubRepo ? true : null
   );
@@ -34,6 +37,8 @@ export function ProjectSettingsModal({ open, onClose, project }: ProjectSettings
     setName(project.name);
     setRepoName(project.githubRepo ?? "");
     setGithubUser(project.githubOwner ?? "");
+    setBuildCommand(project.buildCommand ?? "");
+    setRunCommand(project.runCommand ?? "");
     setRepoExists(project.githubRepo ? true : null);
     setError("");
     setConfirmDelete(false);
@@ -96,6 +101,16 @@ export function ProjectSettingsModal({ open, onClose, project }: ProjectSettings
         body.githubOwner = newOwner ?? "";
       }
 
+      const newBuild = buildCommand.trim() || undefined;
+      if (newBuild !== (project.buildCommand ?? undefined)) {
+        body.buildCommand = newBuild ?? "";
+      }
+
+      const newRun = runCommand.trim() || undefined;
+      if (newRun !== (project.runCommand ?? undefined)) {
+        body.runCommand = newRun ?? "";
+      }
+
       if (Object.keys(body).length === 0) {
         onClose();
         return;
@@ -151,7 +166,9 @@ export function ProjectSettingsModal({ open, onClose, project }: ProjectSettings
   const hasChanges =
     name.trim() !== project.name ||
     repoName.trim() !== (project.githubRepo ?? "") ||
-    githubUser !== (project.githubOwner ?? "");
+    githubUser !== (project.githubOwner ?? "") ||
+    buildCommand.trim() !== (project.buildCommand ?? "") ||
+    runCommand.trim() !== (project.runCommand ?? "");
 
   const modal = (
     <div
@@ -187,6 +204,32 @@ export function ProjectSettingsModal({ open, onClose, project }: ProjectSettings
 
         {/* Body */}
         <div className="px-5 py-4 space-y-4">
+          {notice && (
+            <div
+              className="px-3 py-2.5 rounded-lg text-sm"
+              style={{
+                backgroundColor: "rgba(234, 179, 8, 0.1)",
+                border: "1px solid rgba(234, 179, 8, 0.3)",
+                color: "#eab308",
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                </svg>
+                <span>{notice.includes("\n") ? notice.split("\n")[0] : notice}</span>
+              </div>
+              {notice.includes("\n") && (
+                <pre
+                  className="mt-2 text-xs overflow-x-auto max-h-32 overflow-y-auto"
+                  style={{ color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                >
+                  {notice.split("\n").slice(1).join("\n")}
+                </pre>
+              )}
+            </div>
+          )}
+
           {/* Project name */}
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-secondary)" }}>
@@ -239,6 +282,50 @@ export function ProjectSettingsModal({ open, onClose, project }: ProjectSettings
                 )}
               </div>
             )}
+          </div>
+
+          {/* Build command */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-secondary)" }}>
+              Build command
+            </label>
+            <input
+              type="text"
+              value={buildCommand}
+              onChange={(e) => setBuildCommand(e.target.value)}
+              placeholder="npm install && npx drizzle-kit push && npm run db:seed"
+              className="w-full px-3 py-2.5 rounded-lg text-sm font-mono outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-blue)]"
+              style={{
+                backgroundColor: "var(--bg-input)",
+                border: "1px solid var(--border-medium)",
+                color: "var(--text-primary)",
+              }}
+            />
+            <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+              Runs before the dev server starts (migrations, codegen, etc.)
+            </p>
+          </div>
+
+          {/* Run command */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-secondary)" }}>
+              Run command
+            </label>
+            <input
+              type="text"
+              value={runCommand}
+              onChange={(e) => setRunCommand(e.target.value)}
+              placeholder="npm run dev -- --port {{PORT}} --hostname 0.0.0.0"
+              className="w-full px-3 py-2.5 rounded-lg text-sm font-mono outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-blue)]"
+              style={{
+                backgroundColor: "var(--bg-input)",
+                border: "1px solid var(--border-medium)",
+                color: "var(--text-primary)",
+              }}
+            />
+            <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+              {"Use {{PORT}} as placeholder. Defaults to npm run dev"}
+            </p>
           </div>
 
           {error && (

@@ -31,6 +31,32 @@ export async function POST(
   const trimmed = content.trim();
   const now = new Date().toISOString();
 
+  // Reject generic/garbage completions from being saved as documents
+  // These are meta-comments about the work, not actual research/plan content
+  const GARBAGE_PATTERNS = [
+    /^I've completed my work on this task/i,
+    /^I encountered an error while working/i,
+    /^Check the file changes for details/i,
+    /^The criteria appear to already be checked off/i,
+    /^The research document above is the finalized/i,
+    /^Apologies for that.*the document wasn't persisted/i,
+  ];
+  const isGarbageContent = GARBAGE_PATTERNS.some(p => p.test(trimmed));
+  // Also reject anything under 500 chars that doesn't look like a real document (no headers, no structure)
+  const isTooShortForDocument = trimmed.length < 500 && !trimmed.includes("##") && !trimmed.includes("# ");
+  if (isGarbageContent || isTooShortForDocument) {
+    console.warn(`[agent-complete] Rejecting low-quality content for ticket ${ticketId} (${trimmed.length} chars): "${trimmed.slice(0, 80)}"`);
+    // Still post it as a comment so the agent's output isn't lost, just don't save as a document
+    db.insert(comments)
+      .values({ ticketId, authorType: "agent", personaId: personaId || null, content: trimmed, documentId: documentId || null })
+      .run();
+    db.update(tickets)
+      .set({ commentCount: (ticket.commentCount || 0) + 1 })
+      .where(eq(tickets.id, ticketId))
+      .run();
+    return NextResponse.json({ ok: true, rejected_as_document: true, reason: isGarbageContent ? "garbage_pattern" : "too_short" });
+  }
+
   // Look up the completing persona's role
   const completingPersona = personaId
     ? db.select().from(personas).where(eq(personas.id, personaId)).get()

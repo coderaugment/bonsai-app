@@ -32,6 +32,8 @@ function projectFromRow(row: typeof projects.$inferSelect): Project {
     githubOwner: row.githubOwner ?? undefined,
     githubRepo: row.githubRepo ?? undefined,
     localPath: row.localPath ?? undefined,
+    buildCommand: row.buildCommand ?? undefined,
+    runCommand: row.runCommand ?? undefined,
   };
 }
 

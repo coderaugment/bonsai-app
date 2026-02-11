@@ -77,6 +77,8 @@ export const projects = sqliteTable("projects", {
   githubOwner: text("github_owner"),
   githubRepo: text("github_repo"),
   localPath: text("local_path"),
+  buildCommand: text("build_command"),
+  runCommand: text("run_command"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   deletedAt: text("deleted_at"),
 });

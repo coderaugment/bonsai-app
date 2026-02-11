@@ -56,7 +56,12 @@ export default async function ProjectBoardPage({
 
   return (
     <div className="flex flex-col h-full">
-      <BoardHeader project={project} allProjects={allProjects} />
+      <BoardHeader
+        project={project}
+        allProjects={allProjects}
+        shippedCount={ticketStats.ship}
+        hasCommands={!!(project.buildCommand && project.runCommand)}
+      />
       <ProjectInfoPanel
         project={project}
         personas={personas}
