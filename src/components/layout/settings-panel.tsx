@@ -391,10 +391,6 @@ function ApiKeysSection() {
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyValue, setNewKeyValue] = useState("");
 
-  useEffect(() => {
-    loadKeys();
-  }, []);
-
   function loadKeys() {
     setLoading(true);
     fetch("/api/settings/keys")
@@ -405,6 +401,10 @@ function ApiKeysSection() {
       })
       .catch(() => setLoading(false));
   }
+
+  useEffect(() => {
+    loadKeys();
+  }, []);
 
   async function handleReveal(key: string) {
     if (revealed[key]) {
@@ -907,20 +907,6 @@ function RolesSection() {
   const [skillContent, setSkillContent] = useState("");
   const [addingSkill, setAddingSkill] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/roles")
-      .then((r) => r.json())
-      .then((data: RoleData[]) => {
-        setRolesList(data);
-        if (data.length > 0) {
-          setSelectedId(data[0].id);
-          loadRoleData(data[0]);
-        }
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
   function loadRoleData(role: RoleData) {
     setEditPrompt(role.systemPrompt || "");
     setEditTools(role.tools || []);
@@ -940,6 +926,20 @@ function RolesSection() {
       })
       .catch(() => setLoadingSkills(false));
   }
+
+  useEffect(() => {
+    fetch("/api/roles")
+      .then((r) => r.json())
+      .then((data: RoleData[]) => {
+        setRolesList(data);
+        if (data.length > 0) {
+          setSelectedId(data[0].id);
+          loadRoleData(data[0]);
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
 
   function handleSelectRole(id: number) {
     const role = rolesList.find((r) => r.id === id);

@@ -196,6 +196,7 @@ function postAgentComment(ticketId: string, personaId: string, content: string) 
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function toolsForPhase(role: string, ticket: typeof tickets.$inferSelect): string[] {
   // Research and planning phases: ENFORCE read-only for ALL roles
   // Agents cannot write files — their stdout IS the document
