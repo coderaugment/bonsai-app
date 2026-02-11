@@ -578,7 +578,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     try {
       await fetch(`/api/tickets/${ticket.id}/documents?type=${docType}`, { method: "DELETE" });
       setDocuments((prev) => prev.filter((d) => d.type !== docType));
-      if (docType === "research") setResearchApprovedAt(undefined);
+      // Research approval state is on the ticket — router.refresh() below will update it
       if (expandedDoc?.type === docType) setExpandedDoc(null);
       router.refresh();
     } finally {
@@ -719,9 +719,11 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
 
   // Extract first @mentioned persona name from comment text
   // Supports both @Name and @role (e.g., @designer, @lead, @researcher)
-  function extractMentionedPersona(text: string): { name?: string; role?: string } {
+  function extractMentionedPersona(text: string): { name?: string; role?: string; team?: boolean } {
     const lower = text.toLowerCase();
-    // Check persona names first (sort by length desc so longer names match first)
+    // Check @team first
+    if (lower.includes("@team")) return { team: true };
+    // Check persona names (sort by length desc so longer names match first)
     const sorted = [...personasList].sort((a, b) => b.name.length - a.name.length);
     for (const p of sorted) {
       if (lower.includes(`@${p.name.toLowerCase()}`)) return { name: p.name };
@@ -970,7 +972,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
         setDocCommentAttachments([]);
         setTimeout(() => docCommentsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
         // Dispatch agent — conversational mode so they reply in the doc comment thread
-        const docLabel = expandedDoc.type === "research" ? "research document" : expandedDoc.type === "design" ? "design document" : "implementation plan";
+        const docLabel = expandedDoc.type === "research" ? "research document" : (expandedDoc.type as string) === "design" ? "design document" : "implementation plan";
         queueDispatch(`[Comment on ${docLabel}] ${commentText}`, {
           conversational: true,
           documentId: expandedDoc.id,
@@ -2419,11 +2421,11 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
         style={{ borderColor: "var(--border-subtle)", backgroundColor: "#0f0f1a" }}
       >
         <div className="flex items-center gap-3">
-          <svg className="w-5 h-5" style={{ color: expandedDoc.type === "research" ? "#f59e0b" : expandedDoc.type === "design" ? "#8b5cf6" : "#8b5cf6" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <svg className="w-5 h-5" style={{ color: expandedDoc.type === "research" ? "#f59e0b" : (expandedDoc.type as string) === "design" ? "#8b5cf6" : "#8b5cf6" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
           </svg>
           <span className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
-            {expandedDoc.type === "research" ? "Research Document" : expandedDoc.type === "design" ? "Design Document" : "Implementation Plan"}
+            {expandedDoc.type === "research" ? "Research Document" : (expandedDoc.type as string) === "design" ? "Design Document" : "Implementation Plan"}
           </span>
           <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
             {ticket?.id}
@@ -2454,7 +2456,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
             disabled={!!deletingDoc}
             className="px-4 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-red-500/15"
             style={{ color: "#ef4444" }}
-            title={`Delete ${expandedDoc.type === "research" ? "research" : expandedDoc.type === "design" ? "design" : "plan"} — agents will redo`}
+            title={`Delete ${expandedDoc.type === "research" ? "research" : (expandedDoc.type as string) === "design" ? "design" : "plan"} — agents will redo`}
           >
             {deletingDoc ? "Deleting..." : "Delete"}
           </button>
@@ -2512,7 +2514,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
             {/* Document title */}
             <div className="mb-10">
               <h1 className="text-[28px] font-bold tracking-tight leading-tight" style={{ color: "#fff" }}>
-                {expandedDoc.type === "research" ? "Research Document" : expandedDoc.type === "design" ? "Design Document" : "Implementation Plan"}
+                {expandedDoc.type === "research" ? "Research Document" : (expandedDoc.type as string) === "design" ? "Design Document" : "Implementation Plan"}
               </h1>
               <div className="flex items-center gap-3 mt-3">
                 <span className="text-xs font-mono px-2 py-0.5 rounded" style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>

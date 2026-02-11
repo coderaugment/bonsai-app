@@ -4,10 +4,14 @@ import { join } from "path";
 import { tmpdir } from "os";
 import OpenAI from "openai";
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy-init OpenAI client (avoids build errors when OPENAI_API_KEY isn't set)
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,7 +38,7 @@ export async function POST(req: NextRequest) {
       const file = new File([buffer], "recording.webm", { type: "audio/webm" });
 
       // Transcribe using OpenAI Whisper API
-      const transcription = await openai.audio.transcriptions.create({
+      const transcription = await getOpenAI().audio.transcriptions.create({
         file: file,
         model: "whisper-1",
         language: "en",

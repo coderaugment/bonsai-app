@@ -3,12 +3,13 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 
-type Section = "preferences" | "api-keys" | "prompts";
+type Section = "preferences" | "api-keys" | "prompts" | "roles";
 
 const sections: { id: Section; label: string }[] = [
   { id: "preferences", label: "User preferences" },
   { id: "api-keys", label: "API Keys" },
   { id: "prompts", label: "Prompts" },
+  { id: "roles", label: "Roles" },
 ];
 
 interface SettingsData {
@@ -167,6 +168,8 @@ export function SettingsPanel({
             />
           ) : activeSection === "api-keys" ? (
             <ApiKeysSection />
+          ) : activeSection === "roles" ? (
+            <RolesSection />
           ) : (
             <PromptsSection />
           )}
@@ -697,12 +700,6 @@ function ApiKeysSection() {
 const PROMPT_OPTIONS = [
   { key: "prompt_avatar_style", label: "Team Avatar Style", description: "Art direction for generated worker avatar images" },
   { key: "prompt_user_avatar_style", label: "User Avatar Style", description: "Art direction for your personal avatar image" },
-  { key: "prompt_role_lead", label: "Lead Prompt", description: "System instructions for the team lead agent role" },
-  { key: "prompt_role_researcher", label: "Researcher Prompt", description: "System instructions for the researcher agent role" },
-  { key: "prompt_role_developer", label: "Developer Prompt", description: "System instructions for the developer agent role" },
-  { key: "prompt_role_designer", label: "Designer Prompt", description: "System instructions for the designer agent role" },
-  { key: "prompt_role_critic", label: "Critic Prompt", description: "System instructions for the critic/devil's advocate role" },
-  { key: "prompt_role_hacker", label: "Hacker Prompt", description: "System instructions for the security hacker agent role" },
 ];
 
 function PromptsSection() {
@@ -857,6 +854,526 @@ function PromptsSection() {
             >
               Reset to default
             </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Roles Section ──────────────────────────────────────
+
+interface RoleData {
+  id: number;
+  slug: string;
+  title: string;
+  description: string | null;
+  color: string;
+  systemPrompt: string | null;
+  tools: string[];
+  folderAccess: string[];
+  skillDefinitions: string[];
+}
+
+interface SkillData {
+  name: string;
+  description: string;
+  content: string;
+  scope: "shared" | "role";
+  path: string;
+}
+
+const ALL_TOOLS = ["Read", "Write", "Edit", "Grep", "Glob", "Bash"];
+
+function RolesSection() {
+  const [rolesList, setRolesList] = useState<RoleData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [skills, setSkills] = useState<SkillData[]>([]);
+  const [loadingSkills, setLoadingSkills] = useState(false);
+
+  // Edit state
+  const [editPrompt, setEditPrompt] = useState("");
+  const [editTools, setEditTools] = useState<string[]>([]);
+  const [editDescription, setEditDescription] = useState("");
+  const [editColor, setEditColor] = useState("#6366f1");
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Skill editor
+  const [editingSkill, setEditingSkill] = useState<SkillData | null>(null);
+  const [skillName, setSkillName] = useState("");
+  const [skillDesc, setSkillDesc] = useState("");
+  const [skillContent, setSkillContent] = useState("");
+  const [addingSkill, setAddingSkill] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/roles")
+      .then((r) => r.json())
+      .then((data: RoleData[]) => {
+        setRolesList(data);
+        if (data.length > 0) {
+          setSelectedId(data[0].id);
+          loadRoleData(data[0]);
+        }
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  function loadRoleData(role: RoleData) {
+    setEditPrompt(role.systemPrompt || "");
+    setEditTools(role.tools || []);
+    setEditDescription(role.description || "");
+    setEditColor(role.color || "#6366f1");
+    setDirty(false);
+    setEditingSkill(null);
+    setAddingSkill(false);
+
+    // Load skills for this role
+    setLoadingSkills(true);
+    fetch(`/api/roles/skills?role=${role.slug}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setSkills(data.skills || []);
+        setLoadingSkills(false);
+      })
+      .catch(() => setLoadingSkills(false));
+  }
+
+  function handleSelectRole(id: number) {
+    const role = rolesList.find((r) => r.id === id);
+    if (!role) return;
+    setSelectedId(id);
+    loadRoleData(role);
+  }
+
+  async function handleSave() {
+    if (!selectedId) return;
+    setSaving(true);
+    const res = await fetch("/api/roles", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: selectedId,
+        systemPrompt: editPrompt,
+        tools: editTools,
+        description: editDescription,
+        color: editColor,
+      }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setRolesList((prev) => prev.map((r) => (r.id === selectedId ? { ...r, ...updated } : r)));
+      setDirty(false);
+    }
+    setSaving(false);
+  }
+
+  function handleToggleTool(tool: string) {
+    setEditTools((prev) =>
+      prev.includes(tool) ? prev.filter((t) => t !== tool) : [...prev, tool]
+    );
+    setDirty(true);
+  }
+
+  async function handleSaveSkill() {
+    const role = rolesList.find((r) => r.id === selectedId);
+    if (!role) return;
+    setSaving(true);
+    await fetch("/api/roles/skills", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        role: role.slug,
+        skillName: skillName,
+        description: skillDesc,
+        content: skillContent,
+        scope: addingSkill ? "role" : (editingSkill?.scope || "role"),
+      }),
+    });
+    // Refresh skills list
+    const res = await fetch(`/api/roles/skills?role=${role.slug}`);
+    const data = await res.json();
+    setSkills(data.skills || []);
+    setEditingSkill(null);
+    setAddingSkill(false);
+    setSaving(false);
+  }
+
+  async function handleDeleteSkill(skill: SkillData) {
+    await fetch("/api/roles/skills", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skillPath: skill.path }),
+    });
+    setSkills((prev) => prev.filter((s) => s.path !== skill.path));
+  }
+
+  const selectedRole = rolesList.find((r) => r.id === selectedId);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <span className="text-sm" style={{ color: "var(--text-muted)" }}>Loading...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full gap-0 -mx-6 -my-5">
+      {/* Role list sidebar */}
+      <div
+        className="w-48 shrink-0 py-4 px-3 flex flex-col gap-1 border-r overflow-y-auto"
+        style={{ borderColor: "var(--border-subtle)" }}
+      >
+        <h3
+          className="text-xs font-semibold uppercase tracking-wider px-3 mb-2"
+          style={{ color: "var(--text-muted)" }}
+        >
+          Roles
+        </h3>
+        {rolesList.map((role) => (
+          <button
+            key={role.id}
+            onClick={() => handleSelectRole(role.id)}
+            className="flex items-center gap-2 text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{
+              backgroundColor: selectedId === role.id ? "rgba(91, 141, 249, 0.1)" : "transparent",
+              color: selectedId === role.id ? "var(--accent-blue)" : "var(--text-secondary)",
+            }}
+          >
+            <span
+              className="w-2.5 h-2.5 rounded-full shrink-0"
+              style={{ backgroundColor: role.color }}
+            />
+            {role.title}
+          </button>
+        ))}
+      </div>
+
+      {/* Role editor */}
+      {selectedRole && (
+        <div className="flex-1 py-5 px-6 overflow-y-auto flex flex-col gap-5">
+          {/* Header */}
+          <div className="flex items-center gap-3">
+            <span
+              className="w-4 h-4 rounded-full shrink-0"
+              style={{ backgroundColor: editColor }}
+            />
+            <h3
+              className="text-base font-semibold"
+              style={{ color: "var(--text-primary)" }}
+            >
+              {selectedRole.title}
+            </h3>
+            <span className="text-xs font-mono px-1.5 py-0.5 rounded" style={{ backgroundColor: "var(--bg-input)", color: "var(--text-muted)" }}>
+              {selectedRole.slug}
+            </span>
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="text-xs font-medium mb-1.5 block" style={{ color: "var(--text-muted)" }}>
+              Description
+            </label>
+            <input
+              type="text"
+              value={editDescription}
+              onChange={(e) => { setEditDescription(e.target.value); setDirty(true); }}
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-[var(--accent-blue)]"
+              style={{
+                backgroundColor: "var(--bg-input)",
+                border: "1px solid var(--border-medium)",
+                color: "var(--text-primary)",
+              }}
+            />
+          </div>
+
+          {/* Color */}
+          <div>
+            <label className="text-xs font-medium mb-1.5 block" style={{ color: "var(--text-muted)" }}>
+              Color
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={editColor}
+                onChange={(e) => { setEditColor(e.target.value); setDirty(true); }}
+                className="w-8 h-8 rounded cursor-pointer border-0"
+                style={{ backgroundColor: "transparent" }}
+              />
+              <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>{editColor}</span>
+            </div>
+          </div>
+
+          {/* Tools */}
+          <div>
+            <label className="text-xs font-medium mb-1.5 block" style={{ color: "var(--text-muted)" }}>
+              Allowed Tools
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {ALL_TOOLS.map((tool) => {
+                const active = editTools.includes(tool);
+                return (
+                  <button
+                    key={tool}
+                    onClick={() => handleToggleTool(tool)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                    style={{
+                      backgroundColor: active ? "rgba(91, 141, 249, 0.15)" : "var(--bg-input)",
+                      color: active ? "var(--accent-blue)" : "var(--text-muted)",
+                      border: `1px solid ${active ? "var(--accent-blue)" : "var(--border-subtle)"}`,
+                    }}
+                  >
+                    {tool}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+              Read-only roles: Read, Grep, Glob, Bash. Full access: all tools.
+            </p>
+          </div>
+
+          {/* System Prompt */}
+          <div className="flex flex-col" style={{ minHeight: "200px" }}>
+            <label className="text-xs font-medium mb-1.5 block shrink-0" style={{ color: "var(--text-muted)" }}>
+              System Prompt
+            </label>
+            <textarea
+              value={editPrompt}
+              onChange={(e) => { setEditPrompt(e.target.value); setDirty(true); }}
+              rows={12}
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-[var(--accent-blue)] resize-y"
+              style={{
+                backgroundColor: "var(--bg-input)",
+                border: "1px solid var(--border-medium)",
+                color: "var(--text-primary)",
+                fontFamily: "monospace",
+                lineHeight: "1.5",
+              }}
+            />
+          </div>
+
+          {/* Save button */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleSave}
+              disabled={saving || !dirty}
+              className="px-4 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-40 transition-opacity"
+              style={{ backgroundColor: "var(--accent-blue)" }}
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+
+          {/* Skills */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <label className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>
+                Skills
+              </label>
+              <button
+                onClick={() => {
+                  setAddingSkill(true);
+                  setEditingSkill(null);
+                  setSkillName("");
+                  setSkillDesc("");
+                  setSkillContent("");
+                }}
+                className="flex items-center gap-1 text-xs font-medium transition-colors hover:opacity-80"
+                style={{ color: "var(--accent-blue)" }}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Add skill
+              </button>
+            </div>
+
+            {loadingSkills ? (
+              <span className="text-xs" style={{ color: "var(--text-muted)" }}>Loading skills...</span>
+            ) : skills.length === 0 && !addingSkill ? (
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                No skills configured. Skills are discovered from ~/.bonsai/agents/ via --add-dir.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {skills.map((skill) => (
+                  <div
+                    key={skill.path}
+                    className="flex items-start gap-3 px-3 py-2.5 rounded-lg"
+                    style={{ backgroundColor: "var(--bg-input)" }}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+                          {skill.name}
+                        </span>
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded"
+                          style={{
+                            backgroundColor: skill.scope === "shared" ? "rgba(34, 197, 94, 0.1)" : "rgba(91, 141, 249, 0.1)",
+                            color: skill.scope === "shared" ? "#22c55e" : "var(--accent-blue)",
+                          }}
+                        >
+                          {skill.scope}
+                        </span>
+                      </div>
+                      <p className="text-xs truncate mt-0.5" style={{ color: "var(--text-muted)" }}>
+                        {skill.description}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => {
+                          setEditingSkill(skill);
+                          setAddingSkill(false);
+                          setSkillName(skill.name);
+                          setSkillDesc(skill.description);
+                          setSkillContent(skill.content);
+                        }}
+                        className="p-1 rounded transition-colors hover:bg-white/10"
+                        style={{ color: "var(--text-muted)" }}
+                        title="Edit"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteSkill(skill)}
+                        className="p-1 rounded transition-colors hover:bg-white/10"
+                        style={{ color: "var(--text-muted)" }}
+                        title="Delete"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Skill editor — full viewport modal */}
+            {(editingSkill || addingSkill) && createPortal(
+              <div
+                className="fixed inset-0 z-[60] flex items-center justify-center"
+                style={{ backgroundColor: "rgba(0, 0, 0, 0.7)" }}
+                onClick={(e) => { if (e.target === e.currentTarget) { setEditingSkill(null); setAddingSkill(false); } }}
+              >
+                <div
+                  className="flex flex-col shadow-2xl overflow-hidden"
+                  style={{
+                    backgroundColor: "var(--bg-secondary)",
+                    width: "100vw",
+                    height: "100vh",
+                  }}
+                >
+                  {/* Modal header */}
+                  <div
+                    className="flex items-center justify-between px-6 py-4 shrink-0 border-b"
+                    style={{ borderColor: "var(--border-subtle)" }}
+                  >
+                    <div>
+                      <h3 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>
+                        {editingSkill ? `Edit skill: ${editingSkill.name}` : "New skill"}
+                      </h3>
+                      {editingSkill && (
+                        <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                          {editingSkill.scope === "shared" ? "Shared across all roles" : `Scoped to ${selectedRole?.title}`}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setEditingSkill(null); setAddingSkill(false); }}
+                        className="px-4 py-2 rounded-lg text-xs font-medium transition-colors hover:bg-white/5"
+                        style={{ color: "var(--text-secondary)" }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleSaveSkill}
+                        disabled={saving || !skillName.trim()}
+                        className="px-4 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-40"
+                        style={{ backgroundColor: "var(--accent-blue)" }}
+                      >
+                        {saving ? "Saving..." : editingSkill ? "Update" : "Create"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Modal body */}
+                  <div className="flex-1 flex flex-col gap-4 px-6 py-5 overflow-y-auto min-h-0">
+                    {/* Name + Description row */}
+                    <div className="flex gap-4">
+                      <div className="w-64 shrink-0">
+                        <label className="text-xs font-medium mb-1.5 block" style={{ color: "var(--text-muted)" }}>
+                          Skill name
+                        </label>
+                        <input
+                          type="text"
+                          value={skillName}
+                          onChange={(e) => setSkillName(e.target.value)}
+                          placeholder="e.g. code-review"
+                          disabled={!!editingSkill}
+                          autoFocus={!editingSkill}
+                          className="w-full px-3 py-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-[var(--accent-blue)] disabled:opacity-50"
+                          style={{
+                            backgroundColor: "var(--bg-input)",
+                            border: "1px solid var(--border-medium)",
+                            color: "var(--text-primary)",
+                          }}
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="text-xs font-medium mb-1.5 block" style={{ color: "var(--text-muted)" }}>
+                          Description (when should the agent use this skill?)
+                        </label>
+                        <input
+                          type="text"
+                          value={skillDesc}
+                          onChange={(e) => setSkillDesc(e.target.value)}
+                          placeholder="Applies when..."
+                          className="w-full px-3 py-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-[var(--accent-blue)]"
+                          style={{
+                            backgroundColor: "var(--bg-input)",
+                            border: "1px solid var(--border-medium)",
+                            color: "var(--text-primary)",
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Content — fills remaining space */}
+                    <div className="flex-1 flex flex-col min-h-0">
+                      <label className="text-xs font-medium mb-1.5 block shrink-0" style={{ color: "var(--text-muted)" }}>
+                        Skill instructions (markdown)
+                      </label>
+                      <textarea
+                        value={skillContent}
+                        onChange={(e) => setSkillContent(e.target.value)}
+                        placeholder="# Skill Title&#10;&#10;Instructions for the agent..."
+                        autoFocus={!!editingSkill}
+                        className="w-full flex-1 px-4 py-3 rounded-lg text-sm outline-none focus:ring-1 focus:ring-[var(--accent-blue)] resize-none"
+                        style={{
+                          backgroundColor: "var(--bg-input)",
+                          border: "1px solid var(--border-medium)",
+                          color: "var(--text-primary)",
+                          fontFamily: "monospace",
+                          lineHeight: "1.6",
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
           </div>
         </div>
       )}

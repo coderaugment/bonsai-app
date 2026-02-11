@@ -111,7 +111,6 @@ export async function POST(
       .set({
         data: finalDataUrl,
         mimeType: "image/png",
-        updatedAt: new Date().toISOString(),
       })
       .where(eq(ticketAttachments.id, parseInt(attachmentId)))
       .run();

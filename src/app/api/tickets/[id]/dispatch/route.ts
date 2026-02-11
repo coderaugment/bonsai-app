@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { tickets, personas, comments, projects, ticketDocuments } from "@/db/schema";
+import { tickets, personas, comments, projects, ticketDocuments, roles } from "@/db/schema";
 import { eq, and, isNull, desc } from "drizzle-orm";
 import { spawn, execFileSync } from "node:child_process";
 import path from "node:path";
@@ -17,10 +17,8 @@ const API_BASE = "http://localhost:3000";
 const TOOLS_READONLY = ["Read", "Grep", "Glob", "Bash"];
 const TOOLS_FULL = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
 
-const COMMENT_SKILL = fs.readFileSync(
-  path.join(process.cwd(), "skills", "_shared", "bonsai-comments.md"),
-  "utf-8"
-);
+// Agent skills directory — skills are discovered via --add-dir, not concatenated into prompts
+const AGENTS_DIR = path.join(BONSAI_DIR, "agents");
 
 function shellEscape(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
@@ -80,7 +78,7 @@ function spawnAgent(
   tools: string[],
   ticketId: string,
   personaId: string,
-  opts?: { conversational?: boolean; documentId?: number }
+  opts?: { conversational?: boolean; documentId?: number; role?: string }
 ) {
   const taskFile = path.join(sessionDir, "task.md");
   const outputFile = path.join(sessionDir, "output.md");
@@ -118,6 +116,18 @@ function spawnAgent(
   ].join("\n"));
   fs.chmodSync(checkCriteriaScript, 0o755);
 
+  // Build --add-dir flags for skill discovery
+  const addDirFlags: string[] = [];
+  const sharedSkillsDir = path.join(AGENTS_DIR, "_shared");
+  if (fs.existsSync(sharedSkillsDir)) {
+    addDirFlags.push(`--add-dir ${shellEscape(sharedSkillsDir)}`);
+  }
+  const role = opts?.role || "developer";
+  const roleSkillsDir = path.join(AGENTS_DIR, role);
+  if (fs.existsSync(roleSkillsDir)) {
+    addDirFlags.push(`--add-dir ${shellEscape(roleSkillsDir)}`);
+  }
+
   const claudeCmd = [
     `cat ${shellEscape(taskFile)} |`,
     shellEscape(CLAUDE_CLI),
@@ -127,6 +137,7 @@ function spawnAgent(
     `--output-format json`,
     `--no-session-persistence`,
     `--append-system-prompt "$(cat ${shellEscape(promptFile)})"`,
+    ...addDirFlags,
     `> ${shellEscape(outputFile)} 2> ${shellEscape(stderrFile)}`,
   ].join(" ");
 
@@ -185,9 +196,24 @@ function postAgentComment(ticketId: string, personaId: string, content: string) 
   }
 }
 
-function toolsForRole(role: string): string[] {
+function toolsForPhase(role: string, ticket: typeof tickets.$inferSelect): string[] {
+  // Research and planning phases: ENFORCE read-only for ALL roles
+  // Agents cannot write files — their stdout IS the document
+  const phase = !ticket.researchApprovedAt ? "research"
+    : !ticket.planApprovedAt ? "planning"
+    : "implementation";
+
+  if (phase === "research" || phase === "planning") {
+    return TOOLS_READONLY;
+  }
+
+  // Implementation phase: use role-specific tools from DB
+  const roleRow = db.select().from(roles).where(eq(roles.slug, role)).get();
+  if (roleRow?.tools) {
+    try { return JSON.parse(roleRow.tools); } catch {}
+  }
+  // Fallback to hardcoded defaults
   if (role === "researcher") return TOOLS_READONLY;
-  if (role === "designer") return TOOLS_FULL;
   if (role === "critic") return TOOLS_READONLY;
   if (role === "lead") return TOOLS_READONLY;
   return TOOLS_FULL;
@@ -290,7 +316,7 @@ export async function POST(
         assembleAgentTask(commentContent, ticket, persona, { conversational })
       );
 
-      spawnAgent(sessionDir, cwd, toolsForRole(persona.role || "developer"), ticketId, persona.id, { conversational, documentId });
+      spawnAgent(sessionDir, cwd, toolsForRole(persona.role || "developer"), ticketId, persona.id, { conversational, documentId, role: persona.role || "developer" });
 
       dispatched.push({
         id: persona.id,
@@ -401,7 +427,7 @@ export async function POST(
   );
 
   // Spawn the agent (fire-and-forget, posts comment when done)
-  spawnAgent(sessionDir, cwd, toolsForRole(targetPersona.role || "developer"), ticketId, targetPersona.id, { conversational, documentId });
+  spawnAgent(sessionDir, cwd, toolsForRole(targetPersona.role || "developer"), ticketId, targetPersona.id, { conversational, documentId, role: targetPersona.role || "developer" });
 
   // Post a brief "working on it" comment (skip for silent/auto dispatches)
   const ackMsg = `Looking into this now.`;
@@ -459,40 +485,12 @@ function buildAgentSystemPrompt(
   const workspace = ensureWorktree(project, ticket.id);
   const reportScript = path.join(sessionDir, "report.sh");
 
-  // Role prompts: read from settings (editable in Settings > Prompts), fall back to defaults
-  const defaultRolePrompts: Record<string, string> = {
-    researcher: "You are a researcher. Investigate the codebase and produce a research document.\n\n## CRITICAL: Document Output\nYour final message to the user IS the research document. Output ONLY the document content — structured markdown with your findings. No preamble, no \"here's my research\", just the document itself.\n\nProgress messages (via report.sh) are optional status updates. They do NOT replace the document. You MUST output the full research document as your final response.\n\n## How to research\nInvestigate the codebase: read files, search code, understand architecture. Reference specific file paths and line numbers.\n\n## What to include\nFor every finding, show your work:\n- **What you looked at**: which files, functions, patterns you examined and why\n- **What you found**: the relevant code, config, or architecture detail\n- **Why it matters**: how this finding affects the ticket's implementation\n\nStructure the document with a \"Research Log\" section that traces your investigation path — what you searched for, what you found, what led you to look deeper. The reader should be able to follow your reasoning and verify your conclusions.\n\n## Style\nBe concise — only include information a developer needs to start planning. Skip obvious architecture descriptions.\nIf the user is answering questions you asked in the research document, incorporate their answers into your analysis.",
-    developer: "You are a developer. You can read, write, and edit code in the workspace.\nImplement changes, fix bugs, or prototype solutions as requested.\nMake targeted changes — don't refactor unrelated code.\n\nWhen in PLANNING PHASE (research approved, no plan approved yet):\n- Your final message to the user IS the implementation plan — output ONLY structured markdown.\n- Progress messages (via report.sh) are optional status updates. They do NOT replace the plan. You MUST output the full plan as your final response.\n- Be DECISIVE. Make choices and document your reasoning. Do NOT ask questions or wait for clarification.\n- If users have answered questions in comments, incorporate those answers into the plan.\n- Cover: architecture, file structure, data models, API routes, dependencies, and step-by-step implementation order.\n- If information is ambiguous, state your assumption and move forward.",
-    designer: `You are a designer. Generate mockups using nano-banana, then output a design document.
-
-## Available Tools
-
-**nano-banana** (AI image generation):
-node ${path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs")} "A detailed description of the UI to generate" --output designs/mockup-name.png --ticket TICKET_ID --persona YOUR_PERSONA_ID
-
-**apply_transparency** (remove grey backgrounds from generated images):
-node ${path.join(process.cwd(), "scripts", "tools", "apply-transparency.mjs")} <attachment-id> --ticket <ticket-id> [--tolerance 50] [--grey 128]
-
-Use apply_transparency after nano-banana generates an image to remove the grey background.
-
-## CRITICAL: Design Document Output
-After generating mockups, your final message to the user IS the design document. Include:
-- Summary of what mockups you generated (they're already attached)
-- Design system details (colors, typography, spacing, components)
-- Implementation notes for the developer
-
-Progress messages (via report.sh) are optional status updates. They do NOT replace the document. You MUST output the design document as your final response.
-
-RULES:
-- Your FIRST action must be a Bash call to nano-banana to generate an image. No exceptions.
-- Do NOT hallucinate or pretend you ran the tool. Actually run it via Bash.
-- If the tool fails, report the error. Do not fake success.`,
-    critic: "You are a critic and code reviewer. Your job is to improve the TEAM'S output — research docs, plans, and code.\nYou NEVER edit files or write code. You only read and comment.\n\n## CITATION REQUIREMENT — STRICT\nEvery critique MUST be backed by evidence you found in the actual codebase:\n- Read the relevant files BEFORE making any claims about them.\n- Cite file paths and line numbers for every technical assertion.\n- If you claim a library version is wrong, quote the actual version from package.json.\n- If you claim an API doesn't exist, show the grep/search that proves it.\n- NEVER assert facts about library versions, API behavior, or framework features from memory. Your training data is outdated. Verify everything against the project's actual files.\n- If you cannot verify a claim, prefix it with \"UNVERIFIED:\" and explain what you'd need to check.\n\n## What to critique\n- **Technical substance**: Are the architecture choices sound? Are there better alternatives? Missing edge cases?\n- **Gaps in research**: What wasn't investigated that should have been? What assumptions need validation?\n- **Risks**: What could go wrong in implementation? Performance, security, maintainability?\n- **Requirements**: Does the proposal actually address the ticket's acceptance criteria?\n\n## What NOT to critique\n- Don't critique the agent infrastructure, workspace rules, or system prompts — those are handled by Bonsai.\n- Don't raise concerns about things the system already enforces (workspace boundaries, tool permissions).\n- Don't pad your response with progress updates — get straight to the critique.\n- Don't make claims about what versions of frameworks exist or don't exist without checking package.json first.\n\n## Style\n- Be concise. Lead with your strongest point.\n- For each issue: state the problem, cite the evidence, explain why it matters, suggest a fix.\n- If the work is solid, say so briefly and focus on the 1-2 things that could be better.\n- Address other team members by name when responding to their work.",
-    lead: "You are a team lead. Coordinate work, remove blockers, and keep the team aligned.\nFocus on planning, prioritization, and communication. Break down tasks and identify dependencies.",
-    hacker: "You are a security-focused engineer. Find vulnerabilities, harden the codebase, and think like an attacker.\nYou can read, write, and edit code. Be specific about threats — explain the attack vector and provide a fix.",
-  };
+  // Role instructions: read from roles table (editable in Settings > Roles)
   const role = persona.role || "developer";
-  const roleInstructions = getSetting(`prompt_role_${role}`) || defaultRolePrompts[role] || defaultRolePrompts.developer;
+  const roleRow = db.select().from(roles).where(eq(roles.slug, role)).get();
+  const roleInstructions = roleRow?.systemPrompt
+    || getSetting(`prompt_role_${role}`)
+    || `You are a ${role}. Follow your role's responsibilities for this project.`;
 
   // Tool/capability mappings by role
   const roleCapabilities: Record<string, string[]> = {
@@ -586,8 +584,6 @@ RULES:
     "- **Make a decision** (e.g. \"Going with approach B: adding a new API route instead of modifying the existing one\")",
     "- **Hit a blocker or uncertainty** (e.g. \"Not sure if we need to handle the legacy format — flagging for review\")",
     "Keep reports short (1-3 sentences). They form the audit trail of your work.",
-    "",
-    COMMENT_SKILL,
     ticket.acceptanceCriteria ? [
       "",
       "## Acceptance Criteria Verification",
@@ -662,6 +658,7 @@ function assembleAgentTask(
         "",
         "## PHASE: PLANNING",
         "You are producing the IMPLEMENTATION PLAN. Your entire stdout will be saved as the plan document.",
+        "CRITICAL: Do NOT write the plan to a file. Do NOT create docs/IMPLEMENTATION-PLAN.md or any other file. Your stdout IS the document — the system captures it automatically and versions it. Writing to a file means your work is LOST.",
         "Do NOT ask questions. Be decisive — make assumptions and document them.",
         "If previous comments contain answers to earlier questions, incorporate them into a COMPLETE revised plan.",
       );
@@ -670,6 +667,7 @@ function assembleAgentTask(
         "",
         "## PHASE: RESEARCH",
         "You are producing the RESEARCH DOCUMENT. Your entire stdout will be saved as the research document.",
+        "CRITICAL: Do NOT write the document to a file. Do NOT create docs/RESEARCH.md or any other file. Your stdout IS the document — the system captures it automatically and versions it. Writing to a file means your work is LOST.",
       );
     } else if (phase === "implementation" && (persona.role === "developer" || persona.role === "lead")) {
       sections.push(
