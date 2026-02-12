@@ -8,6 +8,7 @@ import type { Ticket, TicketType, TicketState, Comment, CommentAttachment, Ticke
 import { ticketTypes } from "@/lib/ticket-types";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { VoiceButton } from "@/components/voice-button";
+import { CommentInput } from "@/components/board/comment-input";
 
 interface TicketDetailModalProps {
   ticket: Ticket | null;
@@ -20,7 +21,7 @@ interface TicketDetailModalProps {
 const typeOptions: TicketType[] = ["feature", "bug", "chore"];
 const stateOptions: TicketState[] = ["research", "plan", "build", "test", "ship"];
 
-// Board state mentions — referenceable via @research, @plan, etc.
+// Board state mentions — referenceable via #research, #plan, etc.
 const BOARD_STATES = [
   { name: "research", label: "Research", color: "var(--column-research)", icon: "🔍" },
   { name: "plan", label: "Plan", color: "var(--column-plan)", icon: "📋" },
@@ -30,12 +31,13 @@ const BOARD_STATES = [
 ] as const;
 type MentionItem = { kind: "persona"; persona: Persona } | { kind: "board"; name: string; label: string; color: string; icon: string } | { kind: "team" };
 
-// Render comment text with highlighted @mentions (personas + board states + team)
+// Render comment text with highlighted @mentions (personas + team) and #columns (board states)
 function renderCommentContent(text: string, personas: Persona[]) {
-  const parts = text.split(/(@[\w\p{L}-]+)/gu);
+  const parts = text.split(/([@#][\w\p{L}-]+)/gu);
   return parts.map((part, i) => {
-    if (!part.startsWith("@")) return part;
-    return renderMentionSpan(part, i, personas);
+    if (part.startsWith("@")) return renderMentionSpan(part, i, personas);
+    if (part.startsWith("#")) return renderHashSpan(part, i);
+    return part;
   });
 }
 
@@ -52,21 +54,6 @@ function renderMentionSpan(part: string, key: number | string, personas: Persona
         fontWeight: 600,
       }}>
         👥 @team
-      </span>
-    );
-  }
-  const board = BOARD_STATES.find((b) => b.name === name);
-  if (board) {
-    return (
-      <span key={key} style={{
-        backgroundColor: `color-mix(in srgb, ${board.color} 20%, transparent)`,
-        color: board.color,
-        padding: "1px 6px",
-        borderRadius: "4px",
-        fontSize: "0.8em",
-        fontWeight: 600,
-      }}>
-        {board.icon} {board.label}
       </span>
     );
   }
@@ -88,15 +75,36 @@ function renderMentionSpan(part: string, key: number | string, personas: Persona
   return part;
 }
 
-// Process React children recursively to highlight @mentions inside ReactMarkdown output
+function renderHashSpan(part: string, key: number | string) {
+  const name = part.slice(1).toLowerCase();
+  const board = BOARD_STATES.find((b) => b.name === name);
+  if (board) {
+    return (
+      <span key={key} style={{
+        backgroundColor: `color-mix(in srgb, ${board.color} 20%, transparent)`,
+        color: board.color,
+        padding: "1px 6px",
+        borderRadius: "4px",
+        fontSize: "0.8em",
+        fontWeight: 600,
+      }}>
+        {board.icon} #{board.label}
+      </span>
+    );
+  }
+  return part;
+}
+
+// Process React children recursively to highlight @mentions and #columns inside ReactMarkdown output
 function highlightMentionsInChildren(children: React.ReactNode, personas: Persona[]): React.ReactNode {
   return React.Children.map(children, (child) => {
     if (typeof child === "string") {
-      const parts = child.split(/(@[\w\p{L}-]+)/gu);
+      const parts = child.split(/([@#][\w\p{L}-]+)/gu);
       if (parts.length === 1) return child;
       return parts.map((part, i) => {
-        if (!part.startsWith("@")) return part;
-        return renderMentionSpan(part, `m${i}`, personas);
+        if (part.startsWith("@")) return renderMentionSpan(part, `m${i}`, personas);
+        if (part.startsWith("#")) return renderHashSpan(part, `h${i}`);
+        return part;
       });
     }
     return child;
@@ -120,26 +128,15 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   // Attachments state
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
-  const [lightboxAttachmentId, setLightboxAttachmentId] = useState<number | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
-  const [processingTransparency, setProcessingTransparency] = useState(false);
   const [processingAttachmentId, setProcessingAttachmentId] = useState<number | null>(null);
 
   // Comments state
   const [comments, setComments] = useState<Comment[]>([]);
-  const [newComment, setNewComment] = useState("");
-  const [commentAttachments, setCommentAttachments] = useState<CommentAttachment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
-  const [postingComment, setPostingComment] = useState(false);
-  const [dragOverComment, setDragOverComment] = useState(false);
-  const commentFileInputRef = useRef<HTMLInputElement>(null);
-  const commentInputRef = useRef<HTMLTextAreaElement>(null);
 
-  // @mention autocomplete state
+  // Personas list (for @mention autocomplete in CommentInput)
   const [personasList, setPersonasList] = useState<Persona[]>([]);
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const [mentionIndex, setMentionIndex] = useState(0);
-  const [mentionStart, setMentionStart] = useState(0);
 
   // Dispatch debounce: accumulate comments, send one dispatch after a pause
   const dispatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -192,9 +189,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     onTranscript: useCallback((text: string) => setAcceptanceCriteria(text), []),
     aiField: "massage_criteria",
   });
-  const commentVoice = useVoiceInput({
-    onTranscript: useCallback((text: string) => setNewComment((prev) => prev ? prev + " " + text : text), []),
-  });
 
   // Quote-to-comment state — popup uses refs (no re-render) to preserve selection
   const quotePopupRef = useRef<HTMLDivElement>(null);
@@ -206,18 +200,8 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
 
   // Document-scoped comments state (separate from ticket-level comments)
   const [docComments, setDocComments] = useState<Comment[]>([]);
-  const [newDocComment, setNewDocComment] = useState("");
-  const [docCommentAttachments, setDocCommentAttachments] = useState<CommentAttachment[]>([]);
   const [loadingDocComments, setLoadingDocComments] = useState(false);
-  const [postingDocComment, setPostingDocComment] = useState(false);
-  const [dragOverDocComment, setDragOverDocComment] = useState(false);
   const docCommentsEndRef = useRef<HTMLDivElement>(null);
-  const docCommentInputRef = useRef<HTMLTextAreaElement>(null);
-  const docCommentFileInputRef = useRef<HTMLInputElement>(null);
-  // Doc-comment @mention state
-  const [docMentionQuery, setDocMentionQuery] = useState<string | null>(null);
-  const [docMentionIndex, setDocMentionIndex] = useState(0);
-  const [docMentionStart, setDocMentionStart] = useState(0);
 
   // Baseline values for dirty-checking (description baseline updates after AI enhancement)
   const baselineRef = useRef({ title: "", description: "", acceptanceCriteria: "", type: "" as TicketType, state: "" as TicketState });
@@ -265,12 +249,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
       }
       pendingDispatchContent.current = [];
 
-      // Auto-focus comment input after a brief delay to ensure DOM is ready
-      const focusTimer = setTimeout(() => {
-        commentInputRef.current?.focus();
-      }, 100);
-
-      return () => clearTimeout(focusTimer);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId]);
@@ -297,6 +275,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   }, [ticket, onClose, expandedDoc, lightboxImage]);
 
   // Poll comments every 10s while modal is open (doesn't touch form state)
+  // When new comments arrive, also refresh documents & attachments immediately
   useEffect(() => {
     if (!ticketId) return;
     const poll = setInterval(async () => {
@@ -308,6 +287,8 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
           if (fresh.length !== prev.length) {
             setTypingPersona(null); // Agent responded — clear typing indicator
             setTimeout(() => commentsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+            // New comment arrived — refresh documents & attachments immediately
+            refreshDocumentsAndAttachments(ticketId);
             return fresh;
           }
           return prev;
@@ -375,7 +356,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
         .catch(() => {});
     }, 15_000);
     return () => clearInterval(poll);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId, showActivity]);
 
   // Load doc comments when expandedDoc changes
@@ -385,8 +365,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
       loadDocComments(expandedDocId);
     } else {
       setDocComments([]);
-      setNewDocComment("");
-      setDocCommentAttachments([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedDocId]);
@@ -422,6 +400,38 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     } finally {
       setLoadingComments(false);
     }
+  }
+
+  // Lightweight refresh for docs & attachments (called when new comments arrive)
+  async function refreshDocumentsAndAttachments(tid: string) {
+    try {
+      const [docRes, attRes] = await Promise.all([
+        fetch(`/api/tickets/${tid}/documents`),
+        fetch(`/api/tickets/${tid}/attachments`),
+      ]);
+      const docData = await docRes.json();
+      const attData = await attRes.json();
+      const freshDocs: TicketDocument[] = docData.documents || [];
+      const freshAtts = attData || [];
+      setDocuments((prev) => {
+        const prevKey = prev.map((d) => `${d.type}:${d.version}`).join(",");
+        const freshKey = freshDocs.map((d) => `${d.type}:${d.version}`).join(",");
+        if (prevKey === freshKey) return prev;
+        return freshDocs;
+      });
+      setExpandedDoc((prev) => {
+        if (!prev) return null;
+        const latest = freshDocs
+          .filter((d) => d.type === prev.type)
+          .sort((a, b) => (b.version || 0) - (a.version || 0))[0];
+        if (latest && latest.version !== prev.version) return latest;
+        return prev;
+      });
+      setAttachments((prev) => {
+        if (freshAtts.length !== prev.length) return freshAtts;
+        return prev;
+      });
+    } catch { /* non-critical */ }
   }
 
   async function loadDocuments(ticketId: string, autoExpandType?: "research" | "implementation_plan") {
@@ -482,18 +492,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   const researchDocs = documents
     .filter(d => d.type === "research")
     .sort((a, b) => (b.version || 0) - (a.version || 0));
-  const latestResearchDoc = researchDocs[0] || null;
-  const maxResearchVersion = latestResearchDoc?.version || 0;
-
-  // Workflow state badge
-  function getResearchWorkflowState(): { label: string; color: string } {
-    if (maxResearchVersion >= 3) return { label: "Ready", color: "#f59e0b" };
-    if (maxResearchVersion === 2) return { label: "Researcher Finalizing", color: "#8b5cf6" };
-    if (maxResearchVersion === 1) return { label: "Critic Reviewing", color: "#ef4444" };
-    if (ticket?.researchCompletedBy || documents.some(d => d.type === "research")) return { label: "Researching", color: "#3b82f6" };
-    return { label: "Not Started", color: "var(--text-muted)" };
-  }
-
   // Get the doc to display in expanded view (respects version selector)
   function getExpandedResearchDoc(): TicketDocument | null {
     if (!expandedDoc || expandedDoc.type !== "research") return expandedDoc;
@@ -595,7 +593,12 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     setAccepting(true);
     try {
       // Ship endpoint merges worktree branch into main, cleans up, and sets state
-      await fetch(`/api/tickets/${ticket.id}/ship`, { method: "POST" });
+      const res = await fetch(`/api/tickets/${ticket.id}/ship`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Ship failed" }));
+        alert(`Ship failed: ${data.error || res.statusText}`);
+        return;
+      }
       router.refresh();
       onClose();
     } finally {
@@ -621,101 +624,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
-  // @mention autocomplete: compute filtered items (personas + board states)
-  // Also support @role mentions (e.g., @designer, @lead, @researcher)
   const ROLE_SLUGS = ["lead", "designer", "developer", "critic", "researcher", "hacker"];
-  const filteredMentions: MentionItem[] = mentionQuery !== null
-    ? (() => {
-        const q = mentionQuery.toLowerCase();
-        // Team match
-        const teamMatch: MentionItem[] = "team".startsWith(q) ? [{ kind: "team" }] : [];
-        // Board state matches
-        const boardMatches: MentionItem[] = BOARD_STATES
-          .filter((b) => b.name.startsWith(q))
-          .map((b) => ({ kind: "board", ...b }));
-        // Persona matches by name
-        const byName = personasList.filter((p) =>
-          p.name.toLowerCase().startsWith(q)
-        );
-        // Add role-matched personas (when query matches a role slug)
-        const byRole = ROLE_SLUGS
-          .filter((r) => r.startsWith(q) && q.length > 0)
-          .flatMap((r) => personasList.filter((p) => p.role === r))
-          .filter((p) => !byName.some((n) => n.id === p.id));
-        const personaMatches: MentionItem[] = [...byName, ...byRole].map((p) => ({ kind: "persona", persona: p }));
-        return [...teamMatch, ...boardMatches, ...personaMatches].slice(0, 8);
-      })()
-    : [];
-
-  function handleCommentChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    const val = e.target.value;
-    setNewComment(val);
-
-    // Detect @mention trigger
-    const pos = e.target.selectionStart;
-    const textBefore = val.slice(0, pos);
-    const atMatch = textBefore.match(/@([\w\p{L}-]*)$/u);
-    if (atMatch) {
-      setMentionQuery(atMatch[1]);
-      setMentionStart(pos - atMatch[0].length);
-      setMentionIndex(0);
-    } else {
-      setMentionQuery(null);
-    }
-  }
-
-  function insertMention(item: MentionItem) {
-    const before = newComment.slice(0, mentionStart);
-    const after = newComment.slice(
-      mentionStart + 1 + (mentionQuery?.length || 0)
-    );
-    const mentionName = item.kind === "team" ? "team" : item.kind === "persona" ? item.persona.name : item.name;
-    const inserted = `${before}@${mentionName} ${after}`;
-    setNewComment(inserted);
-    setMentionQuery(null);
-
-    // Refocus and set cursor after the inserted mention
-    setTimeout(() => {
-      const ta = commentInputRef.current;
-      if (ta) {
-        ta.focus();
-        const cursorPos = before.length + 1 + mentionName.length + 1;
-        ta.setSelectionRange(cursorPos, cursorPos);
-      }
-    }, 0);
-  }
-
-  function handleCommentKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // @mention navigation
-    if (mentionQuery !== null && filteredMentions.length > 0) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setMentionIndex((i) => (i + 1) % filteredMentions.length);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setMentionIndex((i) => (i - 1 + filteredMentions.length) % filteredMentions.length);
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        insertMention(filteredMentions[mentionIndex]);
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setMentionQuery(null);
-        return;
-      }
-    }
-
-    // Cmd/Ctrl+Enter to post
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      handlePostComment();
-    }
-  }
 
   // Extract first @mentioned persona name from comment text
   // Supports both @Name and @role (e.g., @designer, @lead, @researcher)
@@ -802,33 +711,23 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }, 3000); // 3s debounce — wait for rapid-fire comments to settle
   }
 
-  async function handlePostComment() {
-    if (!ticket || (!newComment.trim() && commentAttachments.length === 0)) return;
-    setPostingComment(true);
-    try {
-      const res = await fetch("/api/comments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticketId: ticket.id,
-          content: newComment,
-          attachments: commentAttachments.length > 0 ? commentAttachments : undefined,
-        }),
-      });
-      const data = await res.json();
-      if (data.comment) {
-        const commentText = newComment;
-        setComments((prev) => [...prev, data.comment]);
-        setNewComment("");
-        setCommentAttachments([]);
-        setTimeout(() => commentsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-
-        // Detect if this is a conversational comment (short question or chat-like)
-        const isConversational = isConversationalComment(commentText);
-        queueDispatch(commentText, { conversational: isConversational });
-      }
-    } finally {
-      setPostingComment(false);
+  async function handleCommentPost(text: string, attachments: CommentAttachment[]) {
+    if (!ticket) return;
+    const res = await fetch("/api/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticketId: ticket.id,
+        content: text,
+        attachments: attachments.length > 0 ? attachments : undefined,
+      }),
+    });
+    const data = await res.json();
+    if (data.comment) {
+      setComments((prev) => [...prev, data.comment]);
+      setTimeout(() => commentsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+      const isConversational = isConversationalComment(text);
+      queueDispatch(text, { conversational: isConversational });
     }
   }
 
@@ -895,42 +794,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
-  function handleCommentFileDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragOverComment(false);
-    const files = e.dataTransfer.files;
-    if (!files.length) return;
-    processCommentFiles(files);
-    commentInputRef.current?.focus();
-  }
-
-  function handleCommentFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files) return;
-    processCommentFiles(files);
-    if (commentFileInputRef.current) {
-      commentFileInputRef.current.value = "";
-    }
-  }
-
-  function processCommentFiles(files: FileList) {
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const data = event.target?.result as string;
-        setCommentAttachments((prev) => [
-          ...prev,
-          { name: file.name, type: file.type, data },
-        ]);
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-
-  function removeCommentAttachment(index: number) {
-    setCommentAttachments((prev) => prev.filter((_, i) => i !== index));
-  }
-
   function isImageType(type: string) {
     return type.startsWith("image/");
   }
@@ -950,150 +813,30 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
-  async function handlePostDocComment() {
-    if (!ticket || !expandedDoc || (!newDocComment.trim() && docCommentAttachments.length === 0)) return;
-    setPostingDocComment(true);
-    try {
-      const res = await fetch("/api/comments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticketId: ticket.id,
-          content: newDocComment,
-          attachments: docCommentAttachments.length > 0 ? docCommentAttachments : undefined,
-          documentId: expandedDoc.id,
-        }),
-      });
-      const data = await res.json();
-      if (data.comment) {
-        const commentText = newDocComment;
-        setDocComments((prev) => [...prev, data.comment]);
-        setNewDocComment("");
-        setDocCommentAttachments([]);
-        setTimeout(() => docCommentsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-        // Dispatch agent — conversational mode so they reply in the doc comment thread
-        const docLabel = expandedDoc.type === "research" ? "research document" : (expandedDoc.type as string) === "design" ? "design document" : "implementation plan";
-        queueDispatch(`[Comment on ${docLabel}] ${commentText}`, {
-          conversational: true,
-          documentId: expandedDoc.id,
-          isDocComment: true,
-          targetPersonaId: expandedDoc.authorPersonaId,
-        });
-      }
-    } finally {
-      setPostingDocComment(false);
-    }
-  }
-
-  // Doc-comment @mention filtered list (personas + board states + @role + @team)
-  const docFilteredMentions: MentionItem[] = docMentionQuery !== null
-    ? (() => {
-        const q = docMentionQuery.toLowerCase();
-        const teamMatch: MentionItem[] = "team".startsWith(q) ? [{ kind: "team" }] : [];
-        const boardMatches: MentionItem[] = BOARD_STATES
-          .filter((b) => b.name.startsWith(q))
-          .map((b) => ({ kind: "board", ...b }));
-        const byName = personasList.filter((p) =>
-          p.name.toLowerCase().startsWith(q)
-        );
-        const byRole = ROLE_SLUGS
-          .filter((r) => r.startsWith(q) && q.length > 0)
-          .flatMap((r) => personasList.filter((p) => p.role === r))
-          .filter((p) => !byName.some((n) => n.id === p.id));
-        const personaMatches: MentionItem[] = [...byName, ...byRole].map((p) => ({ kind: "persona", persona: p }));
-        return [...teamMatch, ...boardMatches, ...personaMatches].slice(0, 8);
-      })()
-    : [];
-
-  function handleDocCommentChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    const val = e.target.value;
-    setNewDocComment(val);
-    const pos = e.target.selectionStart;
-    const textBefore = val.slice(0, pos);
-    const atMatch = textBefore.match(/@([\w\p{L}-]*)$/u);
-    if (atMatch) {
-      setDocMentionQuery(atMatch[1]);
-      setDocMentionStart(pos - atMatch[0].length);
-      setDocMentionIndex(0);
-    } else {
-      setDocMentionQuery(null);
-    }
-  }
-
-  function insertDocMention(item: MentionItem) {
-    const before = newDocComment.slice(0, docMentionStart);
-    const after = newDocComment.slice(docMentionStart + 1 + (docMentionQuery?.length || 0));
-    const mentionName = item.kind === "team" ? "team" : item.kind === "persona" ? item.persona.name : item.name;
-    const inserted = `${before}@${mentionName} ${after}`;
-    setNewDocComment(inserted);
-    setDocMentionQuery(null);
-    setTimeout(() => {
-      const ta = docCommentInputRef.current;
-      if (ta) {
-        ta.focus();
-        const cursorPos = before.length + 1 + mentionName.length + 1;
-        ta.setSelectionRange(cursorPos, cursorPos);
-      }
-    }, 0);
-  }
-
-  function handleDocCommentKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (docMentionQuery !== null && docFilteredMentions.length > 0) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setDocMentionIndex((i) => (i + 1) % docFilteredMentions.length);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setDocMentionIndex((i) => (i - 1 + docFilteredMentions.length) % docFilteredMentions.length);
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        insertDocMention(docFilteredMentions[docMentionIndex]);
-        return;
-      }
-      if (e.key === "Escape") {
-        setDocMentionQuery(null);
-        return;
-      }
-    }
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      handlePostDocComment();
-    }
-  }
-
-  function handleDocCommentFileDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragOverDocComment(false);
-    const files = e.dataTransfer.files;
-    if (!files.length) return;
-    processDocCommentFiles(files);
-    docCommentInputRef.current?.focus();
-  }
-
-  function handleDocCommentFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files) return;
-    processDocCommentFiles(files);
-    if (docCommentFileInputRef.current) docCommentFileInputRef.current.value = "";
-  }
-
-  function processDocCommentFiles(files: FileList) {
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const data = event.target?.result as string;
-        setDocCommentAttachments((prev) => [...prev, { name: file.name, type: file.type, data }]);
-      };
-      reader.readAsDataURL(file);
+  async function handleDocCommentPost(text: string, attachments: CommentAttachment[]) {
+    if (!ticket || !expandedDoc) return;
+    const res = await fetch("/api/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticketId: ticket.id,
+        content: text,
+        attachments: attachments.length > 0 ? attachments : undefined,
+        documentId: expandedDoc.id,
+      }),
     });
-  }
-
-  function removeDocCommentAttachment(index: number) {
-    setDocCommentAttachments((prev) => prev.filter((_, i) => i !== index));
+    const data = await res.json();
+    if (data.comment) {
+      setDocComments((prev) => [...prev, data.comment]);
+      setTimeout(() => docCommentsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+      const docLabel = expandedDoc.type === "research" ? "research document" : (expandedDoc.type as string) === "design" ? "design document" : "implementation plan";
+      queueDispatch(`[Comment on ${docLabel}] ${text}`, {
+        conversational: true,
+        documentId: expandedDoc.id,
+        isDocComment: true,
+        targetPersonaId: expandedDoc.authorPersonaId,
+      });
+    }
   }
 
   function getFileIcon(type: string) {
@@ -1294,6 +1037,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   if (!ticket || !mounted) return null;
 
   const typeStyle = ticketTypes[type];
+  const currentColumn = BOARD_STATES.find((s) => s.name === state) || BOARD_STATES[0];
 
   const modal = (
     <div
@@ -1337,6 +1081,26 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                 <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
                   {ticket.id}
                 </span>
+                <select
+                  value={state}
+                  onChange={(e) => setState(e.target.value as TicketState)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider cursor-pointer appearance-none"
+                  style={{
+                    backgroundColor: `color-mix(in srgb, ${currentColumn.color} 20%, transparent)`,
+                    color: currentColumn.color,
+                    border: `1.5px solid color-mix(in srgb, ${currentColumn.color} 40%, transparent)`,
+                    outline: "none",
+                  }}
+                >
+                  {stateOptions.map((s) => {
+                    const bs = BOARD_STATES.find((b) => b.name === s);
+                    return (
+                      <option key={s} value={s} style={{ backgroundColor: "#1a1a2e", color: "#fff" }}>
+                        {bs?.icon} {bs?.label || s}
+                      </option>
+                    );
+                  })}
+                </select>
               </div>
               <input
                 type="text"
@@ -1483,12 +1247,11 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                 </div>
               ) : (documents.length > 0 || ticket?.researchCompletedAt || ticket?.planCompletedAt) ? (
                 <div className="grid grid-cols-3 gap-4">
-                  {["research", "design", "implementation_plan"].map((docType) => {
+                  {(["research", "design", "implementation_plan"] as const).map((docType) => {
                     const doc = documents.find(d => d.type === docType);
                     if (!doc && !(docType === "research" && ticket?.researchCompletedAt)) return null;
 
                     const isResearch = docType === "research";
-                    const isPlan = docType === "implementation_plan";
                     const isDesign = docType === "design";
                     const title = isResearch ? "Research Document" : isDesign ? "Design Document" : "Implementation Plan";
                     const color = isResearch ? "#f59e0b" : isDesign ? "#8b5cf6" : "#8b5cf6";
@@ -1514,7 +1277,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                           </div>
                           <div className="flex items-center gap-2">
                             {doc?.content && <button onClick={() => setExpandedDoc(doc)} className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/10" style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-secondary)" }}>View Full</button>}
-                            <button onClick={() => handleDeleteDocument(docType as any)} disabled={deletingDoc === docType} className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-red-500/15" style={{ color: "var(--text-muted)" }} title={`Delete ${title.toLowerCase()}`}>
+                            <button onClick={() => handleDeleteDocument(docType)} disabled={deletingDoc === docType} className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-red-500/15" style={{ color: "var(--text-muted)" }} title={`Delete ${title.toLowerCase()}`}>
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
                             </button>
                           </div>
@@ -1607,7 +1370,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                             backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
                             backgroundColor: '#404040'
                           }}
-                          onClick={() => { setLightboxImage(`${attachmentUrl}?t=${Date.now()}`); setLightboxAttachmentId(att.id); }}
+                          onClick={() => { setLightboxImage(`${attachmentUrl}?t=${Date.now()}`); }}
                         >
                           <img src={`${attachmentUrl}?t=${Date.now()}`} alt={att.filename} className="w-full h-full object-contain transition-transform group-hover:scale-105" />
 
@@ -1742,7 +1505,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                         style={{ left: "7px", width: "2px", backgroundColor: "var(--border-medium)" }}
                       />
 
-                      {auditLog.map((entry, i) => {
+                      {auditLog.map((entry) => {
                         const isAgent = entry.actorType === "agent";
                         const isSystem = entry.actorType === "system";
                         const dotColor = isAgent ? "#8b5cf6" : isSystem ? "var(--text-muted)" : "var(--accent-blue)";
@@ -2151,236 +1914,26 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
           </div>
 
           {/* Comment input */}
-          <div className="px-6 py-4 border-t flex-shrink-0" style={{ borderColor: "var(--border-subtle)" }}>
-            <div
-              className="rounded-xl transition-colors"
-              style={{
-                backgroundColor: dragOverComment ? "rgba(91, 141, 249, 0.08)" : "var(--bg-input)",
-                border: dragOverComment ? "1px dashed rgba(91, 141, 249, 0.5)" : "1px solid var(--border-medium)",
-              }}
-              onDragOver={(e) => { e.preventDefault(); setDragOverComment(true); }}
-              onDragLeave={() => setDragOverComment(false)}
-              onDrop={handleCommentFileDrop}
-            >
-              <div className="relative">
-                <textarea
-                  ref={commentInputRef}
-                  value={newComment}
-                  onChange={handleCommentChange}
-                  placeholder={commentVoice.isRecording ? commentVoice.interimTranscript || "Listening..." : "Write a comment… use @ to mention a persona"}
-                  rows={3}
-                  disabled={commentVoice.isProcessingAI}
-                  className="w-full p-4 text-sm resize-none bg-transparent"
-                  style={{ color: "var(--text-primary)", outline: "none" }}
-                  onKeyDown={handleCommentKeyDown}
-                />
-                {/* @mention autocomplete dropdown */}
-                {mentionQuery !== null && filteredMentions.length > 0 && (
-                  <div
-                    className="absolute left-4 bottom-full mb-1 rounded-lg shadow-xl overflow-hidden"
-                    style={{
-                      backgroundColor: "#1a1a2e",
-                      border: "1px solid var(--border-medium)",
-                      minWidth: "200px",
-                      zIndex: 10,
-                    }}
-                  >
-                    {filteredMentions.map((item, i) => (
-                      <div
-                        key={item.kind === "team" ? "team" : item.kind === "persona" ? item.persona.id : item.name}
-                        className="flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors"
-                        style={{
-                          backgroundColor: i === mentionIndex ? "rgba(255,255,255,0.08)" : "transparent",
-                        }}
-                        onMouseEnter={() => setMentionIndex(i)}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          insertMention(item);
-                        }}
-                      >
-                        {item.kind === "team" ? (
-                          <>
-                            <div
-                              className="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0"
-                              style={{ backgroundColor: "rgba(16, 185, 129, 0.2)" }}
-                            >
-                              👥
-                            </div>
-                            <span className="text-sm" style={{ color: "#10b981" }}>team</span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981" }}>
-                              all agents
-                            </span>
-                          </>
-                        ) : item.kind === "board" ? (
-                          <>
-                            <div
-                              className="w-6 h-6 rounded flex items-center justify-center text-xs flex-shrink-0"
-                              style={{ backgroundColor: `color-mix(in srgb, ${item.color} 25%, transparent)` }}
-                            >
-                              {item.icon}
-                            </div>
-                            <span className="text-sm" style={{ color: item.color }}>{item.label}</span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
-                              board
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <div
-                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold text-white flex-shrink-0 overflow-hidden"
-                              style={{ backgroundColor: item.persona.color || "var(--accent-indigo)" }}
-                            >
-                              {item.persona.avatar ? (
-                                <img src={item.persona.avatar} alt={item.persona.name} className="w-full h-full object-cover" />
-                              ) : (
-                                item.persona.name[0]?.toUpperCase()
-                              )}
-                            </div>
-                            <span className="text-sm" style={{ color: "var(--text-primary)" }}>{item.persona.name}</span>
-                            {item.persona.role && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(139, 92, 246, 0.15)", color: "#a78bfa" }}>
-                                {item.persona.role}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {/* Attachment previews */}
-              {commentAttachments.length > 0 && (
-                <div className="px-4 pb-3 flex flex-wrap gap-2">
-                  {commentAttachments.map((att, i) => (
-                    <div key={i} className="relative group">
-                      {isImageType(att.type) ? (
-                        <img
-                          src={att.data}
-                          alt={att.name}
-                          className="h-16 w-auto rounded-lg object-cover"
-                        />
-                      ) : (
-                        <div
-                          className="h-16 px-3 rounded-lg flex items-center gap-2"
-                          style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
-                        >
-                          <span
-                            className="text-[10px] font-bold px-1.5 py-0.5 rounded"
-                            style={{ backgroundColor: "rgba(255,255,255,0.1)", color: "var(--text-muted)" }}
-                          >
-                            {getFileIcon(att.type)}
-                          </span>
-                          <span className="text-xs truncate max-w-[80px]" style={{ color: "var(--text-secondary)" }}>
-                            {att.name}
-                          </span>
-                        </div>
-                      )}
-                      <button
-                        onClick={() => removeCommentAttachment(i)}
-                        className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        style={{ backgroundColor: "rgba(239, 68, 68, 0.9)" }}
-                      >
-                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="flex items-center justify-between mt-3">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => commentFileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 text-xs transition-colors hover:text-white"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
-                  </svg>
-                  Attach
-                </button>
-                <input ref={commentFileInputRef} type="file" multiple onChange={handleCommentFileSelect} className="hidden" />
-                <VoiceButton voice={commentVoice} compact />
-                <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  ⌘+Enter to send
-                </span>
-              </div>
-              <button
-                onClick={handlePostComment}
-                disabled={postingComment || (!newComment.trim() && commentAttachments.length === 0)}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                style={{
-                  backgroundColor: "var(--accent-blue)",
-                  color: "#fff",
-                  opacity: postingComment || (!newComment.trim() && commentAttachments.length === 0) ? 0.5 : 1,
-                }}
-              >
-                {postingComment ? "Posting..." : "Post"}
-              </button>
-            </div>
-          </div>
+          <CommentInput
+            personasList={personasList}
+            placeholder="Write a comment\u2026 @ to mention, # for columns"
+            onPost={handleCommentPost}
+            enableVoice
+          />
         </div>
       </div>
     </div>
   );
-
-  // Handle transparency tool
-  async function applyTransparency() {
-    if (!lightboxAttachmentId || !ticket) return;
-    setProcessingTransparency(true);
-    try {
-      const res = await fetch(`/api/tickets/${ticket.id}/attachments/${lightboxAttachmentId}/transparency`, {
-        method: "POST",
-      });
-      if (res.ok) {
-        // Reload attachments to get the updated image
-        await loadAttachments(ticket.id);
-        // Update lightbox with new image
-        const attachment = attachments.find(a => a.id === lightboxAttachmentId);
-        if (attachment) {
-          setLightboxImage(`/api/tickets/${ticket.id}/attachments/${lightboxAttachmentId}/file?t=${Date.now()}`);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to apply transparency:", err);
-    } finally {
-      setProcessingTransparency(false);
-    }
-  }
-
-  async function undoTransparency() {
-    if (!lightboxAttachmentId || !ticket) return;
-    setProcessingTransparency(true);
-    try {
-      const res = await fetch(`/api/tickets/${ticket.id}/attachments/${lightboxAttachmentId}/transparency/undo`, {
-        method: "POST",
-      });
-      if (res.ok) {
-        await loadAttachments(ticket.id);
-        const attachment = attachments.find(a => a.id === lightboxAttachmentId);
-        if (attachment) {
-          setLightboxImage(`/api/tickets/${ticket.id}/attachments/${lightboxAttachmentId}/file?t=${Date.now()}`);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to undo transparency:", err);
-    } finally {
-      setProcessingTransparency(false);
-    }
-  }
 
   // Lightbox for full-size image viewing
   const lightbox = lightboxImage && (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-8"
       style={{ backgroundColor: "rgba(0, 0, 0, 0.95)" }}
-      onClick={() => { setLightboxImage(null); setLightboxAttachmentId(null); }}
+      onClick={() => { setLightboxImage(null); }}
     >
       <button
-        onClick={() => { setLightboxImage(null); setLightboxAttachmentId(null); }}
+        onClick={() => { setLightboxImage(null); }}
         className="absolute top-6 right-6 w-10 h-10 rounded-full flex items-center justify-center transition-colors hover:bg-white/10"
         style={{ color: "var(--text-muted)" }}
       >
@@ -2781,163 +2334,11 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
           </div>
 
           {/* Doc comment input */}
-          <div className="px-6 py-4 border-t flex-shrink-0" style={{ borderColor: "var(--border-subtle)" }}>
-            <div
-              className="rounded-xl transition-colors"
-              style={{
-                backgroundColor: dragOverDocComment ? "rgba(91, 141, 249, 0.08)" : "var(--bg-input)",
-                border: dragOverDocComment ? "1px dashed rgba(91, 141, 249, 0.5)" : "1px solid var(--border-medium)",
-              }}
-              onDragOver={(e) => { e.preventDefault(); setDragOverDocComment(true); }}
-              onDragLeave={() => setDragOverDocComment(false)}
-              onDrop={handleDocCommentFileDrop}
-            >
-              <div className="relative">
-                <textarea
-                  ref={docCommentInputRef}
-                  value={newDocComment}
-                  onChange={handleDocCommentChange}
-                  placeholder="Comment on this document… @ to mention"
-                  rows={3}
-                  className="w-full p-4 text-sm resize-none bg-transparent"
-                  style={{ color: "var(--text-primary)", outline: "none" }}
-                  onKeyDown={handleDocCommentKeyDown}
-                />
-                {/* Doc @mention autocomplete dropdown */}
-                {docMentionQuery !== null && docFilteredMentions.length > 0 && (
-                  <div
-                    className="absolute left-4 bottom-full mb-1 rounded-lg shadow-xl overflow-hidden"
-                    style={{
-                      backgroundColor: "#1a1a2e",
-                      border: "1px solid var(--border-medium)",
-                      minWidth: "200px",
-                      zIndex: 10,
-                    }}
-                  >
-                    {docFilteredMentions.map((item, i) => (
-                      <div
-                        key={item.kind === "team" ? "team" : item.kind === "persona" ? item.persona.id : item.name}
-                        className="flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors"
-                        style={{
-                          backgroundColor: i === docMentionIndex ? "rgba(255,255,255,0.08)" : "transparent",
-                        }}
-                        onMouseEnter={() => setDocMentionIndex(i)}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          insertDocMention(item);
-                        }}
-                      >
-                        {item.kind === "team" ? (
-                          <>
-                            <div
-                              className="w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0"
-                              style={{ backgroundColor: "rgba(16, 185, 129, 0.2)" }}
-                            >
-                              👥
-                            </div>
-                            <span className="text-sm" style={{ color: "#10b981" }}>team</span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981" }}>
-                              all agents
-                            </span>
-                          </>
-                        ) : item.kind === "board" ? (
-                          <>
-                            <div
-                              className="w-6 h-6 rounded flex items-center justify-center text-xs flex-shrink-0"
-                              style={{ backgroundColor: `color-mix(in srgb, ${item.color} 25%, transparent)` }}
-                            >
-                              {item.icon}
-                            </div>
-                            <span className="text-sm" style={{ color: item.color }}>{item.label}</span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>
-                              board
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <div
-                              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-semibold text-white flex-shrink-0 overflow-hidden"
-                              style={{ backgroundColor: item.persona.color || "var(--accent-indigo)" }}
-                            >
-                              {item.persona.avatar ? (
-                                <img src={item.persona.avatar} alt={item.persona.name} className="w-full h-full object-cover" />
-                              ) : (
-                                item.persona.name[0]?.toUpperCase()
-                              )}
-                            </div>
-                            <span className="text-sm" style={{ color: "var(--text-primary)" }}>{item.persona.name}</span>
-                            {item.persona.role && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(139, 92, 246, 0.15)", color: "#a78bfa" }}>
-                                {item.persona.role}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {/* Doc comment attachment previews */}
-              {docCommentAttachments.length > 0 && (
-                <div className="px-4 pb-3 flex flex-wrap gap-2">
-                  {docCommentAttachments.map((att, i) => (
-                    <div key={i} className="relative group">
-                      {isImageType(att.type) ? (
-                        <img src={att.data} alt={att.name} className="h-16 w-auto rounded-lg object-cover" />
-                      ) : (
-                        <div className="h-16 px-3 rounded-lg flex items-center gap-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(255,255,255,0.1)", color: "var(--text-muted)" }}>
-                            {getFileIcon(att.type)}
-                          </span>
-                          <span className="text-xs truncate max-w-[80px]" style={{ color: "var(--text-secondary)" }}>{att.name}</span>
-                        </div>
-                      )}
-                      <button
-                        onClick={() => removeDocCommentAttachment(i)}
-                        className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        style={{ backgroundColor: "rgba(239, 68, 68, 0.9)" }}
-                      >
-                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="flex items-center justify-between mt-3">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => docCommentFileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 text-xs transition-colors hover:text-white"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
-                  </svg>
-                  Attach
-                </button>
-                <input ref={docCommentFileInputRef} type="file" multiple onChange={handleDocCommentFileSelect} className="hidden" />
-                <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  {typeof navigator !== "undefined" && navigator.platform?.includes("Mac") ? "Cmd" : "Ctrl"}+Enter to send
-                </span>
-              </div>
-              <button
-                onClick={handlePostDocComment}
-                disabled={postingDocComment || (!newDocComment.trim() && docCommentAttachments.length === 0)}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                style={{
-                  backgroundColor: "var(--accent-blue)",
-                  color: "#fff",
-                  opacity: postingDocComment || (!newDocComment.trim() && docCommentAttachments.length === 0) ? 0.5 : 1,
-                }}
-              >
-                {postingDocComment ? "Posting..." : "Post"}
-              </button>
-            </div>
-          </div>
+          <CommentInput
+            personasList={personasList}
+            placeholder="Comment on this document\u2026 @ to mention, # for columns"
+            onPost={handleDocCommentPost}
+          />
         </div>
       </div>
     </div>
@@ -3014,7 +2415,8 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
               minHeight: "80px",
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+                e.preventDefault();
                 handlePostQuoteComment();
               }
             }}
@@ -3023,25 +2425,15 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
           {/* Actions */}
           <div className="flex items-center justify-between">
             <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-              {navigator.platform?.includes("Mac") ? "Cmd" : "Ctrl"}+Enter to post
+              {postingQuote ? "Posting..." : "Enter to send · Shift+Enter for newline"}
             </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => { setQuoteModalText(null); setQuoteComment(""); }}
-                className="px-3 py-1.5 rounded-lg text-sm transition-colors hover:bg-white/5"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handlePostQuoteComment}
-                disabled={postingQuote || !quoteComment.trim()}
-                className="px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-40"
-                style={{ backgroundColor: "var(--accent-blue)", color: "#fff" }}
-              >
-                {postingQuote ? "Posting..." : "Post Comment"}
-              </button>
-            </div>
+            <button
+              onClick={() => { setQuoteModalText(null); setQuoteComment(""); }}
+              className="px-3 py-1.5 rounded-lg text-sm transition-colors hover:bg-white/5"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       </div>

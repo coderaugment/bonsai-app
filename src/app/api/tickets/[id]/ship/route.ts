@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { tickets, projects } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getTicketById, getProjectById, updateTicket, logAuditEvent } from "@/db/data";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
-import { logAuditEvent } from "@/db/queries";
 
 const HOME = process.env.HOME || "~";
 const BONSAI_DIR = path.join(HOME, ".bonsai");
@@ -30,12 +27,10 @@ export async function POST(
 ) {
   const { id: ticketId } = await params;
 
-  const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+  const ticket = await getTicketById(ticketId);
   if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
 
-  const project = ticket.projectId
-    ? db.select().from(projects).where(eq(projects.id, ticket.projectId)).get()
-    : null;
+  const project = ticket.projectId ? await getProjectById(ticket.projectId) : null;
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   const mainRepo = resolveMainRepo(project);
@@ -51,12 +46,25 @@ export async function POST(
   const log: string[] = [];
 
   try {
-    // Check if this worktree has been corrupted by git init (standalone .git dir)
+    // Check if this worktree has been corrupted
     const worktreeGitPath = path.join(worktreePath, ".git");
     const worktreeExists = fs.existsSync(worktreePath);
-    const isCorruptedWorktree = worktreeExists
-      && fs.existsSync(worktreeGitPath)
-      && fs.statSync(worktreeGitPath).isDirectory();
+    let isCorruptedWorktree = false;
+    if (worktreeExists && fs.existsSync(worktreeGitPath)) {
+      const stat = fs.statSync(worktreeGitPath);
+      if (stat.isDirectory()) {
+        // .git is a directory — corrupted by git init (e.g. create-next-app)
+        isCorruptedWorktree = true;
+      } else if (stat.isFile()) {
+        // .git is a file (normal worktree) — check if the gitdir target exists
+        const content = fs.readFileSync(worktreeGitPath, "utf-8").trim();
+        const match = content.match(/^gitdir:\s*(.+)$/);
+        if (match && !fs.existsSync(match[1])) {
+          // gitdir points to a missing path (e.g. project was renamed)
+          isCorruptedWorktree = true;
+        }
+      }
+    }
 
     if (isCorruptedWorktree) {
       // Worktree was corrupted by git init (e.g. create-next-app).
@@ -171,15 +179,11 @@ export async function POST(
     }
 
     // Update ticket DB
-    const now = new Date().toISOString();
-    db.update(tickets)
-      .set({ state: "ship" })
-      .where(eq(tickets.id, ticketId))
-      .run();
+    await updateTicket(ticketId, { state: "ship" });
 
     log.push("Ticket state set to ship.");
 
-    logAuditEvent({
+    await logAuditEvent({
       ticketId,
       event: "ticket_shipped",
       actorType: "human",
