@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { tickets } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { logAuditEvent } from "@/db/queries";
+import { getTicketById, updateTicket } from "@/db/data/tickets";
+import { logAuditEvent } from "@/db/data/audit";
 
 // POST /api/tickets/[id]/check-criteria
 // Body: { index: number } — 0-based index of the checkbox to mark done
@@ -17,7 +15,7 @@ export async function POST(
     return NextResponse.json({ error: "index must be a non-negative number" }, { status: 400 });
   }
 
-  const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+  const ticket = await getTicketById(ticketId);
   if (!ticket) {
     return NextResponse.json({ error: "ticket not found" }, { status: 404 });
   }
@@ -62,12 +60,9 @@ export async function POST(
     updates.state = "test";
   }
 
-  db.update(tickets)
-    .set(updates)
-    .where(eq(tickets.id, ticketId))
-    .run();
+  await updateTicket(ticketId, updates);
 
-  logAuditEvent({
+  await logAuditEvent({
     ticketId,
     event: "criterion_checked",
     actorType: "system",
@@ -77,7 +72,7 @@ export async function POST(
   });
 
   if (allChecked && ticket.state === "build") {
-    logAuditEvent({
+    await logAuditEvent({
       ticketId,
       event: "state_changed",
       actorType: "system",

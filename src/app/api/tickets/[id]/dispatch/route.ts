@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { tickets, personas, comments, projects, ticketDocuments, roles } from "@/db/schema";
-import { eq, and, isNull, desc } from "drizzle-orm";
+import { tickets, personas, projects } from "@/db/schema";
 import { spawn, execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
-import { getSetting, logAuditEvent } from "@/db/queries";
+import { getTicketById, updateTicket } from "@/db/data/tickets";
+import { createAgentComment, getRecentCommentsEnriched } from "@/db/data/comments";
+import { getDocumentsByTicketVersionDesc } from "@/db/data/documents";
+import { getProjectById } from "@/db/data/projects";
+import { getProjectPersonasRaw, getAllPersonasRaw } from "@/db/data/personas";
+import { getRoleBySlug } from "@/db/data/roles";
+import { getSetting } from "@/db/data/settings";
+import { logAuditEvent } from "@/db/data/audit";
 
 // ── Config ──────────────────────────────────────────
 const HOME = process.env.HOME || "~";
@@ -71,6 +76,33 @@ function ensureWorktree(
   }
 }
 
+// ── Per-persona dispatch cooldown ──────────────────────
+// Tracks recent dispatches to prevent duplicate agent runs.
+// Key: "ticketId:personaId" → timestamp
+const recentDispatches = new Map<string, number>();
+const PERSONA_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes (auto-dispatch chains)
+const MENTION_COOLDOWN_MS = 30 * 1000; // 30 seconds (direct human @mentions)
+
+function isPersonaOnCooldown(ticketId: string, personaId: string, isDirectMention = false): boolean {
+  const key = `${ticketId}:${personaId}`;
+  const last = recentDispatches.get(key);
+  if (!last) return false;
+  const cooldown = isDirectMention ? MENTION_COOLDOWN_MS : PERSONA_COOLDOWN_MS;
+  return Date.now() - last < cooldown;
+}
+
+function markPersonaDispatched(ticketId: string, personaId: string) {
+  const key = `${ticketId}:${personaId}`;
+  recentDispatches.set(key, Date.now());
+  // Prune old entries every 100 dispatches
+  if (recentDispatches.size > 100) {
+    const cutoff = Date.now() - PERSONA_COOLDOWN_MS;
+    for (const [k, v] of recentDispatches) {
+      if (v < cutoff) recentDispatches.delete(k);
+    }
+  }
+}
+
 // ── Agent Spawn (fire-and-forget, posts back when done) ──
 function spawnAgent(
   sessionDir: string,
@@ -98,6 +130,28 @@ function spawnAgent(
     `}).catch(() => {});`,
   ].join("\n"));
   fs.chmodSync(reportScript, 0o755);
+
+  // Write save-document helper — agent calls: save-document.sh <type> <file>
+  // Types: research, implementation_plan, design
+  const saveDocScript = path.join(sessionDir, "save-document.sh");
+  fs.writeFileSync(saveDocScript, [
+    `#!/usr/bin/env node`,
+    `const fs = require("fs");`,
+    `const type = process.argv[2];`,
+    `const file = process.argv[3];`,
+    `if (!type || !file) { console.error("Usage: save-document.sh <type> <file>"); console.error("Types: research, implementation_plan, design"); process.exit(1); }`,
+    `const content = fs.readFileSync(file, "utf-8");`,
+    `if (!content.trim()) { console.error("File is empty"); process.exit(1); }`,
+    `fetch("${API_BASE}/api/tickets/${ticketId}/documents", {`,
+    `  method: "POST",`,
+    `  headers: { "Content-Type": "application/json" },`,
+    `  body: JSON.stringify({ type, content: content.trim(), personaId: "${personaId}" }),`,
+    `}).then(r => r.json()).then(data => {`,
+    `  if (data.ok) console.log(type + " v" + data.version + " saved.");`,
+    `  else { console.error("Failed:", data.error, data.detail || ""); process.exit(1); }`,
+    `}).catch(e => { console.error("Error:", e.message); process.exit(1); });`,
+  ].join("\n"));
+  fs.chmodSync(saveDocScript, 0o755);
 
   // Write check-criteria helper script
   const checkCriteriaScript = path.join(sessionDir, "check-criteria.sh");
@@ -188,35 +242,21 @@ function spawnAgent(
 }
 
 // ── Helpers ──────────────────────────────────────────
-function postAgentComment(ticketId: string, personaId: string, content: string) {
-  db.insert(comments).values({ ticketId, authorType: "agent", personaId, content }).run();
-  const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
-  if (ticket) {
-    db.update(tickets).set({ commentCount: (ticket.commentCount || 0) + 1 }).where(eq(tickets.id, ticketId)).run();
-  }
+async function postAgentComment(ticketId: string, personaId: string, content: string) {
+  await createAgentComment(ticketId, personaId, content);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function toolsForPhase(role: string, ticket: typeof tickets.$inferSelect): string[] {
-  // Research and planning phases: ENFORCE read-only for ALL roles
-  // Agents cannot write files — their stdout IS the document
-  const phase = !ticket.researchApprovedAt ? "research"
-    : !ticket.planApprovedAt ? "planning"
-    : "implementation";
-
-  if (phase === "research" || phase === "planning") {
-    return TOOLS_READONLY;
-  }
-
-  // Implementation phase: use role-specific tools from DB
-  const roleRow = db.select().from(roles).where(eq(roles.slug, role)).get();
-  if (roleRow?.tools) {
-    try { return JSON.parse(roleRow.tools); } catch {}
-  }
-  // Fallback to hardcoded defaults
+async function toolsForRole(role: string): Promise<string[]> {
+  // Read-only roles
   if (role === "researcher") return TOOLS_READONLY;
   if (role === "critic") return TOOLS_READONLY;
   if (role === "lead") return TOOLS_READONLY;
+
+  // Check DB for role-specific tools
+  const roleRow = await getRoleBySlug(role);
+  if (roleRow?.tools) {
+    try { return JSON.parse(roleRow.tools); } catch {}
+  }
   return TOOLS_FULL;
 }
 
@@ -229,34 +269,16 @@ function resolveTargetRole(ticket: typeof tickets.$inferSelect): string {
     if (ticket.type === "feature" || ticket.type === "bug") return "developer";
     return "lead";
   }
-  // Implementation → developer
+  // Test phase → developer (to run tests and fix bugs)
+  if (ticket.state === "test") return "developer";
+  // Build/Implementation → developer
   return "developer";
 }
 
 // ── Fetch ticket context ─────────────────────────────
-function getTicketContext(ticketId: string) {
-  const recentComments = db.select().from(comments)
-    .where(eq(comments.ticketId, ticketId))
-    .orderBy(desc(comments.createdAt))
-    .limit(10)
-    .all()
-    .reverse();
-
-  const enrichedComments = recentComments.map((c) => {
-    let authorName = "Unknown";
-    if (c.authorType === "agent" && c.personaId) {
-      const p = db.select().from(personas).where(eq(personas.id, c.personaId)).get();
-      if (p) authorName = `${p.name} (${p.role})`;
-    } else {
-      authorName = "Human";
-    }
-    return `**${authorName}** [${c.authorType}]:\n${c.content}`;
-  });
-
-  const docs = db.select().from(ticketDocuments)
-    .where(eq(ticketDocuments.ticketId, ticketId))
-    .orderBy(desc(ticketDocuments.version))
-    .all();
+async function getTicketContext(ticketId: string) {
+  const enrichedComments = await getRecentCommentsEnriched(ticketId, 10);
+  const docs = await getDocumentsByTicketVersionDesc(ticketId);
 
   const researchDoc = docs.find((d) => d.type === "research");
   const implPlan = docs.find((d) => d.type === "implementation_plan");
@@ -278,24 +300,21 @@ export async function POST(
     console.log(`[dispatch] Conversational dispatch for ${ticketId}, documentId=${documentId}, targetPersonaId=${targetPersonaId}`);
   }
 
-  const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+  const ticket = await getTicketById(ticketId);
   if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
 
   const project = ticket.projectId
-    ? db.select().from(projects).where(eq(projects.id, ticket.projectId)).get()
+    ? await getProjectById(ticket.projectId)
     : null;
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   // Get all non-deleted personas for this project
-  const projectPersonas = db.select().from(personas)
-    .where(and(
-      eq(personas.projectId, project.id),
-      isNull(personas.deletedAt)
-    ))
-    .all();
+  const projectPersonas = await getProjectPersonasRaw(project.id);
 
-  // Handle @team dispatch — send to all project agents
-  if (team && projectPersonas.length > 0) {
+  // Handle @team dispatch — send to all project agents.
+  // Also treat non-mentioned human comments as team dispatch so all personas see them.
+  const isUnmentionedHumanComment = !team && !targetPersonaName && !targetPersonaId && !requestedRole && !!commentContent?.trim();
+  if ((team || isUnmentionedHumanComment) && projectPersonas.length > 0) {
     const cwd = ensureWorktree(project, ticketId);
     if (!fs.existsSync(cwd)) {
       fs.mkdirSync(cwd, { recursive: true });
@@ -304,20 +323,49 @@ export async function POST(
 
     const dispatched: Array<{ id: string; name: string; role: string | null; color: string | null; avatarUrl: string | null }> = [];
 
-    for (const persona of projectPersonas) {
+    // @team dispatches relevant roles only (not designer/hacker/researcher unless in their phase)
+    // Non-mentioned human comments go to lead (or developer in build/test)
+    let dispatchTargets = projectPersonas;
+    if (isUnmentionedHumanComment) {
+      const inBuildOrTest = !!ticket.planApprovedAt;
+      const targetRole = inBuildOrTest ? "developer" : "lead";
+      dispatchTargets = projectPersonas.filter((p) => p.role === targetRole);
+    } else if (team) {
+      // @team: only dispatch roles relevant to the current phase
+      const inResearch = !ticket.researchApprovedAt;
+      const inPlanning = !!ticket.researchApprovedAt && !ticket.planApprovedAt;
+      const inTest = ticket.state === "test";
+      const inBuild = !!ticket.planApprovedAt && !inTest;
+      const relevantRoles = new Set<string>();
+      relevantRoles.add("lead");
+      if (inResearch) { relevantRoles.add("researcher"); relevantRoles.add("critic"); }
+      if (inPlanning) { relevantRoles.add("developer"); relevantRoles.add("critic"); relevantRoles.add("hacker"); }
+      if (inBuild) { relevantRoles.add("developer"); relevantRoles.add("hacker"); }
+      if (inTest) { relevantRoles.add("developer"); relevantRoles.add("hacker"); relevantRoles.add("critic"); }
+      dispatchTargets = projectPersonas.filter((p) => relevantRoles.has(p.role || ""));
+    }
+
+    // Filter out personas on cooldown
+    dispatchTargets = dispatchTargets.filter((p) => !isPersonaOnCooldown(ticketId, p.id));
+    if (dispatchTargets.length === 0) {
+      return NextResponse.json({ team: true, personas: [], persona: null, skipped: "all on cooldown" });
+    }
+
+    for (const persona of dispatchTargets) {
       const sessionDir = path.join(BONSAI_DIR, "sessions", `${ticketId}-agent-${Date.now()}-${persona.id}`);
       fs.mkdirSync(sessionDir, { recursive: true });
 
       fs.writeFileSync(
         path.join(sessionDir, "system-prompt.txt"),
-        buildAgentSystemPrompt(persona, project, ticket, sessionDir, projectPersonas)
+        await buildAgentSystemPrompt(persona, project, ticket, sessionDir, projectPersonas)
       );
       fs.writeFileSync(
         path.join(sessionDir, "task.md"),
-        assembleAgentTask(commentContent, ticket, persona, { conversational })
+        await assembleAgentTask(commentContent, ticket, persona, { conversational })
       );
 
-      spawnAgent(sessionDir, cwd, toolsForRole(persona.role || "developer"), ticketId, persona.id, { conversational, documentId, role: persona.role || "developer" });
+      spawnAgent(sessionDir, cwd, await toolsForRole(persona.role || "developer"), ticketId, persona.id, { conversational, documentId, role: persona.role || "developer" });
+      markPersonaDispatched(ticketId, persona.id);
 
       dispatched.push({
         id: persona.id,
@@ -327,7 +375,7 @@ export async function POST(
         avatarUrl: persona.avatar,
       });
 
-      logAuditEvent({
+      await logAuditEvent({
         ticketId,
         event: "agent_dispatched",
         actorType: "system",
@@ -340,14 +388,11 @@ export async function POST(
     // Post a single comment about the team dispatch
     if (!silent) {
       const teamNames = dispatched.map(p => p.name).join(", ");
-      postAgentComment(ticketId, dispatched[0].id, `👥 Team dispatch: ${teamNames} are looking into this.`);
+      await postAgentComment(ticketId, dispatched[0].id, `👥 Team dispatch: ${teamNames} are looking into this.`);
     }
 
     // Update last activity (use first persona as assignee for tracking)
-    db.update(tickets)
-      .set({ lastAgentActivity: new Date().toISOString(), assigneeId: dispatched[0].id })
-      .where(eq(tickets.id, ticketId))
-      .run();
+    await updateTicket(ticketId, { lastAgentActivity: new Date().toISOString(), assigneeId: dispatched[0].id });
 
     return NextResponse.json({
       team: true,
@@ -382,9 +427,12 @@ export async function POST(
     : undefined;
 
   // If @mention target not found in project, try all personas (handles cross-project scoping issues)
+  // Skip personas with no projectId — those are orphan defaults and shouldn't be dispatched.
   if (!targetPersona && targetPersonaName) {
-    const allPersonas = db.select().from(personas).where(isNull(personas.deletedAt)).all();
-    const globalMatch = allPersonas.find((p) => p.name.toLowerCase() === targetPersonaName.toLowerCase());
+    const allPersonas = await getAllPersonasRaw();
+    const globalMatch = allPersonas.find(
+      (p) => p.name.toLowerCase() === targetPersonaName.toLowerCase() && p.projectId != null
+    );
     if (globalMatch) {
       console.warn(`[dispatch] @${targetPersonaName} not in project ${project.id} personas (${projectPersonas.map(p => p.name).join(", ")}). Found globally as ${globalMatch.id} (project ${globalMatch.projectId}).`);
       targetPersona = globalMatch;
@@ -406,6 +454,17 @@ export async function POST(
     return NextResponse.json({ error: "No personas available" }, { status: 400 });
   }
 
+  // Per-persona cooldown: 30s for direct human @mentions, 5 min for auto-dispatch chains
+  const isDirectMention = !!targetPersonaName;
+  if (isPersonaOnCooldown(ticketId, targetPersona.id, isDirectMention)) {
+    const cd = isDirectMention ? "30s" : "5 min";
+    console.log(`[dispatch] Skipping ${targetPersona.name} — dispatched to ${ticketId} within last ${cd}`);
+    return NextResponse.json({
+      persona: { id: targetPersona.id, name: targetPersona.name, role: targetPersona.role, color: targetPersona.color },
+      skipped: "persona_cooldown",
+    });
+  }
+
   const cwd = ensureWorktree(project, ticketId);
 
   // Ensure workspace exists — create if missing so agent doesn't silently fail
@@ -420,23 +479,24 @@ export async function POST(
 
   fs.writeFileSync(
     path.join(sessionDir, "system-prompt.txt"),
-    buildAgentSystemPrompt(targetPersona, project, ticket, sessionDir, projectPersonas)
+    await buildAgentSystemPrompt(targetPersona, project, ticket, sessionDir, projectPersonas)
   );
   fs.writeFileSync(
     path.join(sessionDir, "task.md"),
-    assembleAgentTask(commentContent, ticket, targetPersona, { conversational })
+    await assembleAgentTask(commentContent, ticket, targetPersona, { conversational, mentioned: isDirectMention })
   );
 
   // Spawn the agent (fire-and-forget, posts comment when done)
-  spawnAgent(sessionDir, cwd, toolsForRole(targetPersona.role || "developer"), ticketId, targetPersona.id, { conversational, documentId, role: targetPersona.role || "developer" });
+  spawnAgent(sessionDir, cwd, await toolsForRole(targetPersona.role || "developer"), ticketId, targetPersona.id, { conversational, documentId, role: targetPersona.role || "developer" });
+  markPersonaDispatched(ticketId, targetPersona.id);
 
   // Post a brief "working on it" comment (skip for silent/auto dispatches)
   const ackMsg = `Looking into this now.`;
   if (!silent) {
-    postAgentComment(ticketId, targetPersona.id, ackMsg);
+    await postAgentComment(ticketId, targetPersona.id, ackMsg);
   }
 
-  logAuditEvent({
+  await logAuditEvent({
     ticketId,
     event: "agent_dispatched",
     actorType: "system",
@@ -446,10 +506,7 @@ export async function POST(
   });
 
   // Set last_agent_activity to prevent heartbeat overlap
-  db.update(tickets)
-    .set({ lastAgentActivity: new Date().toISOString(), assigneeId: targetPersona.id })
-    .where(eq(tickets.id, ticketId))
-    .run();
+  await updateTicket(ticketId, { lastAgentActivity: new Date().toISOString(), assigneeId: targetPersona.id });
 
   return NextResponse.json({
     persona: {
@@ -476,21 +533,22 @@ export async function POST(
 }
 
 // ── System prompt builder ────────────────────────────
-function buildAgentSystemPrompt(
+async function buildAgentSystemPrompt(
   persona: typeof personas.$inferSelect,
   project: typeof projects.$inferSelect,
   ticket: typeof tickets.$inferSelect,
   sessionDir: string,
   teamMembers: (typeof personas.$inferSelect)[] = []
-): string {
+): Promise<string> {
   const workspace = ensureWorktree(project, ticket.id);
   const reportScript = path.join(sessionDir, "report.sh");
+  const saveDocScript = path.join(sessionDir, "save-document.sh");
 
   // Role instructions: read from roles table (editable in Settings > Roles)
   const role = persona.role || "developer";
-  const roleRow = db.select().from(roles).where(eq(roles.slug, role)).get();
+  const roleRow = await getRoleBySlug(role);
   const roleInstructions = roleRow?.systemPrompt
-    || getSetting(`prompt_role_${role}`)
+    || await getSetting(`prompt_role_${role}`)
     || `You are a ${role}. Follow your role's responsibilities for this project.`;
 
   // Tool/capability mappings by role
@@ -499,12 +557,14 @@ function buildAgentSystemPrompt(
       "Read, Grep, Glob (read-only file access)",
       "Bash (read-only commands)",
       "report.sh (post progress updates)",
+      "save-document.sh (save research/plan/design documents)",
     ],
     developer: [
       "Read, Write, Edit, Grep, Glob (full file access)",
       "Bash (full command access)",
       "Git (status, diff, commit, push)",
       "report.sh (post progress updates)",
+      "save-document.sh (save research/plan/design documents)",
       "apply_transparency (remove grey backgrounds from images)",
     ],
     designer: [
@@ -513,23 +573,27 @@ function buildAgentSystemPrompt(
       "nano_banana (AI image generation via Gemini)",
       "apply_transparency (remove grey backgrounds from images)",
       "report.sh (post progress updates)",
+      "save-document.sh (save research/plan/design documents)",
     ],
     hacker: [
       "Read, Write, Edit, Grep, Glob (full file access)",
       "Bash (full command access)",
       "Git (status, diff, commit, push)",
       "report.sh (post progress updates)",
+      "save-document.sh (save research/plan/design documents)",
       "apply_transparency (remove grey backgrounds from images)",
     ],
     critic: [
       "Read, Grep, Glob (read-only file access)",
       "Bash (read-only commands)",
       "report.sh (post progress updates)",
+      "save-document.sh (save research/plan/design documents)",
     ],
     lead: [
       "Read, Grep, Glob (read-only file access)",
       "Bash (read-only commands)",
       "report.sh (post progress updates)",
+      "save-document.sh (save research/plan/design documents)",
     ],
   };
 
@@ -585,6 +649,16 @@ function buildAgentSystemPrompt(
     "- **Make a decision** (e.g. \"Going with approach B: adding a new API route instead of modifying the existing one\")",
     "- **Hit a blocker or uncertainty** (e.g. \"Not sure if we need to handle the legacy format — flagging for review\")",
     "Keep reports short (1-3 sentences). They form the audit trail of your work.",
+    "",
+    "## Saving Documents",
+    "When you produce a research document, implementation plan, or design document, you MUST save it using the save-document tool.",
+    "1. Write your document to a file (e.g. /tmp/doc.md)",
+    `2. Run: \`${saveDocScript} <type> <file>\``,
+    "   Types: research, implementation_plan, design",
+    `   Example: \`${saveDocScript} research /tmp/doc.md\``,
+    "3. Your final chat response should be a brief summary (1-2 sentences), NOT the full document.",
+    "",
+    "CRITICAL: Do NOT output the full document as your response. Save it with save-document.sh. Your response is just a chat message.",
     ticket.acceptanceCriteria ? [
       "",
       "## Acceptance Criteria Verification",
@@ -601,13 +675,13 @@ function buildAgentSystemPrompt(
 }
 
 // ── Agent task assembler ─────────────────────────────
-function assembleAgentTask(
+async function assembleAgentTask(
   commentContent: string,
   ticket: typeof tickets.$inferSelect,
   persona: typeof personas.$inferSelect,
-  opts?: { conversational?: boolean }
-): string {
-  const { enrichedComments, researchDoc, implPlan, researchCritique, planCritique } = getTicketContext(ticket.id);
+  opts?: { conversational?: boolean; mentioned?: boolean }
+): Promise<string> {
+  const { enrichedComments, researchDoc, implPlan, researchCritique, planCritique } = await getTicketContext(ticket.id);
 
   const sections: string[] = [
     `# Ticket: ${ticket.title}`,
@@ -648,62 +722,55 @@ function assembleAgentTask(
     sections.push(...enrichedComments.map((c) => c + "\n---"));
   }
 
-  // Phase-specific instructions (skip when conversational — agent should reply, not produce a document)
-  if (!opts?.conversational) {
-    const phase = !ticket.researchApprovedAt ? "research"
-      : !ticket.planApprovedAt ? "planning"
-      : "implementation";
+  // Determine current phase
+  const phase = !ticket.researchApprovedAt ? "research"
+    : !ticket.planApprovedAt ? "planning"
+    : ticket.state === "test" ? "test"
+    : "implementation";
 
-    if (phase === "planning" && (persona.role === "developer" || persona.role === "lead")) {
-      sections.push(
-        "",
-        "## PHASE: PLANNING",
-        "You are producing the IMPLEMENTATION PLAN. Your entire stdout will be saved as the plan document.",
-        "CRITICAL: Do NOT write the plan to a file. Do NOT create docs/IMPLEMENTATION-PLAN.md or any other file. Your stdout IS the document — the system captures it automatically and versions it. Writing to a file means your work is LOST.",
-        "Do NOT ask questions. Be decisive — make assumptions and document them.",
-        "If previous comments contain answers to earlier questions, incorporate them into a COMPLETE revised plan.",
-      );
-    } else if (phase === "research" && persona.role === "researcher") {
-      sections.push(
-        "",
-        "## PHASE: RESEARCH",
-        "You are producing the RESEARCH DOCUMENT. Your entire stdout will be saved as the research document.",
-        "CRITICAL: Do NOT write the document to a file. Do NOT create docs/RESEARCH.md or any other file. Your stdout IS the document — the system captures it automatically and versions it. Writing to a file means your work is LOST.",
-      );
-    } else if (phase === "implementation" && (persona.role === "developer" || persona.role === "lead")) {
-      sections.push(
-        "",
-        "## PHASE: IMPLEMENTATION",
-        "The research and implementation plan have BOTH been approved. You are now BUILDING.",
-        "Follow the implementation plan above step by step. Write real code — create files, install dependencies, build the feature.",
-        "Work inside your workspace directory ONLY. Do not modify files outside it.",
-        "After completing each major step, report progress using the report script.",
-      );
+  // Always inject phase context so the agent knows where we are
+  if (phase === "implementation") {
+    // BUILD phase — always inject this, even in conversational mode
+    const prompt = await getSetting("prompt_phase_implementation");
+    sections.push("", prompt || "## PHASE: IMPLEMENTATION — BUILD THE APP\nWrite code. Do NOT produce documents.");
+    if (opts?.conversational) {
+      sections.push("", "You were @mentioned. Answer briefly, but your PRIMARY job is to BUILD — write code, not documents. If the message is asking you to do work, DO the work (write code), don't just describe what you'd do.");
     }
-
-    // Designer always gets explicit tool-use instructions
-    if (persona.role === "designer") {
-      const toolPath = path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs");
-      sections.push(
-        "",
-        "## ACTION REQUIRED: GENERATE IMAGES WITH NANO-BANANA",
-        `Your FIRST action MUST be a Bash tool call to generate an image. Run this exact command (fill in the prompt):`,
-        "",
-        `node ${toolPath} "DESCRIBE THE UI HERE IN DETAIL" --output designs/mockup.png --ticket ${ticket.id} --persona ${persona.id}`,
-        "",
-        "This will generate an image via Gemini AI, save it to designs/, and attach it to the ticket.",
-        "Do NOT write text describing designs. Do NOT skip this step. Do NOT pretend you ran it.",
-        "If the command fails, paste the error. Do not fabricate output.",
-      );
+  } else if (phase === "test") {
+    // TEST phase — test thoroughly, even in conversational mode
+    const prompt = await getSetting("prompt_phase_test");
+    sections.push("", prompt || "## PHASE: TESTING\nTest the app thoroughly. Run it, verify acceptance criteria, find bugs.");
+    if (opts?.conversational) {
+      sections.push("", "You were @mentioned. Answer briefly, but your PRIMARY job is to TEST — run the app, verify features work, find bugs.");
     }
+  } else if (opts?.conversational) {
+    // Conversational in research/planning — just reply
+    const convPrompt = await getSetting("prompt_phase_conversational");
+    sections.push("", convPrompt || "## CONVERSATIONAL MODE\nReply conversationally — short, direct, under 500 characters.");
   } else {
-    sections.push(
-      "",
-      "## CONVERSATIONAL MODE",
-      "A human left a comment on a document. Reply CONVERSATIONALLY — short, direct, under 500 characters.",
-      "Do NOT produce a full document. Do NOT output headers or structured markdown.",
-      "Just answer their question or acknowledge their feedback like a teammate would in a chat.",
-    );
+    // Phase-specific document instructions (research/planning only)
+    if (phase === "planning" && (persona.role === "developer" || persona.role === "lead")) {
+      const prompt = await getSetting("prompt_phase_planning");
+      sections.push("", prompt || "## PHASE: PLANNING\nProduce the implementation plan as your response.");
+    } else if (phase === "research" && persona.role === "researcher") {
+      const prompt = await getSetting("prompt_phase_research");
+      sections.push("", prompt || "## PHASE: RESEARCH\nProduce the research document as your response.");
+    } else if (phase === "research" && persona.role === "critic") {
+      const prompt = await getSetting("prompt_phase_research_critic");
+      sections.push("", prompt || "## PHASE: RESEARCH — CRITIC REVIEW\nWrite your critical review.");
+    }
+  }
+
+  // Designer always gets explicit tool-use instructions
+  if (persona.role === "designer" && !opts?.conversational) {
+    const toolPath = path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs");
+    const designerPrompt = (await getSetting("prompt_phase_designer") || "")
+      .replace(/\{\{toolPath\}\}/g, toolPath)
+      .replace(/\{\{ticketId\}\}/g, ticket.id)
+      .replace(/\{\{personaId\}\}/g, persona.id);
+    if (designerPrompt) {
+      sections.push("", designerPrompt);
+    }
   }
 
   sections.push(
@@ -717,6 +784,11 @@ function assembleAgentTask(
     sections.push(
       "",
       `You are ${persona.name} (${persona.role}). Your FIRST action must be: Bash tool → node ${toolPath} "your prompt" --output designs/mockup.png --ticket ${ticket.id} --persona ${persona.id}`,
+    );
+  } else if (opts?.mentioned) {
+    sections.push(
+      "",
+      `You are ${persona.name} (${persona.role}). You were @mentioned in the comment above. Read it and decide: if the message is directed at you or requires action from you, respond or do the work. If you are just being referenced and there is nothing for you to do, output a single empty line and move on — do NOT respond with filler like "nothing for me to do here."`,
     );
   } else {
     sections.push(

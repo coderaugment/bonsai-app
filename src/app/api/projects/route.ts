@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import { getProjects, createProject } from "@/db/queries";
-import { db } from "@/db";
-import { projects } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getProjects, createProject, updateProject, softDeleteProject } from "@/db/data/projects";
 import { getGithubToken } from "@/lib/vault";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -96,7 +93,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const project = createProject({
+    const project = await createProject({
       name: name.trim(),
       slug: finalSlug,
       visibility: visibility || "private",
@@ -113,8 +110,8 @@ export async function POST(req: Request) {
   }
 }
 
-export function GET() {
-  const allProjects = getProjects();
+export async function GET() {
+  const allProjects = await getProjects();
   return NextResponse.json({ projects: allProjects });
 }
 
@@ -137,10 +134,7 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
-  db.update(projects)
-    .set(updates)
-    .where(eq(projects.id, Number(id)))
-    .run();
+  await updateProject(Number(id), updates);
   return NextResponse.json({ success: true });
 }
 
@@ -149,9 +143,6 @@ export async function DELETE(req: Request) {
   if (!id) {
     return NextResponse.json({ error: "Project id is required" }, { status: 400 });
   }
-  db.update(projects)
-    .set({ deletedAt: new Date().toISOString() })
-    .where(eq(projects.id, Number(id)))
-    .run();
+  await softDeleteProject(Number(id));
   return NextResponse.json({ success: true });
 }

@@ -48,7 +48,7 @@ interface SpeechRecognition extends EventTarget {
   onend: ((event: Event) => void) | null;
 }
 
-declare var webkitSpeechRecognition: {
+declare let _webkitSpeechRecognition: {
   new (): SpeechRecognition;
 };
 
@@ -127,7 +127,7 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
     if (!isSpeechSupported) return;
 
     try {
-      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+      const SpeechRecognition = (window as unknown as Record<string, { new(): SpeechRecognition }>).webkitSpeechRecognition || (window as unknown as Record<string, { new(): SpeechRecognition }>).SpeechRecognition;
       const recognition = new SpeechRecognition();
 
       recognition.continuous = true;
@@ -151,7 +151,7 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
         setInterimTranscript(finalTranscript + interim);
       };
 
-      recognition.onerror = (event: any) => {
+      recognition.onerror = (event: Event & { error?: string }) => {
         console.error('Speech recognition error:', event.error);
         setIsRecording(false);
         setInterimTranscript('');

@@ -14,7 +14,7 @@
  * @module prompt-builder
  */
 
-import { getCommentsByTicket } from '../db/queries';
+import { getCommentsByTicket } from '../db/data/comments';
 import { detectTechStack, loadClaudeMd } from './project-analyzer';
 import {
   buildPersonaSection,
@@ -22,6 +22,12 @@ import {
   buildTicketSection,
   buildCommentsSection,
 } from './prompt-sections';
+import type {
+  PersonaRow as SchemaPersonaRow,
+  ProjectRow as SchemaProjectRow,
+  TicketRow as SchemaTicketRow,
+  CommentRow as SchemaCommentRow,
+} from '../db/schema';
 
 // Accept both snake_case (raw SQL) and camelCase (Drizzle ORM) field names
 export interface PersonaRow {
@@ -93,12 +99,12 @@ export interface PromptOptions {
  * @param options.roleData - Detailed role definition with skills and workflow
  * @returns The complete system prompt as a string
  */
-export function buildSystemPrompt(
+export async function buildSystemPrompt(
   persona: PersonaRow,
   project: ProjectRow,
   ticket: TicketRow,
   options: PromptOptions = {}
-): string {
+): Promise<string> {
   const {
     commentLimit = 10,
     includeComments = true,
@@ -126,7 +132,7 @@ export function buildSystemPrompt(
   const sections: string[] = [];
 
   // 1. Persona identity
-  sections.push(buildPersonaSection(normalizedPersona as any));
+  sections.push(buildPersonaSection(normalizedPersona as SchemaPersonaRow));
 
   // 2. Role definition (if available)
   if (roleData) {
@@ -150,7 +156,7 @@ export function buildSystemPrompt(
           sections.push(`\n## ticket-researcher Instructions`);
           sections.push(skills['ticket-researcher']);
         }
-      } catch (e) {
+      } catch {
         // Malformed skill definitions, skip
       }
     }
@@ -174,7 +180,7 @@ export function buildSystemPrompt(
             sections.push(workflow.outputFormat);
           }
         }
-      } catch (e) {
+      } catch {
         // Malformed workflow, skip
       }
     }
@@ -184,16 +190,16 @@ export function buildSystemPrompt(
   if (workspacePath) {
     const techStack = detectTechStack(workspacePath);
     const claudeMd = loadClaudeMd(workspacePath);
-    sections.push(`\n${buildProjectSection(normalizedProject as any, techStack, claudeMd)}`);
+    sections.push(`\n${buildProjectSection(normalizedProject as SchemaProjectRow, techStack, claudeMd)}`);
   }
 
   // 4. Ticket context
-  sections.push(`\n${buildTicketSection(normalizedTicket as any)}`);
+  sections.push(`\n${buildTicketSection(normalizedTicket as SchemaTicketRow)}`);
 
   // 5. Recent comments
   if (includeComments) {
-    const comments = getCommentsByTicket(ticket.id, commentLimit);
-    const commentsSection = buildCommentsSection(comments as any);
+    const comments = await getCommentsByTicket(ticket.id, commentLimit);
+    const commentsSection = buildCommentsSection(comments as SchemaCommentRow[]);
     if (commentsSection) {
       sections.push(`\n${commentsSection}`);
     }

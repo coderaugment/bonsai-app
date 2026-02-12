@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { comments, tickets, personas } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { logAuditEvent } from "@/db/queries";
+import { getTicketById, createAgentComment, updateTicket, getPersonaRaw, logAuditEvent } from "@/db/data";
 
 // Called by agents mid-run to post progress updates to the ticket thread.
 // Lighter than agent-complete — just posts a comment, no document logic.
@@ -17,35 +14,22 @@ export async function POST(
     return NextResponse.json({ error: "empty" }, { status: 400 });
   }
 
-  const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+  const ticket = await getTicketById(ticketId);
   if (!ticket) {
     return NextResponse.json({ error: "ticket not found" }, { status: 404 });
   }
 
-  // Post agent comment
-  db.insert(comments)
-    .values({
-      ticketId,
-      authorType: "agent",
-      personaId: personaId || null,
-      content: content.trim(),
-    })
-    .run();
+  // Post agent comment (this function already bumps comment count)
+  await createAgentComment(ticketId, personaId, content.trim());
 
-  // Bump comment count + refresh activity timestamp
-  db.update(tickets)
-    .set({
-      commentCount: (ticket.commentCount || 0) + 1,
-      lastAgentActivity: new Date().toISOString(),
-    })
-    .where(eq(tickets.id, ticketId))
-    .run();
+  // Update lastAgentActivity separately
+  await updateTicket(ticketId, {
+    lastAgentActivity: new Date().toISOString(),
+  });
 
-  const persona = personaId
-    ? db.select().from(personas).where(eq(personas.id, personaId)).get()
-    : null;
+  const persona = personaId ? await getPersonaRaw(personaId) : null;
 
-  logAuditEvent({
+  await logAuditEvent({
     ticketId,
     event: "agent_progress",
     actorType: "agent",

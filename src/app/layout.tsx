@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/sidebar";
-import { getUser } from "@/db/queries";
+import { getUser } from "@/db/data/users";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -19,12 +19,12 @@ export const metadata: Metadata = {
   description: "AI-powered developer workspace",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const user = getUser();
+  const user = await getUser();
 
   return (
     <html lang="en" className="dark">

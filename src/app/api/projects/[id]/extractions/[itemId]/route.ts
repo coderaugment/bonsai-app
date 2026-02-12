@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { extractedItems, tickets, users } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { updateExtractionStatus, getExtractionById } from "@/db/data/notes";
+import { getUser } from "@/db/data/users";
+import { generateTicketId, createTicket } from "@/db/data/tickets";
 
 export async function PATCH(
   req: NextRequest,
@@ -20,46 +20,30 @@ export async function PATCH(
   }
 
   // Update the extracted item status
-  db.update(extractedItems)
-    .set({ status })
-    .where(eq(extractedItems.id, itemIdNum))
-    .run();
+  await updateExtractionStatus(itemIdNum, status);
 
   // If approved, create a real ticket in the research column
   if (status === "approved") {
-    const item = db
-      .select()
-      .from(extractedItems)
-      .where(eq(extractedItems.id, itemIdNum))
-      .get();
+    const item = await getExtractionById(itemIdNum);
 
     if (item) {
-      const user = db.select().from(users).limit(1).get();
+      const user = await getUser();
 
       // Generate next ticket ID
-      const countRow = db
-        .select({ count: sql<number>`count(*)` })
-        .from(tickets)
-        .get();
-      const num = (countRow?.count ?? 0) + 1;
-      const ticketId = `tkt_${String(num).padStart(2, "0")}`;
+      const ticketId = await generateTicketId();
 
-      const ticket = db
-        .insert(tickets)
-        .values({
-          id: ticketId,
-          title: item.title,
-          description: item.description,
-          type: item.type as "feature" | "bug" | "chore",
-          state: "research",
-          priority: 500,
-          projectId,
-          createdBy: user?.id ?? null,
-          commentCount: 0,
-          hasAttachments: false,
-        })
-        .returning()
-        .get();
+      const ticket = await createTicket({
+        id: ticketId,
+        title: item.title,
+        description: item.description,
+        type: item.type as "feature" | "bug" | "chore",
+        state: "research",
+        priority: 500,
+        projectId,
+        createdBy: user?.id ?? null,
+        commentCount: 0,
+        hasAttachments: false,
+      });
 
       return NextResponse.json({ ok: true, ticket });
     }

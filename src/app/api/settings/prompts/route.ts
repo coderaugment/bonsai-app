@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSetting, setSetting } from "@/db/queries";
+import { getSetting, setSetting, deleteSetting } from "@/db/data/settings";
 
 const PROMPT_KEYS = [
   "prompt_avatar_style",
@@ -10,6 +10,17 @@ const PROMPT_KEYS = [
   "prompt_role_designer",
   "prompt_role_critic",
   "prompt_role_hacker",
+  "prompt_phase_research",
+  "prompt_phase_research_critic",
+  "prompt_phase_planning",
+  "prompt_phase_implementation",
+  "prompt_phase_test",
+  "prompt_phase_designer",
+  "prompt_phase_conversational",
+  "prompt_dispatch_critic_v2",
+  "prompt_dispatch_researcher_v3",
+  "prompt_dispatch_plan_critic",
+  "prompt_dispatch_plan_hacker",
 ] as const;
 type PromptKey = (typeof PROMPT_KEYS)[number];
 
@@ -104,13 +115,108 @@ When implementing:
 - Fix vulnerabilities with minimal blast radius
 
 Be specific about threats. Don't just say "this is insecure" — explain the attack vector and provide a fix.`,
+
+  // ── Phase instructions (injected into dispatch prompts based on ticket phase) ──
+
+  prompt_phase_research: `## PHASE: RESEARCH
+You are producing the RESEARCH DOCUMENT.
+1. Do your research — read files, search code, understand architecture.
+2. Write the document to /tmp/research.md
+3. Save it: \`save-document.sh research /tmp/research.md\`
+4. Your final chat response should be a brief 1-2 sentence summary, NOT the full document.`,
+
+  prompt_phase_research_critic: `## PHASE: RESEARCH — CRITIC REVIEW
+You are reviewing the research document above. Write your critical review.
+1. Write your review to /tmp/review.md
+2. Save it: \`save-document.sh research /tmp/review.md\`  (it will be appended below the original as v2)
+3. Your final chat response should be a brief summary of your findings.
+Focus on: verifying claims, identifying gaps, challenging assumptions.
+Do NOT rewrite the entire research document — write ONLY your review.`,
+
+  prompt_phase_planning: `## PHASE: PLANNING
+You are producing the IMPLEMENTATION PLAN.
+1. Read the research, design your plan.
+2. Write the plan to /tmp/plan.md
+3. Save it: \`save-document.sh implementation_plan /tmp/plan.md\`
+4. Your final chat response should be a brief 1-2 sentence summary, NOT the full plan.
+Be decisive — make assumptions and document them. Do NOT ask questions.`,
+
+  prompt_phase_implementation: `## PHASE: IMPLEMENTATION — BUILD THE APP
+
+You are in the BUILD phase. The research and plan have been approved. Your ONLY job now is to WRITE CODE.
+
+DO NOT:
+- Write or revise documents
+- Use save-document.sh
+- Produce implementation plans
+- Analyze or critique the plan
+- Output markdown documents of any kind
+
+DO:
+- Write real code: create files, edit files, install dependencies
+- Follow the implementation plan step by step
+- Run the app/tests to verify your changes work
+- Use git to commit your progress
+- Check off acceptance criteria as you complete them (check-criteria.sh)
+- Report progress using report.sh ("Implemented user table migration", "Added API endpoint for providers")
+
+If the plan is missing details, make reasonable decisions and BUILD. Do not go back to planning.
+Work inside your workspace directory ONLY.`,
+
+  prompt_phase_test: `## PHASE: TESTING — VERIFY THE BUILD
+
+You are in the TEST phase. The code has been built. Your job is to thoroughly test the app, code, and feature.
+
+DO:
+- Run the app and verify it works end-to-end
+- Test edge cases, error states, and boundary conditions
+- Check every acceptance criterion manually and mark them off (check-criteria.sh)
+- Run any existing test suites (npm test, etc.)
+- Write new tests if the project has a test framework set up
+- Try to break things — test invalid inputs, missing data, race conditions
+- Report bugs and issues you find using report.sh
+- Fix minor issues you discover during testing
+
+DO NOT:
+- Rewrite or refactor working code (unless you found a bug)
+- Produce documents or plans
+- Redesign the architecture
+
+Be thorough. The goal is confidence that the feature works correctly before shipping.`,
+
+  prompt_phase_designer: `## ACTION REQUIRED: GENERATE IMAGES WITH NANO-BANANA
+
+Your FIRST action MUST be a Bash tool call to generate an image. Run this exact command (fill in the prompt):
+
+node {{toolPath}} "DESCRIBE THE UI HERE IN DETAIL" --output designs/mockup.png --ticket {{ticketId}} --persona {{personaId}}
+
+This will generate an image via Gemini AI, save it to designs/, and attach it to the ticket.
+Do NOT write text describing designs. Do NOT skip this step. Do NOT pretend you ran it.
+If the command fails, paste the error. Do not fabricate output.`,
+
+  prompt_phase_conversational: `## CONVERSATIONAL MODE
+A human left a comment. Reply CONVERSATIONALLY — short, direct, under 500 characters.
+Do NOT produce a full document. Do NOT use save-document.sh.
+Just answer their question or acknowledge their feedback like a teammate would in a chat.`,
+
+  // ── Auto-dispatch templates (used in document save chain) ──
+  // Use {{authorName}} and {{criticName}} as placeholders for agent names.
+
+  prompt_dispatch_critic_v2: `{{authorName}} just completed initial research (v1). Review it critically — verify claims, find gaps, challenge assumptions — then save your review with save-document.sh.`,
+
+  prompt_dispatch_researcher_v3: `{{criticName}} completed the critic review (v2). The v2 document contains your original research PLUS the critic's review appended below. Produce the FINAL v3 research document: a clean, complete document that incorporates the critic's corrections and fills any gaps. Save it with save-document.sh. Your chat response should be a brief summary.`,
+
+  prompt_dispatch_plan_critic: `{{authorName}} just completed the implementation plan. Review it critically — check feasibility, missing edge cases, architectural risks, and whether it fully addresses the acceptance criteria. Save your review with save-document.sh if producing a critique document, or just post your feedback in chat if it's brief.`,
+
+  prompt_dispatch_plan_hacker: `{{authorName}} just completed the implementation plan. Review it from a security perspective — identify attack surfaces, input validation gaps, auth weaknesses, injection risks. Post your findings in chat (keep it concise).`,
+
 };
 
 export async function GET() {
   const prompts: Record<string, { value: string; isDefault: boolean }> = {};
 
   for (const key of PROMPT_KEYS) {
-    const stored = getSetting(key);
+    const stored = await getSetting(key);
     prompts[key] = {
       value: stored ?? DEFAULTS[key],
       isDefault: !stored,
@@ -151,10 +257,7 @@ export async function DELETE(req: Request) {
   }
 
   // Reset to default by removing from settings
-  const { db } = await import("@/db");
-  const { settings } = await import("@/db/schema");
-  const { eq } = await import("drizzle-orm");
-  db.delete(settings).where(eq(settings.key, key)).run();
+  await deleteSetting(key);
 
   return NextResponse.json({ success: true, value: DEFAULTS[key as PromptKey] });
 }

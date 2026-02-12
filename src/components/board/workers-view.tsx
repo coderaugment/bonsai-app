@@ -72,7 +72,7 @@ export function WorkersView({ projectId: propProjectId }: WorkersViewProps) {
   // If no projectId prop, resolve from active project setting
   useEffect(() => {
     if (propProjectId) {
-      setResolvedProjectId(propProjectId);
+      queueMicrotask(() => setResolvedProjectId(propProjectId));
       return;
     }
     fetch("/api/settings/project")
@@ -100,7 +100,8 @@ export function WorkersView({ projectId: propProjectId }: WorkersViewProps) {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [resolvedProjectId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedProjectId, propProjectId]);
 
   useEffect(() => {
     if (resolvedProjectId === null && !propProjectId) return;
@@ -111,7 +112,8 @@ export function WorkersView({ projectId: propProjectId }: WorkersViewProps) {
         .catch(() => {});
     }, 15_000);
     return () => clearInterval(interval);
-  }, [resolvedProjectId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedProjectId, propProjectId]);
 
   const selectedWorker = workers.find((w) => w.id === selected);
 

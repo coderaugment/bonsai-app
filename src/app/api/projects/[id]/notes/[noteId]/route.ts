@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { projectNotes } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { deleteNote } from "@/db/data/notes";
 
 export async function DELETE(
   _req: NextRequest,
@@ -11,14 +9,7 @@ export async function DELETE(
   const projectId = Number(id);
   const noteIdNum = Number(noteId);
 
-  db.delete(projectNotes)
-    .where(
-      and(
-        eq(projectNotes.id, noteIdNum),
-        eq(projectNotes.projectId, projectId)
-      )
-    )
-    .run();
+  await deleteNote(projectId, noteIdNum);
 
   return NextResponse.json({ ok: true });
 }

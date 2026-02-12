@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getProjectBySlug, getUser } from "@/db/queries";
+import { getUser } from "@/db/data/users";
+import { getProjectBySlug } from "@/db/data/projects";
 import { WorkersView } from "@/components/board/workers-view";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +12,10 @@ export default async function ProjectWorkersPage({
 }) {
   const { slug } = await params;
 
-  const user = getUser();
+  const user = await getUser();
   if (!user) redirect("/onboard/welcome");
 
-  const project = getProjectBySlug(slug);
+  const project = await getProjectBySlug(slug);
   if (!project) redirect("/board");
 
   return <WorkersView projectId={Number(project.id)} />;

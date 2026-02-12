@@ -23,13 +23,25 @@ export function ProjectsPanel({ open, onClose }: { open: boolean; onClose: () =>
   // New project modal
   const [showAddModal, setShowAddModal] = useState(false);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => { queueMicrotask(() => setMounted(true)); }, []);
+
+  async function fetchProjects() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/projects");
+      const data = await res.json();
+      setProjects(Array.isArray(data.projects) ? data.projects : data);
+    } catch {}
+    setLoading(false);
+  }
 
   useEffect(() => {
     if (!open) return;
-    setRenamingId(null);
-    setArchivingId(null);
-    fetchProjects();
+    queueMicrotask(() => {
+      setRenamingId(null);
+      setArchivingId(null);
+      fetchProjects();
+    });
   }, [open]);
 
   useEffect(() => {
@@ -47,16 +59,6 @@ export function ProjectsPanel({ open, onClose }: { open: boolean; onClose: () =>
       renameRef.current.select();
     }
   }, [renamingId]);
-
-  async function fetchProjects() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/projects");
-      const data = await res.json();
-      setProjects(Array.isArray(data.projects) ? data.projects : data);
-    } catch {}
-    setLoading(false);
-  }
 
   async function handleRename(id: string) {
     if (!renameValue.trim()) {

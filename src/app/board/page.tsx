@@ -1,24 +1,27 @@
 import { redirect } from "next/navigation";
-import { getProject, getUser, isTeamComplete, hasTickets } from "@/db/queries";
+import { getUser } from "@/db/data/users";
+import { getProject } from "@/db/data/projects";
+import { isTeamComplete } from "@/db/data/personas";
+import { hasTickets } from "@/db/data/tickets";
 
 export const dynamic = "force-dynamic";
 
-export default function BoardPage() {
-  const user = getUser();
+export default async function BoardPage() {
+  const user = await getUser();
   if (!user) {
     redirect("/onboard/welcome");
   }
 
-  const project = getProject();
+  const project = await getProject();
   if (!project) {
     redirect("/onboard/github");
   }
 
-  if (!isTeamComplete(Number(project.id))) {
+  if (!await isTeamComplete(Number(project.id))) {
     redirect("/onboard/team");
   }
 
-  if (!hasTickets()) {
+  if (!await hasTickets()) {
     redirect("/onboard/ticket");
   }
 

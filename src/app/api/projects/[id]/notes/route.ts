@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { projectNotes } from "@/db/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { getNotesByProject, createNote } from "@/db/data/notes";
 
 export async function GET(
   _req: NextRequest,
@@ -10,12 +8,7 @@ export async function GET(
   const { id } = await params;
   const projectId = Number(id);
 
-  const notes = db
-    .select()
-    .from(projectNotes)
-    .where(eq(projectNotes.projectId, projectId))
-    .orderBy(desc(projectNotes.createdAt))
-    .all();
+  const notes = await getNotesByProject(projectId);
 
   return NextResponse.json(notes);
 }
@@ -33,11 +26,7 @@ export async function POST(
     return NextResponse.json({ error: "content is required" }, { status: 400 });
   }
 
-  const note = db
-    .insert(projectNotes)
-    .values({ projectId, type, content })
-    .returning()
-    .get();
+  const note = await createNote(projectId, type as "text" | "image", content);
 
   return NextResponse.json(note, { status: 201 });
 }

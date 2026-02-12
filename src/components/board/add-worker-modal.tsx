@@ -112,7 +112,7 @@ const roleTemplates: Record<WorkerRole, {
 
 type ModalStep = "select-role" | "customize";
 
-export function AddWorkerModal({ open, onClose, projectSlug }: AddWorkerModalProps) {
+export function AddWorkerModal({ open, onClose, projectSlug: _projectSlug }: AddWorkerModalProps) {
   const router = useRouter();
   const [step, setStep] = useState<ModalStep>("select-role");
   const [selectedRole, setSelectedRole] = useState<WorkerRole | null>(null);
@@ -144,11 +144,13 @@ export function AddWorkerModal({ open, onClose, projectSlug }: AddWorkerModalPro
   // Reset when closed
   useEffect(() => {
     if (!open) {
-      setStep("select-role");
-      setSelectedRole(null);
-      setName("");
-      setPersonality("");
-      setAvatarUrl(null);
+      queueMicrotask(() => {
+        setStep("select-role");
+        setSelectedRole(null);
+        setName("");
+        setPersonality("");
+        setAvatarUrl(null);
+      });
     }
   }, [open]);
 

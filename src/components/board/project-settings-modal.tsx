@@ -30,18 +30,20 @@ export function ProjectSettingsModal({ open, onClose, project, notice }: Project
   const [mounted, setMounted] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => { queueMicrotask(() => setMounted(true)); }, []);
 
   useEffect(() => {
     if (!open) return;
-    setName(project.name);
-    setRepoName(project.githubRepo ?? "");
-    setGithubUser(project.githubOwner ?? "");
-    setBuildCommand(project.buildCommand ?? "");
-    setRunCommand(project.runCommand ?? "");
-    setRepoExists(project.githubRepo ? true : null);
-    setError("");
-    setConfirmDelete(false);
+    queueMicrotask(() => {
+      setName(project.name);
+      setRepoName(project.githubRepo ?? "");
+      setGithubUser(project.githubOwner ?? "");
+      setBuildCommand(project.buildCommand ?? "");
+      setRunCommand(project.runCommand ?? "");
+      setRepoExists(project.githubRepo ? true : null);
+      setError("");
+      setConfirmDelete(false);
+    });
 
     fetch("/api/github/user")
       .then((r) => r.json())
@@ -54,10 +56,10 @@ export function ProjectSettingsModal({ open, onClose, project, notice }: Project
   // Debounced repo check when repoName changes
   useEffect(() => {
     if (!repoName.trim()) {
-      setRepoExists(null);
+      queueMicrotask(() => setRepoExists(null));
       return;
     }
-    setChecking(true);
+    queueMicrotask(() => setChecking(true));
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       fetch(`/api/github/repo?name=${encodeURIComponent(repoName.trim())}`)
@@ -293,7 +295,7 @@ export function ProjectSettingsModal({ open, onClose, project, notice }: Project
               type="text"
               value={buildCommand}
               onChange={(e) => setBuildCommand(e.target.value)}
-              placeholder="npm install && npx drizzle-kit push && npm run db:seed"
+              placeholder="npm install"
               className="w-full px-3 py-2.5 rounded-lg text-sm font-mono outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-blue)]"
               style={{
                 backgroundColor: "var(--bg-input)",
@@ -315,7 +317,7 @@ export function ProjectSettingsModal({ open, onClose, project, notice }: Project
               type="text"
               value={runCommand}
               onChange={(e) => setRunCommand(e.target.value)}
-              placeholder="npm run dev -- --port {{PORT}} --hostname 0.0.0.0"
+              placeholder="npm run dev -- --port {{PORT}}"
               className="w-full px-3 py-2.5 rounded-lg text-sm font-mono outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-blue)]"
               style={{
                 backgroundColor: "var(--bg-input)",

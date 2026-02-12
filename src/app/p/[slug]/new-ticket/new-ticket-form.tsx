@@ -8,14 +8,6 @@ import { ticketTypes } from "@/lib/ticket-types";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { VoiceButton } from "@/components/voice-button";
 
-function slugify(text: string) {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40);
-}
-
 interface NewTicketFormProps {
   projectId: string;
   projectSlug: string;

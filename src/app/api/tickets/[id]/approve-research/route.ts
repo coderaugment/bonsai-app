@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { tickets, users, comments, personas } from "@/db/schema";
-import { eq, sql, and, isNull } from "drizzle-orm";
-import { logAuditEvent } from "@/db/queries";
+import { getUser } from "@/db/data/users";
+import { getTicketById, updateTicket } from "@/db/data/tickets";
+import { createSystemCommentAndBumpCount } from "@/db/data/comments";
+import { getPersonasByRole } from "@/db/data/personas";
+import { logAuditEvent } from "@/db/data/audit";
+import { fireDispatch } from "@/lib/dispatch-agent";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -13,17 +15,13 @@ export async function POST(req: Request, context: RouteContext) {
   const { id: ticketId } = await context.params;
 
   // Get current user (first user for now - in production would use auth)
-  const user = db.select().from(users).limit(1).get();
+  const user = await getUser();
   if (!user) {
     return NextResponse.json({ error: "No user found" }, { status: 401 });
   }
 
   // Check that ticket has research completed
-  const ticket = db
-    .select()
-    .from(tickets)
-    .where(eq(tickets.id, ticketId))
-    .get();
+  const ticket = await getTicketById(ticketId);
 
   if (!ticket) {
     return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
@@ -38,61 +36,38 @@ export async function POST(req: Request, context: RouteContext) {
 
   const now = new Date().toISOString();
 
-  db.update(tickets)
-    .set({
-      researchApprovedAt: now,
-      researchApprovedBy: user.id,
-      state: "plan",
-    })
-    .where(eq(tickets.id, ticketId))
-    .run();
+  await updateTicket(ticketId, {
+    researchApprovedAt: now,
+    researchApprovedBy: user.id,
+    state: "plan",
+  });
 
   // Post system comment for the transition
-  db.insert(comments)
-    .values({
-      ticketId,
-      authorType: "system",
-      content: `Moved from **research** to **plan** — research approved`,
-    })
-    .run();
-  db.update(tickets)
-    .set({ commentCount: sql`COALESCE(${tickets.commentCount}, 0) + 1` })
-    .where(eq(tickets.id, ticketId))
-    .run();
+  await createSystemCommentAndBumpCount(
+    ticketId,
+    `Moved from **research** to **plan** — research approved`
+  );
+
+  const origin = new URL(req.url).origin;
 
   // Auto-dispatch developer to start implementation planning
-  const origin = new URL(req.url).origin;
-  fetch(`${origin}/api/tickets/${ticketId}/dispatch`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      commentContent: "Research has been approved. Create the implementation plan now.",
-      targetRole: "developer",
-    }),
-  }).catch(() => {});
+  fireDispatch(origin, ticketId, {
+    commentContent: "Research has been approved. Create the implementation plan now.",
+    targetRole: "developer",
+  }, "approve-research");
 
   // Auto-dispatch designer if the project has one — generate mockups in parallel with planning
   if (ticket.projectId) {
-    const designer = db.select().from(personas)
-      .where(and(
-        eq(personas.projectId, ticket.projectId),
-        eq(personas.role, "designer"),
-        isNull(personas.deletedAt),
-      ))
-      .get();
-    if (designer) {
-      fetch(`${origin}/api/tickets/${ticketId}/dispatch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          commentContent: "Research has been approved. Generate UI mockups for this ticket based on the description and research findings. Use nano-banana to create the images and attach them to the ticket.",
-          targetPersonaId: designer.id,
-        }),
-      }).catch(() => {});
+    const designers = await getPersonasByRole("designer", { projectId: ticket.projectId });
+    if (designers.length > 0) {
+      fireDispatch(origin, ticketId, {
+        commentContent: "Research has been approved. Generate UI mockups for this ticket based on the description and research findings. Use nano-banana to create the images and attach them to the ticket.",
+        targetPersonaId: designers[0].id,
+      }, "approve-research/designer");
     }
   }
 
-  logAuditEvent({
+  await logAuditEvent({
     ticketId,
     event: "research_approved",
     actorType: "human",
@@ -114,16 +89,13 @@ export async function POST(req: Request, context: RouteContext) {
 export async function DELETE(req: Request, context: RouteContext) {
   const { id: ticketId } = await context.params;
 
-  db.update(tickets)
-    .set({
-      researchApprovedAt: null,
-      researchApprovedBy: null,
-    })
-    .where(eq(tickets.id, ticketId))
-    .run();
+  await updateTicket(ticketId, {
+    researchApprovedAt: null,
+    researchApprovedBy: null,
+  });
 
-  const user = db.select().from(users).limit(1).get();
-  logAuditEvent({
+  const user = await getUser();
+  await logAuditEvent({
     ticketId,
     event: "research_approval_revoked",
     actorType: "human",

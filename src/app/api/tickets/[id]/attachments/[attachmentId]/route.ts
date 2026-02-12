@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { ticketAttachments } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getAttachment, deleteAttachment } from "@/db/data/attachments";
 
 // GET /api/tickets/[id]/attachments/[attachmentId] - Serve a specific attachment
 export async function GET(
@@ -11,11 +9,7 @@ export async function GET(
   try {
     const { id, attachmentId } = await params;
 
-    const attachment = await db
-      .select()
-      .from(ticketAttachments)
-      .where(eq(ticketAttachments.id, parseInt(attachmentId)))
-      .get();
+    const attachment = await getAttachment(parseInt(attachmentId));
 
     if (!attachment || attachment.ticketId !== id) {
       return NextResponse.json(
@@ -61,11 +55,7 @@ export async function DELETE(
   try {
     const { id, attachmentId } = await params;
 
-    const attachment = await db
-      .select()
-      .from(ticketAttachments)
-      .where(eq(ticketAttachments.id, parseInt(attachmentId)))
-      .get();
+    const attachment = await getAttachment(parseInt(attachmentId));
 
     if (!attachment || attachment.ticketId !== id) {
       return NextResponse.json(
@@ -74,10 +64,7 @@ export async function DELETE(
       );
     }
 
-    await db
-      .delete(ticketAttachments)
-      .where(eq(ticketAttachments.id, parseInt(attachmentId)))
-      .run();
+    await deleteAttachment(parseInt(attachmentId));
 
     return NextResponse.json({ success: true });
   } catch (error) {

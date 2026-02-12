@@ -34,7 +34,7 @@ export function detectTechStack(workspacePath: string): TechStack {
       if (allDeps['react']) stack.frameworks.push('React');
       if (allDeps['vue']) stack.frameworks.push('Vue');
       if (allDeps['express']) stack.frameworks.push('Express');
-    } catch (e) {
+    } catch {
       // Malformed package.json, skip framework detection
     }
   }

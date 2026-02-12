@@ -35,12 +35,12 @@ export function SettingsPanel({
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
+    queueMicrotask(() => setMounted(true));
   }, []);
 
   useEffect(() => {
     if (!open) return;
-    setEditingName(false);
+    queueMicrotask(() => setEditingName(false));
     Promise.all([
       fetch("/api/onboard/user").then((r) => r.json()),
       fetch("/api/github/user").then((r) => r.json()),
@@ -403,7 +403,7 @@ function ApiKeysSection() {
   }
 
   useEffect(() => {
-    loadKeys();
+    queueMicrotask(() => loadKeys());
   }, []);
 
   async function handleReveal(key: string) {

@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { tickets, users, comments, ticketDocuments } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
-import { getTickets, getSetting, logAuditEvent } from "@/db/queries";
+import { getTickets, getTicketById, createTicket, updateTicket, softDeleteTicket, generateTicketId, getSetting, getUser, createSystemCommentAndBumpCount, logAuditEvent } from "@/db/data";
+import { fireDispatch } from "@/lib/dispatch-agent";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const projectId = searchParams.get("projectId");
-  const result = getTickets(projectId ? Number(projectId) : undefined);
+  const result = await getTickets(projectId ? Number(projectId) : undefined);
   return NextResponse.json(result);
 }
 
@@ -24,7 +22,7 @@ export async function PATCH(req: Request) {
     return NextResponse.json(shipData, { status: shipRes.status });
   }
 
-  const prevTicket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+  const prevTicket = await getTicketById(ticketId);
   const prevState = prevTicket?.state;
 
   const now = new Date().toISOString();
@@ -35,7 +33,7 @@ export async function PATCH(req: Request) {
     updates.researchApprovedAt = now;
   }
 
-  db.update(tickets).set(updates).where(eq(tickets.id, ticketId)).run();
+  await updateTicket(ticketId, updates);
 
   // Post system comment for the state transition
   if (prevState && prevState !== state) {
@@ -45,20 +43,13 @@ export async function PATCH(req: Request) {
       ship: "implementation complete",
     };
     const reason = reasonMap[state] || "manual move";
-    db.insert(comments)
-      .values({
-        ticketId,
-        authorType: "system",
-        content: `Moved from **${prevState}** to **${state}** — ${reason}`,
-      })
-      .run();
-    db.update(tickets)
-      .set({ commentCount: sql`COALESCE(${tickets.commentCount}, 0) + 1` })
-      .where(eq(tickets.id, ticketId))
-      .run();
+    await createSystemCommentAndBumpCount(
+      ticketId,
+      `Moved from **${prevState}** to **${state}** — ${reason}`
+    );
   }
 
-  logAuditEvent({
+  await logAuditEvent({
     ticketId,
     event: "state_changed",
     actorType: "human",
@@ -71,28 +62,20 @@ export async function PATCH(req: Request) {
 
   // When moved to "plan", dispatch developer to create implementation plan
   if (state === "plan") {
-    fetch(`${origin}/api/tickets/${ticketId}/dispatch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        commentContent: "Research has been approved. Create the implementation plan now.",
-        targetRole: "developer",
-      }),
-    }).catch(() => {});
+    fireDispatch(origin, ticketId, {
+      commentContent: "Research has been approved. Create the implementation plan now.",
+      targetRole: "developer",
+    }, "state-change/plan");
   }
 
   // When moved to "build", auto-dispatch developer to start implementation
   if (state === "build") {
-    const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+    const ticket = await getTicketById(ticketId);
     if (ticket?.planApprovedAt) {
-      fetch(`${origin}/api/tickets/${ticketId}/dispatch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          commentContent: "The implementation plan has been approved and the ticket is in build. Begin coding the implementation now. Follow the plan step by step.",
-          targetRole: "developer",
-        }),
-      }).catch(() => {});
+      fireDispatch(origin, ticketId, {
+        commentContent: "The implementation plan has been approved and the ticket is in build. Begin coding the implementation now. Follow the plan step by step.",
+        targetRole: "developer",
+      }, "state-change/build");
     }
   }
 
@@ -104,19 +87,16 @@ export async function PUT(req: Request) {
   if (!ticketId) {
     return NextResponse.json({ error: "ticketId required" }, { status: 400 });
   }
-  db.update(tickets)
-    .set({
-      title: title?.trim() || undefined,
-      description: description?.trim() || null,
-      acceptanceCriteria: acceptanceCriteria?.trim() || null,
-      type: type || undefined,
-      state: state || undefined,
-    })
-    .where(eq(tickets.id, ticketId))
-    .run();
+  await updateTicket(ticketId, {
+    title: title?.trim() || undefined,
+    description: description?.trim() || null,
+    acceptanceCriteria: acceptanceCriteria?.trim() || null,
+    type: type || undefined,
+    state: state || undefined,
+  });
 
-  const editUser = db.select().from(users).limit(1).get();
-  logAuditEvent({
+  const editUser = await getUser();
+  await logAuditEvent({
     ticketId,
     event: "ticket_edited",
     actorType: "human",
@@ -133,8 +113,8 @@ export async function DELETE(req: Request) {
   if (!ticketId) {
     return NextResponse.json({ error: "ticketId required" }, { status: 400 });
   }
-  const delUser = db.select().from(users).limit(1).get();
-  logAuditEvent({
+  const delUser = await getUser();
+  await logAuditEvent({
     ticketId,
     event: "ticket_deleted",
     actorType: "human",
@@ -144,10 +124,7 @@ export async function DELETE(req: Request) {
   });
 
   // Soft delete — set deletedAt timestamp, preserve all data
-  db.update(tickets)
-    .set({ deletedAt: new Date().toISOString() })
-    .where(eq(tickets.id, ticketId))
-    .run();
+  await softDeleteTicket(ticketId);
   return NextResponse.json({ ok: true });
 }
 
@@ -156,39 +133,31 @@ export async function POST(req: Request) {
     await req.json();
 
   // Get current user as creator
-  const user = db.select().from(users).limit(1).get();
+  const user = await getUser();
 
   if (!title?.trim()) {
     return NextResponse.json({ error: "Title is required" }, { status: 400 });
   }
 
   // Generate next ticket ID
-  const countRow = db
-    .select({ count: sql<number>`count(*)` })
-    .from(tickets)
-    .get();
-  const num = (countRow?.count ?? 0) + 1;
-  const id = `tkt_${String(num).padStart(2, "0")}`;
+  const id = await generateTicketId();
 
-  const ticket = db
-    .insert(tickets)
-    .values({
-      id,
-      title: title.trim(),
-      type: type || "feature",
-      state: "research",
-      description: description?.trim() || null,
-      acceptanceCriteria: acceptanceCriteria?.trim() || null,
-      priority: 500,
-      projectId: projectId || Number(getSetting("active_project_id")) || 1,
-      createdBy: user?.id ?? null,
-      commentCount: 0,
-      hasAttachments: false,
-    })
-    .returning()
-    .get();
+  const activeProjectId = await getSetting("active_project_id");
+  const ticket = await createTicket({
+    id,
+    title: title.trim(),
+    type: type || "feature",
+    state: "research",
+    description: description?.trim() || null,
+    acceptanceCriteria: acceptanceCriteria?.trim() || null,
+    priority: 500,
+    projectId: projectId || Number(activeProjectId) || 1,
+    createdBy: user?.id ?? null,
+    commentCount: 0,
+    hasAttachments: false,
+  });
 
-  logAuditEvent({
+  await logAuditEvent({
     ticketId: id,
     event: "ticket_created",
     actorType: "human",
@@ -198,33 +167,19 @@ export async function POST(req: Request) {
     metadata: { type: type || "feature", state: "research" },
   });
 
-  // Auto-dispatch research agent (fire-and-forget)
-  try {
-    const origin = new URL(req.url).origin;
-    const ticketSummary = `${title.trim()}${description ? `\n\n${description.trim()}` : ""}${acceptanceCriteria ? `\n\nAcceptance Criteria:\n${acceptanceCriteria.trim()}` : ""}`;
+  // Auto-dispatch research agent
+  const origin = new URL(req.url).origin;
+  const ticketSummary = `${title.trim()}${description ? `\n\n${description.trim()}` : ""}${acceptanceCriteria ? `\n\nAcceptance Criteria:\n${acceptanceCriteria.trim()}` : ""}`;
 
-    // Dispatch researcher
-    fetch(`${origin}/api/tickets/${id}/dispatch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        commentContent: `New ticket created. Research this ticket.\n\n${ticketSummary}`,
-      }),
-    }).catch(() => {});
+  fireDispatch(origin, id, {
+    commentContent: `New ticket created. Research this ticket.\n\n${ticketSummary}`,
+  }, "ticket-create/research");
 
-    // Dispatch designer for UI/UX review
-    fetch(`${origin}/api/tickets/${id}/dispatch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        commentContent: `New ticket created. Review the UI/UX implications and propose design direction.\n\n${ticketSummary}`,
-        targetRole: "designer",
-        silent: true,
-      }),
-    }).catch(() => {});
-  } catch {
-    // dispatch failure shouldn't block ticket creation
-  }
+  fireDispatch(origin, id, {
+    commentContent: `New ticket created. Review the UI/UX implications and propose design direction.\n\n${ticketSummary}`,
+    targetRole: "designer",
+    silent: true,
+  }, "ticket-create/designer");
 
   return NextResponse.json({ success: true, ticket });
 }

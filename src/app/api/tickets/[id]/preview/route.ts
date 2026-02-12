@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { tickets, projects } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getTicketById, getProjectById } from "@/db/data";
 import { spawn, execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -44,12 +42,10 @@ export async function POST(
 ) {
   const { id: ticketId } = await params;
 
-  const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+  const ticket = await getTicketById(ticketId);
   if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
 
-  const project = ticket.projectId
-    ? db.select().from(projects).where(eq(projects.id, ticket.projectId)).get()
-    : null;
+  const project = ticket.projectId ? await getProjectById(ticket.projectId) : null;
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   const workspace = resolveWorkspace(project, ticketId);
@@ -62,7 +58,7 @@ export async function POST(
 
   // Use the requesting host so URLs work from LAN devices (phone, etc.)
   const reqHost = new URL(req.url).hostname;
-  const host = reqHost === "localhost" || reqHost === "127.0.0.1" ? reqHost : reqHost;
+  const host = reqHost === "0.0.0.0" ? "localhost" : reqHost;
 
   // Check if dev server is already running on this port
   const inUse = await isPortInUse(port);
@@ -81,7 +77,36 @@ export async function POST(
   const logDir = path.dirname(logFile);
   if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
-  const envVars = { ...process.env, PORT: String(port) };
+  // Copy env files from main repo into worktree so builds have DB credentials, etc.
+  const mainRepo = project.localPath || path.join(PROJECTS_DIR, project.githubRepo || project.slug);
+  if (workspace !== mainRepo && fs.existsSync(mainRepo)) {
+    for (const envFile of [".env", ".env.local", ".env.development", ".env.development.local"]) {
+      const src = path.join(mainRepo, envFile);
+      const dst = path.join(workspace, envFile);
+      if (fs.existsSync(src) && !fs.existsSync(dst)) {
+        fs.copyFileSync(src, dst);
+      }
+    }
+  }
+
+  // Load workspace env files into envVars so build commands (drizzle-kit, etc.) see them
+  const envVars: Record<string, string> = { ...process.env, PORT: String(port) } as Record<string, string>;
+  for (const envFile of [".env", ".env.local"]) {
+    const envPath = path.join(workspace, envFile);
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf-8");
+      for (const line of content.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx > 0) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          const val = trimmed.slice(eqIdx + 1).trim();
+          envVars[key] = val;
+        }
+      }
+    }
+  }
 
   // Run build command synchronously before starting the dev server
   if (project.buildCommand) {
@@ -90,7 +115,7 @@ export async function POST(
       execSync(project.buildCommand, {
         cwd: workspace,
         timeout: 120_000,
-        env: envVars,
+        env: envVars as NodeJS.ProcessEnv,
         stdio: ["ignore", fs.openSync(logFile, "a"), fs.openSync(logFile, "a")],
       });
     } catch (buildErr) {
@@ -119,7 +144,7 @@ export async function POST(
     cwd: workspace,
     detached: true,
     stdio: ["ignore", out, err],
-    env: envVars,
+    env: envVars as NodeJS.ProcessEnv,
   });
   child.unref();
 

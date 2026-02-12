@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setSetting } from "@/db/queries";
+import { setSetting } from "@/db/data/settings";
 
 export async function POST(req: NextRequest) {
   const { key, value } = await req.json();
@@ -8,6 +8,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "key and value required" }, { status: 400 });
   }
 
-  setSetting(key, String(value));
+  await setSetting(key, String(value));
   return NextResponse.json({ ok: true });
 }

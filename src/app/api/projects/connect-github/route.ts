@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { projects } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getProjectById, updateProject } from "@/db/data/projects";
 import { getGithubToken } from "@/lib/vault";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -42,7 +40,7 @@ export async function POST(req: Request) {
   const owner = githubUser.login;
 
   // Get project from DB for the slug
-  const project = db.select().from(projects).where(eq(projects.id, Number(projectId))).get();
+  const project = await getProjectById(Number(projectId));
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -98,10 +96,12 @@ export async function POST(req: Request) {
   }
 
   // Update project with GitHub info and local path
-  db.update(projects)
-    .set({ githubOwner: owner, githubRepo: finalRepoName, slug: finalRepoName, localPath })
-    .where(eq(projects.id, Number(projectId)))
-    .run();
+  await updateProject(Number(projectId), {
+    githubOwner: owner,
+    githubRepo: finalRepoName,
+    slug: finalRepoName,
+    localPath
+  });
 
   return NextResponse.json({ success: true, owner, repo: finalRepoName, localPath });
 }

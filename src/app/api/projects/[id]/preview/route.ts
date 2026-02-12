@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { projects } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getProjectById } from "@/db/data";
 import { spawn, execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -28,7 +26,7 @@ export async function POST(
 ) {
   const { id } = await params;
 
-  const project = db.select().from(projects).where(eq(projects.id, Number(id))).get();
+  const project = await getProjectById(Number(id));
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   const workspace = project.localPath;

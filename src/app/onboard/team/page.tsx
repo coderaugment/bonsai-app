@@ -49,7 +49,7 @@ const ART_STYLES: Record<ArtStyle, { label: string; prompt: string }> = {
 export default function TeamPage() {
   const router = useRouter();
   const [projectId, setProjectId] = useState<number | null>(null);
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [_roles, setRoles] = useState<Role[]>([]);
   const [existingPersonas, setExistingPersonas] = useState<Persona[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -59,7 +59,7 @@ export default function TeamPage() {
   // Step: 0 = art style, 1..N = create worker for each unfilled role
   const [step, setStep] = useState(0);
   const [artStyle, setArtStyle] = useState<ArtStyle>("hollywood");
-  const [hasArtStyle, setHasArtStyle] = useState(false);
+  const [_hasArtStyle, setHasArtStyle] = useState(false);
   // The actual saved style prompt from DB (used for avatar generation)
   const [savedStylePrompt, setSavedStylePrompt] = useState<string | null>(null);
 
@@ -77,20 +77,6 @@ export default function TeamPage() {
   const [rerolling, setRerolling] = useState<"" | "name" | "appearance" | "style" | "avatar">("");
   const [saving, setSaving] = useState(false);
   const generateAbortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    fetchInitialData();
-  }, []);
-
-  // Auto-generate worker with random gender when entering a hire step
-  useEffect(() => {
-    if (step < 1 || unfilledRoles.length === 0) return;
-    const role = unfilledRoles[step - 1];
-    if (!role) return;
-    const g = (["male", "female", "non-binary"] as const)[Math.floor(Math.random() * 3)];
-    setGender(g);
-    generateWorker(role.slug, g);
-  }, [step, unfilledRoles]);
 
   async function fetchInitialData() {
     setLoading(true);
@@ -270,12 +256,29 @@ export default function TeamPage() {
       const avatarData = await avatarRes.json();
       if (signal.aborted) return;
       if (avatarData.avatar) setAvatarUrl(avatarData.avatar);
-    } catch (e) {
+    } catch {
       if (signal.aborted) return;
     }
     setGenerating(false);
     setGeneratingPhase("");
   }
+
+  useEffect(() => {
+    queueMicrotask(() => fetchInitialData());
+  }, []);
+
+  // Auto-generate worker with random gender when entering a hire step
+  useEffect(() => {
+    if (step < 1 || unfilledRoles.length === 0) return;
+    const role = unfilledRoles[step - 1];
+    if (!role) return;
+    const g = (["male", "female", "non-binary"] as const)[Math.floor(Math.random() * 3)];
+    queueMicrotask(() => {
+      setGender(g);
+      generateWorker(role.slug, g);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, unfilledRoles]);
 
   function switchGender(g: "male" | "female" | "non-binary") {
     setGender(g);

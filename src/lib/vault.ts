@@ -217,12 +217,12 @@ export async function getGithubToken(): Promise<string | null> {
   if (token) return token;
 
   // Migration: check old plaintext storage
-  const { getSetting, setSetting } = await import("@/db/queries");
-  const legacy = getSetting("github_token");
+  const { getSetting, setSetting } = await import("@/db/data/settings");
+  const legacy = await getSetting("github_token");
   if (legacy) {
     await v.set("github", legacy, "token");
     // Remove plaintext — overwrite with empty marker
-    setSetting("github_token", "__migrated_to_vault__");
+    await setSetting("github_token", "__migrated_to_vault__");
     return legacy;
   }
 

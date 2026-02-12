@@ -29,8 +29,6 @@ const BOARD_STATES = [
   { name: "test", label: "Test", color: "var(--column-test)", icon: "🧪" },
   { name: "ship", label: "Ship", color: "var(--column-ship)", icon: "🚀" },
 ] as const;
-type MentionItem = { kind: "persona"; persona: Persona } | { kind: "board"; name: string; label: string; color: string; icon: string } | { kind: "team" };
-
 // Render comment text with highlighted @mentions (personas + team) and #columns (board states)
 function renderCommentContent(text: string, personas: Persona[]) {
   const parts = text.split(/([@#][\w\p{L}-]+)/gu);

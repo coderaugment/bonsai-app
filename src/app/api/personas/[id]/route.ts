@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPersona } from "@/db/queries";
+import { getPersona } from "@/db/data/personas";
 
 // GET /api/personas/[id] - Get persona by ID
 export async function GET(
@@ -8,7 +8,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const persona = getPersona(id);
+    const persona = await getPersona(id);
 
     if (!persona) {
       return NextResponse.json(

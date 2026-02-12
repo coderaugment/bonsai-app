@@ -3,13 +3,17 @@ import type { Metadata } from "next";
 import { BoardHeader } from "@/components/board/board-header";
 import { BoardView } from "@/components/board/board-view";
 import { ProjectInfoPanel } from "@/components/board/project-info-panel";
-import { getProjectBySlug, getProjects, getTickets, getPersonas, getUser, setSetting, isTeamComplete } from "@/db/queries";
+import { getUser } from "@/db/data/users";
+import { getProjectBySlug, getProjects } from "@/db/data/projects";
+import { getTickets } from "@/db/data/tickets";
+import { getPersonas, isTeamComplete } from "@/db/data/personas";
+import { setSetting } from "@/db/data/settings";
 
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
-  const project = getProjectBySlug(slug);
+  const project = await getProjectBySlug(slug);
   return { title: project ? `Bonsai — ${project.name}` : "Bonsai" };
 }
 
@@ -20,31 +24,31 @@ export default async function ProjectBoardPage({
 }) {
   const { slug } = await params;
 
-  const user = getUser();
+  const user = await getUser();
   if (!user) {
     redirect("/onboard/welcome");
   }
 
-  const project = getProjectBySlug(slug);
+  const project = await getProjectBySlug(slug);
   if (!project) {
     redirect("/board");
   }
 
   // Remember this as the active project BEFORE redirect guards,
   // so any downstream redirect (e.g. /new-ticket) knows which project is active
-  setSetting("active_project_id", project.id);
+  await setSetting("active_project_id", project.id);
 
-  if (!isTeamComplete(Number(project.id))) {
+  if (!await isTeamComplete(Number(project.id))) {
     redirect("/onboard/team");
   }
 
-  const tickets = getTickets(Number(project.id));
+  const tickets = await getTickets(Number(project.id));
   if (tickets.length === 0) {
     redirect(`/p/${slug}/new-ticket`);
   }
 
-  const allProjects = getProjects();
-  const personas = getPersonas(Number(project.id));
+  const allProjects = await getProjects();
+  const personas = await getPersonas(Number(project.id));
 
   const ticketStats = {
     research: tickets.filter((t) => t.state === "research").length,
@@ -53,6 +57,14 @@ export default async function ProjectBoardPage({
     test: tickets.filter((t) => t.state === "test").length,
     ship: tickets.filter((t) => t.state === "ship").length,
   };
+
+  // eslint-disable-next-line react-hooks/purity
+  const now = Date.now();
+  const awakePersonaIds = new Set(
+    tickets
+      .filter((t) => t.assignee && t.lastAgentActivity && (now - new Date(t.lastAgentActivity).getTime()) < 30 * 60 * 1000)
+      .map((t) => t.assignee!.id)
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -66,11 +78,7 @@ export default async function ProjectBoardPage({
         project={project}
         personas={personas}
         ticketStats={ticketStats}
-        awakePersonaIds={new Set(
-          tickets
-            .filter((t) => t.assignee && t.lastAgentActivity && (Date.now() - new Date(t.lastAgentActivity).getTime()) < 30 * 60 * 1000)
-            .map((t) => t.assignee!.id)
-        )}
+        awakePersonaIds={awakePersonaIds}
       />
       <BoardView tickets={tickets} projectId={project.id} />
     </div>

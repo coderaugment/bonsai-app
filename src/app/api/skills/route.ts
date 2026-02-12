@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { skills } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getSkills, createSkill, updateSkill, deleteSkill } from "@/db/data/roles";
 
 // GET /api/skills - List all skills
 export async function GET() {
-  const allSkills = db.select().from(skills).all();
+  const allSkills = await getSkills();
   return NextResponse.json(allSkills);
 }
 
@@ -18,15 +16,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
   }
 
-  const result = db
-    .insert(skills)
-    .values({
-      name: name.trim(),
-      description: description?.trim() || null,
-      category: category || null,
-    })
-    .returning()
-    .get();
+  const result = await createSkill({
+    name: name.trim(),
+    description: description?.trim() || undefined,
+    category: category || undefined,
+  });
 
   return NextResponse.json(result);
 }
@@ -40,17 +34,18 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "ID is required" }, { status: 400 });
   }
 
-  const result = db
-    .update(skills)
-    .set({
-      ...(name && { name: name.trim() }),
-      ...(description !== undefined && { description: description?.trim() || null }),
-      ...(category !== undefined && { category: category || null }),
-    })
-    .where(eq(skills.id, id))
-    .returning()
-    .get();
+  const updates: Parameters<typeof updateSkill>[1] = {};
+  if (name !== undefined) {
+    updates.name = name.trim();
+  }
+  if (description !== undefined) {
+    updates.description = description?.trim() || undefined;
+  }
+  if (category !== undefined) {
+    updates.category = category || undefined;
+  }
 
+  const result = await updateSkill(id, updates);
   return NextResponse.json(result);
 }
 
@@ -63,6 +58,6 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "ID is required" }, { status: 400 });
   }
 
-  db.delete(skills).where(eq(skills.id, parseInt(id))).run();
+  await deleteSkill(parseInt(id));
   return NextResponse.json({ success: true });
 }

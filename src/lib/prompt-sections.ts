@@ -21,7 +21,7 @@ export function buildPersonaSection(persona: PersonaRow): string {
           parts.push(`\n${personality.quirks}`);
         }
       }
-    } catch (e) {
+    } catch {
       // Malformed personality JSON, skip
     }
   }

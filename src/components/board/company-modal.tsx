@@ -15,7 +15,7 @@ interface CompanyModalProps {
 
 type Tab = "workers" | "roles" | "edit-worker";
 
-export function CompanyModal({ open, onClose, projectSlug, personas }: CompanyModalProps) {
+export function CompanyModal({ open, onClose, projectSlug: _projectSlug, personas }: CompanyModalProps) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("workers");
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
@@ -49,14 +49,7 @@ export function CompanyModal({ open, onClose, projectSlug, personas }: CompanyMo
   const [savingRole, setSavingRole] = useState(false);
   const [editingSkillIndex, setEditingSkillIndex] = useState<number | null>(null);
 
-  const accent = selectedRole ? selectedRole.color : "#6366f1";
-
-  // Fetch data on open
-  useEffect(() => {
-    if (open) {
-      fetchData();
-    }
-  }, [open]);
+  const _accent = selectedRole ? selectedRole.color : "#6366f1";
 
   async function fetchData() {
     setLoading(true);
@@ -69,17 +62,26 @@ export function CompanyModal({ open, onClose, projectSlug, personas }: CompanyMo
     setLoading(false);
   }
 
+  // Fetch data on open
+  useEffect(() => {
+    if (open) {
+      queueMicrotask(() => fetchData());
+    }
+  }, [open]);
+
   useEffect(() => {
     if (!open) {
-      setTab("workers");
-      setSelectedRole(null);
-      setEditingRole(null);
-      setEditingPersona(null);
-      setName("");
-      setGender("male");
-      setAppearance("");
-      setCommStyle("");
-      setAvatarUrl(null);
+      queueMicrotask(() => {
+        setTab("workers");
+        setSelectedRole(null);
+        setEditingRole(null);
+        setEditingPersona(null);
+        setName("");
+        setGender("male");
+        setAppearance("");
+        setCommStyle("");
+        setAvatarUrl(null);
+      });
     }
   }, [open]);
 
@@ -301,7 +303,7 @@ export function CompanyModal({ open, onClose, projectSlug, personas }: CompanyMo
   }
 
   // Parse name from skill content (YAML frontmatter)
-  function parseSkillName(content: string): string | null {
+  function _parseSkillName(content: string): string | null {
     const match = content.match(/^---\s*\n[\s\S]*?name:\s*([a-z0-9-]+)[\s\S]*?\n---/);
     return match ? match[1] : null;
   }
@@ -501,7 +503,7 @@ Your skill instructions here...
                   <div className="flex items-center justify-between px-8 py-5 border-b border-[var(--border-subtle)]">
                     <div>
                       <h3 className="text-lg font-semibold text-[var(--text-primary)]">Team Roster</h3>
-                      <p className="text-sm text-[var(--text-muted)]">Your project's workers</p>
+                      <p className="text-sm text-[var(--text-muted)]">Your project&apos;s workers</p>
                     </div>
                     <button
                       onClick={() => setTab("roles")}
@@ -799,7 +801,7 @@ Your skill instructions here...
                           <div className="p-4 rounded-lg border border-dashed border-[var(--border-medium)] text-center">
                             <p className="text-xs text-[var(--text-muted)]">No skills defined</p>
                             <p className="text-[10px] text-[var(--text-muted)] mt-1">
-                              Skills extend Claude's capabilities with custom instructions
+                              Skills extend Claude&apos;s capabilities with custom instructions
                             </p>
                           </div>
                         ) : (

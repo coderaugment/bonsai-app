@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { personas, roles } from "@/db/schema";
-import { eq, and, isNull } from "drizzle-orm";
-import { createPersona, getPersonas } from "@/db/queries";
+import {
+  getPersonas,
+  createPersona,
+  getRoleColorById,
+  getPersonaRaw,
+  updatePersona,
+  getPersonasByRole,
+  softDeletePersona,
+} from "@/db/data/personas";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const projectId = searchParams.get("projectId");
-  const all = getPersonas(projectId ? Number(projectId) : undefined);
+  const all = await getPersonas(projectId ? Number(projectId) : undefined);
   return NextResponse.json(all);
 }
 
@@ -25,12 +30,12 @@ export async function POST(req: Request) {
   // Look up color from the roles table if roleId is provided
   let color: string | undefined;
   if (roleId) {
-    const roleRow = db.select().from(roles).where(eq(roles.id, roleId)).get();
-    if (roleRow) color = roleRow.color;
+    const roleColor = await getRoleColorById(roleId);
+    if (roleColor) color = roleColor;
   }
 
   try {
-    const persona = createPersona({
+    const persona = await createPersona({
       name: name.trim(),
       role,
       color,
@@ -59,7 +64,7 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "ID is required" }, { status: 400 });
   }
 
-  const existing = db.select().from(personas).where(eq(personas.id, id)).get();
+  const existing = await getPersonaRaw(id);
   if (!existing) {
     return NextResponse.json({ error: "Persona not found" }, { status: 404 });
   }
@@ -72,12 +77,7 @@ export async function PUT(req: Request) {
   if (personality !== undefined) updates.personality = personality?.trim() || null;
   if (avatar !== undefined) updates.avatar = avatar || null;
 
-  const updated = db
-    .update(personas)
-    .set(updates)
-    .where(eq(personas.id, id))
-    .returning()
-    .get();
+  const updated = await updatePersona(id, updates);
 
   return NextResponse.json(updated);
 }
@@ -90,17 +90,15 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "ID is required" }, { status: 400 });
   }
 
-  const existing = db.select().from(personas).where(eq(personas.id, id)).get();
+  const existing = await getPersonaRaw(id);
   if (!existing) {
     return NextResponse.json({ error: "Persona not found" }, { status: 404 });
   }
 
   // Prevent deleting the last active persona of a role
-  const activeWithSameRole = db
-    .select()
-    .from(personas)
-    .where(and(eq(personas.role, existing.role!), isNull(personas.deletedAt)))
-    .all();
+  const activeWithSameRole = await getPersonasByRole(existing.role!, {
+    projectId: existing.projectId ?? undefined,
+  });
 
   if (activeWithSameRole.length <= 1) {
     return NextResponse.json(
@@ -109,9 +107,6 @@ export async function DELETE(req: Request) {
     );
   }
 
-  db.update(personas)
-    .set({ deletedAt: new Date().toISOString() })
-    .where(eq(personas.id, id))
-    .run();
+  await softDeletePersona(id);
   return NextResponse.json({ success: true });
 }

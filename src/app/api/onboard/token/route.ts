@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { getVault } from "@/lib/vault";
-import { db } from "@/db";
-import { users } from "@/db/schema";
-import { getUser } from "@/db/queries";
-import { eq } from "drizzle-orm";
+import { getUser, updateUser } from "@/db/data/users";
 
 export async function POST(req: Request) {
   const { token } = await req.json();
@@ -21,12 +18,9 @@ export async function POST(req: Request) {
     });
     if (ghRes.ok) {
       const ghData = await ghRes.json();
-      const user = getUser();
+      const user = await getUser();
       if (user && ghData.avatar_url) {
-        db.update(users)
-          .set({ avatarUrl: ghData.avatar_url })
-          .where(eq(users.id, user.id))
-          .run();
+        await updateUser(user.id, { avatarUrl: ghData.avatar_url });
       }
     }
   } catch {

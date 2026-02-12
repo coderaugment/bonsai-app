@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSetting } from "@/db/queries";
+import { getSetting } from "@/db/data/settings";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MODEL = "gemini-3-pro-image-preview";
@@ -18,11 +18,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "name and role are required" }, { status: 400 });
   }
 
-  const stylePrompt = style
-    || (useUserStyle && getSetting("prompt_user_avatar_style"))
-    || getSetting("prompt_avatar_style")
-    || DEFAULT_STYLE;
-  console.log("[avatar] style prompt source:", getSetting("prompt_avatar_style") ? "custom" : "default");
+  const customStyle = await getSetting("prompt_avatar_style");
+  const userStyle = useUserStyle ? await getSetting("prompt_user_avatar_style") : null;
+  const stylePrompt = style || userStyle || customStyle || DEFAULT_STYLE;
+  console.log("[avatar] style prompt source:", customStyle ? "custom" : "default");
   const prompt = buildAvatarPrompt(name, role, personality, stylePrompt);
 
   try {

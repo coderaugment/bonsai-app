@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { comments, users, personas, tickets } from "@/db/schema";
-import { eq, asc, and, isNull } from "drizzle-orm";
-import { logAuditEvent } from "@/db/queries";
+import { getCommentsByTicketOrDocument, enrichComments, createCommentAndBumpCount } from "@/db/data/comments";
+import { getUser } from "@/db/data/users";
+import { logAuditEvent } from "@/db/data/audit";
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -13,54 +12,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "ticketId required" }, { status: 400 });
   }
 
-  // If documentId provided, return only comments for that document.
-  // If absent, return only ticket-level comments (documentId IS NULL).
-  const whereClause = documentIdParam
-    ? and(eq(comments.ticketId, ticketId), eq(comments.documentId, Number(documentIdParam)))
-    : and(eq(comments.ticketId, ticketId), isNull(comments.documentId));
-
-  const rows = db
-    .select()
-    .from(comments)
-    .where(whereClause)
-    .orderBy(asc(comments.createdAt))
-    .all();
-
-  // Enrich with author info
-  const enriched = rows.map((row) => {
-    let author: { name: string; avatarUrl?: string; color?: string; role?: string } | undefined;
-
-    if (row.authorType === "human" && row.authorId) {
-      const user = db.select().from(users).where(eq(users.id, row.authorId)).get();
-      if (user) {
-        author = { name: user.name, avatarUrl: user.avatarUrl || undefined };
-      }
-    } else if (row.authorType === "agent" && row.personaId) {
-      const persona = db.select().from(personas).where(eq(personas.id, row.personaId)).get();
-      if (persona) {
-        author = { name: persona.name, avatarUrl: persona.avatar || undefined, color: persona.color, role: persona.role || undefined };
-      }
-    }
-
-    // Parse attachments JSON
-    let attachments;
-    try {
-      attachments = row.attachments ? JSON.parse(row.attachments) : undefined;
-    } catch {
-      attachments = undefined;
-    }
-
-    return {
-      id: row.id,
-      ticketId: row.ticketId,
-      authorType: row.authorType,
-      author,
-      content: row.content,
-      attachments,
-      documentId: row.documentId ?? undefined,
-      createdAt: row.createdAt,
-    };
-  });
+  const documentId = documentIdParam ? Number(documentIdParam) : undefined;
+  const rows = await getCommentsByTicketOrDocument(ticketId, documentId);
+  const enriched = await enrichComments(rows);
 
   return NextResponse.json({ comments: enriched });
 }
@@ -73,34 +27,19 @@ export async function POST(req: Request) {
   }
 
   // Get current user
-  const user = db.select().from(users).limit(1).get();
+  const user = await getUser();
 
-  const comment = db
-    .insert(comments)
-    .values({
-      ticketId,
-      authorType: "human",
-      authorId: user?.id ?? null,
-      content: content?.trim() || "",
-      attachments: attachments ? JSON.stringify(attachments) : null,
-      documentId: documentId || null,
-    })
-    .returning()
-    .get();
+  const comment = await createCommentAndBumpCount({
+    ticketId,
+    authorType: "human",
+    authorId: user?.id ?? null,
+    content: content?.trim() || "",
+    attachments: attachments ? JSON.stringify(attachments) : null,
+    documentId: documentId || null,
+    bumpHumanCommentAt: true,
+  });
 
-  // Update comment count and lastHumanCommentAt on ticket
-  const ticket = db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
-  if (ticket) {
-    db.update(tickets)
-      .set({
-        commentCount: (ticket.commentCount || 0) + 1,
-        lastHumanCommentAt: new Date().toISOString()
-      })
-      .where(eq(tickets.id, ticketId))
-      .run();
-  }
-
-  logAuditEvent({
+  await logAuditEvent({
     ticketId,
     event: "comment_added",
     actorType: "human",

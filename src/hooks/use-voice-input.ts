@@ -26,6 +26,11 @@ interface SpeechRecognitionAlternative {
   confidence: number;
 }
 
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+  message?: string;
+}
+
 interface SpeechRecognition extends EventTarget {
   continuous: boolean;
   interimResults: boolean;
@@ -34,13 +39,16 @@ interface SpeechRecognition extends EventTarget {
   stop(): void;
   abort(): void;
   onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onerror: ((event: Event) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
   onend: ((event: Event) => void) | null;
 }
 
-declare var webkitSpeechRecognition: {
-  new (): SpeechRecognition;
-};
+type SpeechRecognitionConstructor = new () => SpeechRecognition;
+
+interface WindowWithSpeechRecognition {
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  SpeechRecognition?: SpeechRecognitionConstructor;
+}
 
 interface UseVoiceInputOptions {
   onTranscript: (text: string) => void;
@@ -111,9 +119,11 @@ export function useVoiceInput({ onTranscript, aiCleanup = true, aiField = "massa
     if (!isSpeechSupported) return;
 
     try {
+      const speechWindow = window as unknown as WindowWithSpeechRecognition;
       const Ctor =
-        (window as any).webkitSpeechRecognition ||
-        (window as any).SpeechRecognition;
+        speechWindow.webkitSpeechRecognition ||
+        speechWindow.SpeechRecognition;
+      if (!Ctor) return;
       const recognition: SpeechRecognition = new Ctor();
 
       recognition.continuous = true;
@@ -136,7 +146,7 @@ export function useVoiceInput({ onTranscript, aiCleanup = true, aiField = "massa
         setInterimTranscript(finalTranscriptRef.current + interim);
       };
 
-      recognition.onerror = (event: any) => {
+      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
         // "aborted" fires when cancelRecording() calls abort() — not a real error
         if (event.error === "aborted") return;
         console.error("Speech recognition error:", event.error);

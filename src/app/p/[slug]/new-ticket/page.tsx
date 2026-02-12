@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { BoardHeader } from "@/components/board/board-header";
-import { getProjectBySlug, getProjects, getUser, isTeamComplete } from "@/db/queries";
+import { getUser } from "@/db/data/users";
+import { getProjectBySlug, getProjects } from "@/db/data/projects";
+import { isTeamComplete } from "@/db/data/personas";
 import { NewTicketForm } from "./new-ticket-form";
 
 export const dynamic = "force-dynamic";
@@ -12,15 +14,15 @@ export default async function NewTicketPage({
 }) {
   const { slug } = await params;
 
-  const user = getUser();
+  const user = await getUser();
   if (!user) redirect("/onboard/welcome");
 
-  const project = getProjectBySlug(slug);
+  const project = await getProjectBySlug(slug);
   if (!project) redirect("/board");
 
-  if (!isTeamComplete(Number(project.id))) redirect("/onboard/team");
+  if (!await isTeamComplete(Number(project.id))) redirect("/onboard/team");
 
-  const allProjects = getProjects();
+  const allProjects = await getProjects();
 
   return (
     <div className="flex flex-col h-full">

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { tickets, comments } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { logAuditEvent } from "@/db/queries";
+import { getTicketById, updateTicket } from "@/db/data/tickets";
+import { createCommentAndBumpCount } from "@/db/data/comments";
+import { logAuditEvent } from "@/db/data/audit";
 
 export async function POST(
   request: NextRequest,
@@ -13,11 +12,7 @@ export async function POST(
   const { reason, authorType = "human" } = body;
 
   // Verify ticket exists and is in verification state
-  const ticket = db
-    .select()
-    .from(tickets)
-    .where(eq(tickets.id, ticketId))
-    .get();
+  const ticket = await getTicketById(ticketId);
 
   if (!ticket) {
     return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
@@ -31,40 +26,33 @@ export async function POST(
   }
 
   // Set returned flag and move back to build
-  db.update(tickets)
-    .set({
-      returnedFromVerification: true,
-      state: "build",
-    })
-    .where(eq(tickets.id, ticketId))
-    .run();
+  await updateTicket(ticketId, {
+    returnedFromVerification: true,
+    state: "build",
+  });
 
   // Add a comment with the reason
   if (reason) {
-    db.insert(comments)
-      .values({
-        ticketId,
-        authorType,
-        authorId: authorType === "human" ? 1 : null, // TODO: Get actual user ID
-        personaId: authorType === "agent" ? ticket.assigneeId : null,
-        content: `**Returned from verification:** ${reason}`,
-        createdAt: new Date().toISOString(),
-      })
-      .run();
+    const commentData = {
+      ticketId,
+      authorType,
+      authorId: authorType === "human" ? 1 : null, // TODO: Get actual user ID
+      personaId: authorType === "agent" ? ticket.assigneeId : null,
+      content: `**Returned from verification:** ${reason}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    await createCommentAndBumpCount(commentData);
 
     // Update lastHumanCommentAt if human authored
     if (authorType === "human") {
-      db.update(tickets)
-        .set({
-          lastHumanCommentAt: new Date().toISOString(),
-          commentCount: (ticket.commentCount || 0) + 1,
-        })
-        .where(eq(tickets.id, ticketId))
-        .run();
+      await updateTicket(ticketId, {
+        lastHumanCommentAt: new Date().toISOString(),
+      });
     }
   }
 
-  logAuditEvent({
+  await logAuditEvent({
     ticketId,
     event: "returned_from_verification",
     actorType: authorType === "agent" ? "agent" : "human",

@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { projects } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { getProject } from "@/db/queries";
+import { getProject, updateProject } from "@/db/data/projects";
 
 export async function GET() {
-  const project = getProject();
+  const project = await getProject();
   if (!project) {
     return NextResponse.json({ error: "No project found" }, { status: 404 });
   }
@@ -16,7 +13,7 @@ export async function POST(req: Request) {
   const body = await req.json();
   const { name, githubOwner, githubRepo, buildCommand, runCommand } = body;
 
-  const project = getProject();
+  const project = await getProject();
   if (!project) {
     return NextResponse.json({ error: "No project found" }, { status: 404 });
   }
@@ -47,10 +44,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
-  db.update(projects)
-    .set(updates)
-    .where(eq(projects.id, Number(project.id)))
-    .run();
+  await updateProject(Number(project.id), updates);
 
   return NextResponse.json({ success: true });
 }

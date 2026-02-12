@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { tickets } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getTicketById, updateTicket } from "@/db/data/tickets";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -13,11 +11,7 @@ export async function POST(req: Request, context: RouteContext) {
   const { mergeCommit } = await req.json();
 
   // Validate that ticket exists and is in 'ship' state
-  const ticket = db
-    .select()
-    .from(tickets)
-    .where(eq(tickets.id, ticketId))
-    .get();
+  const ticket = await getTicketById(ticketId);
 
   if (!ticket) {
     return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
@@ -32,13 +26,10 @@ export async function POST(req: Request, context: RouteContext) {
 
   const now = new Date().toISOString();
 
-  db.update(tickets)
-    .set({
-      mergedAt: now,
-      mergeCommit: mergeCommit || null,
-    })
-    .where(eq(tickets.id, ticketId))
-    .run();
+  await updateTicket(ticketId, {
+    mergedAt: now,
+    mergeCommit: mergeCommit || null,
+  });
 
   return NextResponse.json({
     ok: true,
@@ -51,13 +42,10 @@ export async function POST(req: Request, context: RouteContext) {
 export async function DELETE(req: Request, context: RouteContext) {
   const { id: ticketId } = await context.params;
 
-  db.update(tickets)
-    .set({
-      mergedAt: null,
-      mergeCommit: null,
-    })
-    .where(eq(tickets.id, ticketId))
-    .run();
+  await updateTicket(ticketId, {
+    mergedAt: null,
+    mergeCommit: null,
+  });
 
   return NextResponse.json({ ok: true });
 }

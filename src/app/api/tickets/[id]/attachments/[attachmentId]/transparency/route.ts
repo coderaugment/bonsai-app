@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { ticketAttachments } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getAttachment, updateAttachmentData } from "@/db/data/attachments";
 import sharp from "sharp";
 
 // POST /api/tickets/[id]/attachments/[attachmentId]/transparency - Update attachment with processed image
@@ -13,11 +11,7 @@ export async function POST(
     const { id, attachmentId } = await params;
 
     // Get the attachment to verify it exists
-    const attachment = await db
-      .select()
-      .from(ticketAttachments)
-      .where(eq(ticketAttachments.id, parseInt(attachmentId)))
-      .get();
+    const attachment = await getAttachment(parseInt(attachmentId));
 
     if (!attachment || attachment.ticketId !== id) {
       return NextResponse.json(
@@ -106,14 +100,10 @@ export async function POST(
     }
 
     // Update the attachment with the processed image
-    await db
-      .update(ticketAttachments)
-      .set({
-        data: finalDataUrl,
-        mimeType: "image/png",
-      })
-      .where(eq(ticketAttachments.id, parseInt(attachmentId)))
-      .run();
+    await updateAttachmentData(parseInt(attachmentId), {
+      data: finalDataUrl,
+      mimeType: "image/png",
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

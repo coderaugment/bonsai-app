@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { ticketAttachments, tickets } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { getAttachmentsByTicket, createAttachment } from "@/db/data/attachments";
+import { updateTicket } from "@/db/data/tickets";
 
 // GET /api/tickets/[id]/attachments - List all attachments for a ticket
 export async function GET(
@@ -11,11 +10,7 @@ export async function GET(
   try {
     const { id } = await params;
 
-    const attachments = await db
-      .select()
-      .from(ticketAttachments)
-      .where(eq(ticketAttachments.ticketId, id))
-      .all();
+    const attachments = await getAttachmentsByTicket(id);
 
     return NextResponse.json(attachments);
   } catch (error) {
@@ -46,26 +41,19 @@ export async function POST(
     }
 
     // Insert attachment
-    const result = await db
-      .insert(ticketAttachments)
-      .values({
-        ticketId: id,
-        filename,
-        mimeType,
-        data,
-        createdByType,
-        createdById,
-      })
-      .returning();
+    const attachment = await createAttachment({
+      ticketId: id,
+      filename,
+      mimeType,
+      data,
+      createdByType,
+      createdById,
+    });
 
     // Update ticket's hasAttachments flag
-    await db
-      .update(tickets)
-      .set({ hasAttachments: true })
-      .where(eq(tickets.id, id))
-      .run();
+    await updateTicket(id, { hasAttachments: true });
 
-    return NextResponse.json(result[0], { status: 201 });
+    return NextResponse.json(attachment, { status: 201 });
   } catch (error) {
     console.error("Error uploading attachment:", error);
     return NextResponse.json(

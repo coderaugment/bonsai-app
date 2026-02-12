@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
-import { getUser, getProject } from "@/db/queries";
+import { getUser } from "@/db/data/users";
+import { getProject } from "@/db/data/projects";
 
-export default function TeamGuard({ children }: { children: React.ReactNode }) {
-  if (!getUser()) redirect("/onboard/welcome");
-  if (!getProject()) redirect("/onboard/project");
+export default async function TeamGuard({ children }: { children: React.ReactNode }) {
+  if (!await getUser()) redirect("/onboard/welcome");
+  if (!await getProject()) redirect("/onboard/project");
   return <>{children}</>;
 }

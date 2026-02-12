@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
-import { getUser } from "@/db/queries";
+import { getUser } from "@/db/data/users";
 
-export default function GithubGuard({ children }: { children: React.ReactNode }) {
-  if (!getUser()) redirect("/onboard/welcome");
+export default async function GithubGuard({ children }: { children: React.ReactNode }) {
+  if (!await getUser()) redirect("/onboard/welcome");
   return <>{children}</>;
 }

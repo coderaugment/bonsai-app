@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { db } from "@/db";
-import { projectNotes, extractedItems } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { getNotesByProject, createExtraction } from "@/db/data/notes";
 
 const client = new Anthropic();
 
@@ -14,11 +12,7 @@ export async function POST(
   const projectId = Number(id);
 
   // Gather all notes for this project
-  const notes = db
-    .select()
-    .from(projectNotes)
-    .where(eq(projectNotes.projectId, projectId))
-    .all();
+  const notes = await getNotesByProject(projectId);
 
   if (notes.length === 0) {
     return NextResponse.json(
@@ -75,18 +69,16 @@ ${notesSummary}`,
   }
 
   // Insert extracted items into DB
-  const inserted = items.map((item) =>
-    db
-      .insert(extractedItems)
-      .values({
+  const inserted = await Promise.all(
+    items.map((item) =>
+      createExtraction({
         projectId,
         title: item.title,
         description: item.description || null,
         type: (item.type as "feature" | "bug" | "chore") || "feature",
         status: "pending",
       })
-      .returning()
-      .get()
+    )
   );
 
   return NextResponse.json(inserted);

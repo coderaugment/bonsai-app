@@ -1,21 +1,22 @@
 import { redirect } from "next/navigation";
-import { getProject, getProjects, getUser } from "@/db/queries";
+import { getUser } from "@/db/data/users";
+import { getProject, getProjects } from "@/db/data/projects";
 import { IdeasShell } from "./ideas-shell";
 
 export const dynamic = "force-dynamic";
 
-export default function IdeasPage() {
-  const user = getUser();
+export default async function IdeasPage() {
+  const user = await getUser();
   if (!user) {
     redirect("/onboard/welcome");
   }
 
-  const project = getProject();
+  const project = await getProject();
   if (!project) {
     redirect("/board");
   }
 
-  const allProjects = getProjects();
+  const allProjects = await getProjects();
 
   return <IdeasShell project={project} allProjects={allProjects} />;
 }

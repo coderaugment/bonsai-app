@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGithubToken } from "@/lib/vault";
-import { db } from "@/db";
-import { users } from "@/db/schema";
-import { getUser } from "@/db/queries";
-import { eq } from "drizzle-orm";
+import { getUser, updateUser } from "@/db/data/users";
 
 export async function GET() {
   const token = await getGithubToken();
@@ -32,12 +29,9 @@ export async function GET() {
   const data = await res.json();
 
   // Sync name + avatar from GitHub to local user record
-  const user = getUser();
+  const user = await getUser();
   if (user && data.avatar_url) {
-    db.update(users)
-      .set({ avatarUrl: data.avatar_url, name: data.name || user.name })
-      .where(eq(users.id, user.id))
-      .run();
+    await updateUser(user.id, { avatarUrl: data.avatar_url, name: data.name || user.name });
   }
 
   return NextResponse.json({

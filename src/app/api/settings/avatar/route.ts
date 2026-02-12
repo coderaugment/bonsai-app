@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { users } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { getUser } from "@/db/queries";
+import { getUser, updateUser } from "@/db/data/users";
 
 export async function POST(req: Request) {
   const { avatarUrl } = await req.json();
@@ -10,15 +7,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "avatarUrl is required" }, { status: 400 });
   }
 
-  const user = getUser();
+  const user = await getUser();
   if (!user) {
     return NextResponse.json({ error: "No user found" }, { status: 404 });
   }
 
-  db.update(users)
-    .set({ avatarUrl })
-    .where(eq(users.id, user.id))
-    .run();
-
+  await updateUser(user.id, { avatarUrl });
   return NextResponse.json({ success: true });
 }

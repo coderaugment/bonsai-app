@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createProject } from "@/db/queries";
+import { createProject } from "@/db/data/projects";
 import { getGithubToken } from "@/lib/vault";
 import path from "node:path";
 
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
 
   // 4. Save project locally (upserts on slug conflict)
   const localPath = path.join(PROJECTS_DIR, repoName);
-  const project = createProject({
+  const project = await createProject({
     name: name.trim(),
     slug: repoName,
     visibility: visibility || "private",

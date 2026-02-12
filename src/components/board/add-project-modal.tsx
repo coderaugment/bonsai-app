@@ -23,16 +23,18 @@ export function AddProjectModal({ open, onClose }: AddProjectModalProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
 
   useEffect(() => {
-    setMounted(true);
+    queueMicrotask(() => setMounted(true));
   }, []);
 
   useEffect(() => {
     if (!open) return;
-    setName("");
-    setVisibility("private");
-    setDescription("");
-    setError("");
-    setRepoExists(null);
+    queueMicrotask(() => {
+      setName("");
+      setVisibility("private");
+      setDescription("");
+      setError("");
+      setRepoExists(null);
+    });
     fetch("/api/github/user")
       .then((r) => r.json())
       .then((data) => {
@@ -44,10 +46,10 @@ export function AddProjectModal({ open, onClose }: AddProjectModalProps) {
   useEffect(() => {
     const slug = name.trim().toLowerCase().replace(/\s+/g, "-");
     if (!slug) {
-      setRepoExists(null);
+      queueMicrotask(() => setRepoExists(null));
       return;
     }
-    setChecking(true);
+    queueMicrotask(() => setChecking(true));
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       fetch(`/api/github/repo?name=${encodeURIComponent(name.trim())}`)

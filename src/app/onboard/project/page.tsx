@@ -28,11 +28,11 @@ export default function ProjectPage() {
   useEffect(() => {
     const slug = name.trim().toLowerCase().replace(/\s+/g, "-");
     if (!slug) {
-      setRepoExists(null);
+      queueMicrotask(() => setRepoExists(null));
       return;
     }
 
-    setChecking(true);
+    queueMicrotask(() => setChecking(true));
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       fetch(`/api/github/repo?name=${encodeURIComponent(name.trim())}`)
