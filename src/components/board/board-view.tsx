@@ -169,7 +169,7 @@ export function BoardView({ tickets: initialTickets, projectId }: BoardViewProps
   return (
     <div className="flex gap-6 overflow-x-auto px-6 py-5 flex-1 h-full">
       {columnOrder.map((state) => {
-        const defaultCollapsed = state === "ship" || (state !== "research" && grouped[state].length === 0);
+        const defaultCollapsed = state === "ship";
         const collapsed = state in collapseOverrides ? collapseOverrides[state] : defaultCollapsed;
         return (
           <Column

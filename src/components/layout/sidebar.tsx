@@ -11,11 +11,9 @@ import type { Project } from "@/types";
 
 function getNavItems(projectSlug?: string) {
   const boardHref = projectSlug ? `/p/${projectSlug}` : "/board";
-  const workersHref = projectSlug ? `/p/${projectSlug}/workers` : "/workers";
   return [
     { icon: "ideas", label: "Ideas", href: "/ideas", matchPaths: ["/ideas"] },
-    { icon: "board", label: "Project kanban board", href: boardHref, matchPaths: ["/board", "/p/"], excludePaths: ["/workers"] },
-    { icon: "workers", label: "Workers", href: workersHref, matchPaths: ["/workers"] },
+    { icon: "board", label: "Project kanban board", href: boardHref, matchPaths: ["/board", "/p/"] },
   ];
 }
 
