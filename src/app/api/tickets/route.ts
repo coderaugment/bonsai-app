@@ -147,7 +147,7 @@ export async function POST(req: Request) {
     id,
     title: title.trim(),
     type: type || "feature",
-    state: "research",
+    state: "review",
     description: description?.trim() || null,
     acceptanceCriteria: acceptanceCriteria?.trim() || null,
     priority: 500,

@@ -19,15 +19,16 @@ interface TicketDetailModalProps {
 }
 
 const typeOptions: TicketType[] = ["feature", "bug", "chore"];
-const stateOptions: TicketState[] = ["research", "plan", "build", "test", "ship"];
+const stateOptions: TicketState[] = ["review", "planning", "building", "preview", "test", "shipped"];
 
-// Board state mentions — referenceable via #research, #plan, etc.
+// Board state mentions — referenceable via #review, #planning, etc.
 const BOARD_STATES = [
-  { name: "research", label: "Research", color: "var(--column-research)", icon: "🔍" },
-  { name: "plan", label: "Plan", color: "var(--column-plan)", icon: "📋" },
-  { name: "build", label: "Build", color: "var(--column-build)", icon: "🔨" },
+  { name: "review", label: "Review", color: "var(--column-research)", icon: "🔍" },
+  { name: "planning", label: "Planning", color: "var(--column-plan)", icon: "📋" },
+  { name: "building", label: "Building", color: "var(--column-build)", icon: "🔨" },
+  { name: "preview", label: "Preview", color: "var(--column-preview)", icon: "👁" },
   { name: "test", label: "Test", color: "var(--column-test)", icon: "🧪" },
-  { name: "ship", label: "Ship", color: "var(--column-ship)", icon: "🚀" },
+  { name: "shipped", label: "Shipped", color: "var(--column-ship)", icon: "🚀" },
 ] as const;
 // Render comment text with highlighted @mentions (personas + team) and #columns (board states)
 function renderCommentContent(text: string, personas: Persona[]) {
@@ -121,7 +122,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   const [description, setDescription] = useState("");
   const [acceptanceCriteria, setAcceptanceCriteria] = useState("");
   const [type, setType] = useState<TicketType>("feature");
-  const [state, setState] = useState<TicketState>("plan");
+  const [state, setState] = useState<TicketState>("planning");
 
   // Attachments state
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
@@ -534,11 +535,11 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     if (!ticket) return;
     setApprovingResearch(true);
     try {
-      // Move ticket to plan state
+      // Move ticket to planning state
       const response = await fetch(`/api/tickets`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId: ticket.id, state: "plan" }),
+        body: JSON.stringify({ ticketId: ticket.id, state: "planning" }),
       });
       if (response.ok) {
         router.refresh();
@@ -553,11 +554,11 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     if (!ticket) return;
     setApprovingPlan(true);
     try {
-      // Move ticket to build state
+      // Move ticket to building state
       const response = await fetch(`/api/tickets`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId: ticket.id, state: "build" }),
+        body: JSON.stringify({ ticketId: ticket.id, state: "building" }),
       });
       if (response.ok) {
         router.refresh();
@@ -1594,7 +1595,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
           </div>
 
           {/* Build state preview bar */}
-          {ticket.state === "build" && (
+          {ticket.state === "building" && (
             <div
               className="mx-8 mb-4 rounded-xl p-5 flex items-center justify-between"
               style={{
@@ -1692,24 +1693,24 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
             >
               {saving ? "Saving..." : "Save Changes"}
             </button>
-            {ticket?.state === "research" && (
+            {ticket?.state === "review" && (
               <button
                 onClick={handleApproveResearch}
                 disabled={approvingResearch}
                 className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors hover:opacity-90"
                 style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingResearch ? 0.5 : 1 }}
               >
-                {approvingResearch ? "Moving..." : "Move to Plan"}
+                {approvingResearch ? "Moving..." : "Move to Planning"}
               </button>
             )}
-            {ticket?.state === "plan" && (
+            {ticket?.state === "planning" && (
               <button
                 onClick={handleApprovePlan}
                 disabled={approvingPlan}
                 className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors hover:opacity-90"
                 style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingPlan ? 0.5 : 1 }}
               >
-                {approvingPlan ? "Moving..." : "Move to Build"}
+                {approvingPlan ? "Moving..." : "Move to Building"}
               </button>
             )}
           </div>

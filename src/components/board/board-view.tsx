@@ -7,11 +7,12 @@ import { Column } from "./column";
 import { TicketDetailModal } from "./ticket-detail-modal";
 
 const columnOrder: TicketState[] = [
-  "research",
-  "plan",
-  "build",
+  "review",
+  "planning",
+  "building",
+  "preview",
   "test",
-  "ship",
+  "shipped",
 ];
 
 const AGENT_ACTIVE_MS = 30 * 60 * 1000;
@@ -154,7 +155,7 @@ export function BoardView({ tickets: initialTickets, projectId }: BoardViewProps
     setDraggingId(null);
 
     // Persist — ship endpoint handles merge + worktree cleanup
-    if (targetState === "ship") {
+    if (targetState === "shipped") {
       await fetch(`/api/tickets/${draggingId}/ship`, { method: "POST" });
     } else {
       await fetch("/api/tickets", {
@@ -169,7 +170,7 @@ export function BoardView({ tickets: initialTickets, projectId }: BoardViewProps
   return (
     <div className="flex gap-6 overflow-x-auto px-6 py-5 flex-1 h-full">
       {columnOrder.map((state) => {
-        const defaultCollapsed = state === "ship";
+        const defaultCollapsed = state === "shipped";
         const collapsed = state in collapseOverrides ? collapseOverrides[state] : defaultCollapsed;
         return (
           <Column

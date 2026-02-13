@@ -184,4 +184,29 @@ if (!existingTables.has("users")) {
   console.log("[db] Auto-created tables (fresh database)");
 }
 
+// ── agent_runs table (self-healing migration) ──────────────────
+if (!existingTables.has("agent_runs")) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS "agent_runs" (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id TEXT NOT NULL,
+      persona_id TEXT NOT NULL,
+      phase TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      tools TEXT,
+      session_dir TEXT,
+      dispatch_source TEXT,
+      started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      last_report_at TEXT,
+      completed_at TEXT,
+      duration_ms INTEGER,
+      error_message TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs (status);
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_ticket ON agent_runs (ticket_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_persona_status ON agent_runs (persona_id, status);
+  `);
+  console.log("[db] Auto-created agent_runs table");
+}
+
 export const db = drizzle(sqlite, { schema });

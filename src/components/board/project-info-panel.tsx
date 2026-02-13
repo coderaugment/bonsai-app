@@ -3,12 +3,12 @@ import type { Project, Persona } from "@/types";
 interface ProjectInfoPanelProps {
   project: Project;
   personas: Persona[];
-  ticketStats: { research: number; plan: number; build: number; test: number; ship: number };
+  ticketStats: { review: number; planning: number; building: number; test: number; shipped: number };
   awakePersonaIds?: Set<string>;
 }
 
 export function ProjectInfoPanel({ project, personas, ticketStats, awakePersonaIds = new Set() }: ProjectInfoPanelProps) {
-  const total = ticketStats.research + ticketStats.plan + ticketStats.build + ticketStats.test + ticketStats.ship;
+  const total = ticketStats.review + ticketStats.planning + ticketStats.building + ticketStats.test + ticketStats.shipped;
 
   return (
     <div
@@ -23,7 +23,7 @@ export function ProjectInfoPanel({ project, personas, ticketStats, awakePersonaI
         <div className="flex items-center gap-4 ml-auto flex-shrink-0">
           <div className="flex items-center gap-2 text-[10px]" style={{ color: "var(--text-muted)" }}>
             <span>{total} tickets</span>
-            <span>{ticketStats.ship} done</span>
+            <span>{ticketStats.shipped} done</span>
           </div>
           <div className="flex items-center gap-3">
             {[...personas].sort((a, b) => {

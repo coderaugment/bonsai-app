@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getTicketById, createAgentComment, updateTicket, getPersonaRaw, logAuditEvent } from "@/db/data";
+import { getTicketById, createAgentComment, updateTicket, getPersonaRaw, logAuditEvent, touchAgentRunReport } from "@/db/data";
 
 // Called by agents mid-run to post progress updates to the ticket thread.
 // Lighter than agent-complete — just posts a comment, no document logic.
@@ -26,6 +26,11 @@ export async function POST(
   await updateTicket(ticketId, {
     lastAgentActivity: new Date().toISOString(),
   });
+
+  // Touch the active agent run's lastReportAt
+  if (personaId) {
+    await touchAgentRunReport(ticketId, personaId);
+  }
 
   const persona = personaId ? await getPersonaRaw(personaId) : null;
 

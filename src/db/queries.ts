@@ -390,7 +390,7 @@ export function getNextTicket(personaId?: string): typeof tickets.$inferSelect |
   const inProgress = db
     .select()
     .from(tickets)
-    .where(and(...baseFilters, eq(tickets.state, "build")))
+    .where(and(...baseFilters, eq(tickets.state, "building")))
 
     .orderBy(desc(tickets.priority), asc(tickets.createdAt))
     .limit(1)
@@ -402,7 +402,7 @@ export function getNextTicket(personaId?: string): typeof tickets.$inferSelect |
   const backlog = db
     .select()
     .from(tickets)
-    .where(and(...baseFilters, eq(tickets.state, "plan")))
+    .where(and(...baseFilters, eq(tickets.state, "planning")))
     .orderBy(desc(tickets.priority), asc(tickets.createdAt))
     .limit(1)
     .get();

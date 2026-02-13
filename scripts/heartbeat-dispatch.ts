@@ -162,6 +162,12 @@ const getDocumentContent = db.prepare(`
   ORDER BY version DESC LIMIT 1
 `);
 
+const getDocumentLatestVersion = db.prepare(`
+  SELECT version, content FROM ticket_documents
+  WHERE ticket_id = ? AND type = ?
+  ORDER BY version DESC LIMIT 1
+`);
+
 const markAgentActivity = db.prepare(`
   UPDATE tickets
   SET last_agent_activity = ?,
@@ -207,6 +213,28 @@ const markTicketPickedUpStmt = db.prepare(`
       returned_from_verification = 0,
       last_agent_activity = ?
   WHERE id = ?
+`);
+
+// ── Agent Runs tracking ──────────────────────────
+const abandonPersonaRunsStmt = db.prepare(`
+  UPDATE agent_runs
+  SET status = 'abandoned', completed_at = ?
+  WHERE persona_id = ? AND status = 'running'
+`);
+
+const insertAgentRunStmt = db.prepare(`
+  INSERT INTO agent_runs (ticket_id, persona_id, phase, status, tools, session_dir, dispatch_source, started_at)
+  VALUES (?, ?, ?, 'running', ?, ?, 'heartbeat', ?)
+`);
+
+const completeRunByLookupStmt = db.prepare(`
+  UPDATE agent_runs
+  SET status = ?, completed_at = ?, duration_ms = ?, error_message = ?
+  WHERE id = (
+    SELECT id FROM agent_runs
+    WHERE ticket_id = ? AND persona_id = ? AND status = 'running'
+    ORDER BY started_at DESC LIMIT 1
+  )
 `);
 
 function postAgentComment(ticketId: string, personaId: string, content: string) {
@@ -539,6 +567,27 @@ async function runAgentPhase(
   ].join("\n"));
   fs.chmodSync(reportScript, 0o755);
 
+  // Write save-document helper — agent calls: save-document.sh <type> <file>
+  const saveDocScript = path.join(sessionDir, "save-document.sh");
+  fs.writeFileSync(saveDocScript, [
+    `#!/usr/bin/env node`,
+    `const fs = require("fs");`,
+    `const type = process.argv[2];`,
+    `const file = process.argv[3];`,
+    `if (!type || !file) { console.error("Usage: save-document.sh <type> <file>"); console.error("Types: research, implementation_plan, design"); process.exit(1); }`,
+    `const content = fs.readFileSync(file, "utf-8");`,
+    `if (!content.trim()) { console.error("File is empty"); process.exit(1); }`,
+    `fetch("${API_BASE}/api/tickets/${ticket.id}/documents", {`,
+    `  method: "POST",`,
+    `  headers: { "Content-Type": "application/json" },`,
+    `  body: JSON.stringify({ type, content: content.trim(), personaId: "${persona.id}" }),`,
+    `}).then(r => r.json()).then(data => {`,
+    `  if (data.ok) console.log(type + " v" + data.version + " saved.");`,
+    `  else { console.error("Failed:", data.error, data.detail || ""); process.exit(1); }`,
+    `}).catch(e => { console.error("Error:", e.message); process.exit(1); });`,
+  ].join("\n"));
+  fs.chmodSync(saveDocScript, 0o755);
+
   // Resolve tool script paths
   const nanoBananaScript = path.resolve(__dirname, "tools", "nano-banana.mjs");
   const attachFileScript = path.resolve(__dirname, "tools", "attach-file.mjs");
@@ -618,15 +667,39 @@ async function runAgentPhase(
     `3. If a criterion is NOT met, report what's missing via report.sh`,
   ].join("\n") : "";
 
-  const fullPrompt = systemPrompt + reportInstructions + nanoBananaInstructions + attachFileInstructions + checkCriteriaInstructions;
+  // Inject save-document instructions
+  const saveDocInstructions = [
+    `\n## Saving Documents`,
+    `When you produce a research document, implementation plan, or design document, you MUST save it using the save-document tool.`,
+    `1. Write your document to a file (e.g. /tmp/doc.md)`,
+    `2. Run: \`${saveDocScript} <type> <file>\``,
+    `   Types: research, implementation_plan, design`,
+    `   Example: \`${saveDocScript} research /tmp/doc.md\``,
+    `3. Your final chat response should be a brief summary (1-2 sentences), NOT the full document.`,
+    ``,
+    `CRITICAL: Do NOT output the full document as your response. Save it with save-document.sh. Your response is just a chat message.`,
+  ].join("\n");
+
+  const fullPrompt = systemPrompt + reportInstructions + saveDocInstructions + nanoBananaInstructions + attachFileInstructions + checkCriteriaInstructions;
 
   fs.writeFileSync(path.join(sessionDir, "system-prompt.txt"), fullPrompt);
   fs.writeFileSync(path.join(sessionDir, "task.md"), taskContent);
 
   log(`  [${ticket.id}] running ${phase} in ${workspacePath}`);
 
+  // Track agent run
+  const runStartedAt = new Date().toISOString();
+  try { abandonPersonaRunsStmt.run(runStartedAt, persona.id); } catch {}
+  try { insertAgentRunStmt.run(ticket.id, persona.id, phase, JSON.stringify(tools), sessionDir, runStartedAt); } catch {}
+
   try {
     const result = await runClaude(sessionDir, systemPrompt, workspacePath, timeoutMs, tools, extraEnv);
+
+    // Update agent run status
+    const runDurationMs = Date.now() - new Date(runStartedAt).getTime();
+    const runStatus = result.timedOut ? "timeout" : (result.code === 0 && result.stdout.trim().length > 100) ? "completed" : "failed";
+    const runError = result.timedOut ? `Timed out after ${timeoutMs / 1000}s` : (runStatus === "failed" ? `Exit code ${result.code}, output ${result.stdout.length} chars` : null);
+    try { completeRunByLookupStmt.run(runStatus, new Date().toISOString(), runDurationMs, runError, ticket.id, persona.id); } catch {}
 
     fs.appendFileSync(
       path.join(sessionDir, "session.jsonl"),
@@ -654,6 +727,8 @@ async function runAgentPhase(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log(`  [${ticket.id}] ERROR: ${msg.slice(0, 200)}`);
+    const runDurationMs = Date.now() - new Date(runStartedAt).getTime();
+    try { completeRunByLookupStmt.run("failed", new Date().toISOString(), runDurationMs, msg.slice(0, 500), ticket.id, persona.id); } catch {}
     return null;
   }
 }
@@ -819,31 +894,69 @@ async function dispatch(maxTickets: number) {
       markTicketPickedUp(ticket.id);
       dispatched++;
 
+      // Snapshot doc version before agent runs, so we can detect if agent saved via API
+      const docType = phase === "research" ? "research" : phase === "plan" ? "implementation_plan" : null;
+      const preRunDoc = docType
+        ? getDocumentLatestVersion.get(ticket.id, docType) as { version: number; content: string } | undefined
+        : undefined;
+      const preRunVersion = preRunDoc?.version || 0;
+
       const result = await runAgentPhase(ticket, persona, project, phase, systemPrompt, taskContent, tools, timeoutMs, vaultEnv);
 
-      if (result) {
-        if (phase === "research") {
+      if (phase === "research") {
+        // Check if agent saved the document via save-document.sh (API)
+        const existingDoc = getDocumentLatestVersion.get(ticket.id, "research") as { version: number; content: string } | undefined;
+        if (existingDoc && existingDoc.version > preRunVersion && existingDoc.content.length > 100) {
+          // Agent used save-document.sh — document is already in DB
+          markResearchCompleted.run(new Date().toISOString(), persona.id, ticket.id);
+          const summary = result ? extractSummary(result) : extractSummary(existingDoc.content);
+          postAgentComment(ticket.id, persona.id, `**Research complete** (v${existingDoc.version})\n\n${summary}`);
+          log(`  COMPLETE: ${ticket.id} — research saved via API (v${existingDoc.version}, ${existingDoc.content.length} chars)`);
+          completed++;
+        } else if (result) {
+          // Fallback: agent used stdout — insert directly
+          log(`  WARN: ${ticket.id} — agent did not use save-document.sh, falling back to stdout capture`);
           insertDocument.run(ticket.id, "research", result);
           markResearchCompleted.run(new Date().toISOString(), persona.id, ticket.id);
           const summary = extractSummary(result);
           postAgentComment(ticket.id, persona.id, `**Research complete**\n\n${summary}`);
-          log(`  COMPLETE: ${ticket.id} — research stored (${result.length} chars)`);
-        } else if (phase === "plan") {
+          log(`  COMPLETE: ${ticket.id} — research stored from stdout (${result.length} chars)`);
+          completed++;
+        } else {
+          markAgentActivity.run(null, null, ticket.id);
+          log(`  FAILED: ${ticket.id} — no document saved and no stdout output`);
+        }
+      } else if (phase === "plan") {
+        const existingDoc = getDocumentLatestVersion.get(ticket.id, "implementation_plan") as { version: number; content: string } | undefined;
+        if (existingDoc && existingDoc.version > preRunVersion && existingDoc.content.length > 100) {
+          markPlanCompleted.run(new Date().toISOString(), persona.id, ticket.id);
+          const summary = result ? extractSummary(result) : extractSummary(existingDoc.content);
+          postAgentComment(ticket.id, persona.id, `**Implementation plan complete** (v${existingDoc.version})\n\n${summary}`);
+          log(`  COMPLETE: ${ticket.id} — plan saved via API (v${existingDoc.version}, ${existingDoc.content.length} chars)`);
+          completed++;
+        } else if (result) {
+          log(`  WARN: ${ticket.id} — agent did not use save-document.sh, falling back to stdout capture`);
           insertDocument.run(ticket.id, "implementation_plan", result);
           markPlanCompleted.run(new Date().toISOString(), persona.id, ticket.id);
           const summary = extractSummary(result);
           postAgentComment(ticket.id, persona.id, `**Implementation plan complete**\n\n${summary}`);
-          log(`  COMPLETE: ${ticket.id} — implementation plan stored (${result.length} chars)`);
-        } else if (phase === "implement") {
+          log(`  COMPLETE: ${ticket.id} — plan stored from stdout (${result.length} chars)`);
+          completed++;
+        } else {
+          markAgentActivity.run(null, null, ticket.id);
+          log(`  FAILED: ${ticket.id} — no plan saved and no stdout output`);
+        }
+      } else if (phase === "implement") {
+        if (result) {
           markTicketState.run("test", ticket.id);
           const summary = extractSummary(result);
           postAgentComment(ticket.id, persona.id, `**Implementation complete** — moved to test\n\n${summary}`);
           log(`  COMPLETE: ${ticket.id} — implementation done, moved to test`);
+          completed++;
+        } else {
+          markAgentActivity.run(null, null, ticket.id);
+          log(`  FAILED: ${ticket.id} — agent returned no result`);
         }
-        completed++;
-      } else {
-        markAgentActivity.run(null, null, ticket.id);
-        log(`  FAILED: ${ticket.id} — agent returned no result`);
       }
     });
 

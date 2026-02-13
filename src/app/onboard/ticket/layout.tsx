@@ -7,7 +7,7 @@ export default async function TicketGuard({ children }: { children: React.ReactN
   if (!await getUser()) redirect("/onboard/welcome");
   const project = await getProject();
   if (!project) redirect("/onboard/project");
-  if (!await isTeamComplete(Number(project.id))) redirect("/onboard/team");
+  if (!await isTeamComplete(Number(project.id))) redirect(`/p/${project.slug}/onboard/team`);
   // If all prerequisites met, use /new-ticket (with sidebar visible)
   redirect("/new-ticket");
   return <>{children}</>;

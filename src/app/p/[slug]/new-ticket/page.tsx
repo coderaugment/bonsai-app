@@ -20,7 +20,7 @@ export default async function NewTicketPage({
   const project = await getProjectBySlug(slug);
   if (!project) redirect("/board");
 
-  if (!await isTeamComplete(Number(project.id))) redirect("/onboard/team");
+  if (!await isTeamComplete(Number(project.id))) redirect(`/p/${slug}/onboard/team`);
 
   const allProjects = await getProjects();
 

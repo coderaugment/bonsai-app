@@ -108,10 +108,10 @@ export const tickets = sqliteTable("tickets", {
   description: text("description"),
   type: text("type", { enum: ["feature", "bug", "chore"] }).notNull(),
   state: text("state", {
-    enum: ["research", "plan", "build", "test", "ship"],
+    enum: ["review", "planning", "building", "preview", "test", "shipped"],
   })
     .notNull()
-    .default("plan"),
+    .default("planning"),
   priority: integer("priority").notNull().default(0),
   assigneeId: text("assignee_id").references(() => personas.id),
   createdBy: integer("created_by").references(() => users.id),
@@ -225,6 +225,29 @@ export const ticketAuditLog = sqliteTable("ticket_audit_log", {
 });
 
 export type TicketAuditLogRow = typeof ticketAuditLog.$inferSelect;
+
+// ============================================================================
+// AGENT RUNS - Tracks every agent spawn (dispatch or heartbeat)
+// ============================================================================
+export const agentRuns = sqliteTable("agent_runs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  ticketId: text("ticket_id").notNull(),
+  personaId: text("persona_id").notNull(),
+  phase: text("phase").notNull(), // research, planning, implementation, conversational, test
+  status: text("status", {
+    enum: ["running", "completed", "failed", "timeout", "abandoned"],
+  }).notNull().default("running"),
+  tools: text("tools"), // JSON array of allowed tools
+  sessionDir: text("session_dir"),
+  dispatchSource: text("dispatch_source"), // "api" | "heartbeat"
+  startedAt: text("started_at").default(sql`CURRENT_TIMESTAMP`),
+  lastReportAt: text("last_report_at"),
+  completedAt: text("completed_at"),
+  durationMs: integer("duration_ms"),
+  errorMessage: text("error_message"),
+});
+
+export type AgentRunRow = typeof agentRuns.$inferSelect;
 
 // ── Type exports for prompt builder ──────────────
 

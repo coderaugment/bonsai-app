@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
 import { getSetting } from "@/db/data/settings";
+import { appendFileSync } from "fs";
+
+const TELEMETRY_LOG = "/tmp/avatar-telemetry.jsonl";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = "gemini-3-pro-image-preview";
+const MODEL = "gemini-2.5-flash-image";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+
+// Gemini 2.5 Flash pricing: $0.30/1M input tokens, $30/1M output tokens
+// Image output = 1290 tokens → $0.039/image
+const IMAGE_OUTPUT_TOKENS = 1290;
+const INPUT_COST_PER_TOKEN = 0.30 / 1_000_000;
+const OUTPUT_COST_PER_TOKEN = 30.0 / 1_000_000;
+const IMAGE_OUTPUT_COST = IMAGE_OUTPUT_TOKENS * OUTPUT_COST_PER_TOKEN; // ~$0.0387
 
 const DEFAULT_STYLE = `A real photograph — NOT an illustration, NOT a cartoon, NOT anime, NOT digital art, NOT 3D render. Shot on a Canon EOS R5 camera, 85mm f/1.4 lens. Real skin texture, real lighting, real depth of field. Professional headshot quality. Subject centered in frame for circular crop. Soft bokeh background. Natural warm studio lighting. Friendly, confident expression. No text, no watermarks, no logos. Square format.`;
 
@@ -21,8 +31,10 @@ export async function POST(req: Request) {
   const customStyle = await getSetting("prompt_avatar_style");
   const userStyle = useUserStyle ? await getSetting("prompt_user_avatar_style") : null;
   const stylePrompt = style || userStyle || customStyle || DEFAULT_STYLE;
-  console.log("[avatar] style prompt source:", customStyle ? "custom" : "default");
   const prompt = buildAvatarPrompt(name, role, personality, stylePrompt);
+
+  const t0 = Date.now();
+  console.log(`[avatar] ${new Date().toISOString()} | model=${MODEL} | role=${role} | name=${name} | starting request`);
 
   try {
     const res = await fetch(`${ENDPOINT}?key=${GEMINI_API_KEY}`, {
@@ -36,13 +48,23 @@ export async function POST(req: Request) {
       }),
     });
 
+    const elapsed = Date.now() - t0;
+
     if (!res.ok) {
       const err = await res.text();
-      console.error("Gemini API error:", err);
+      console.error(`[avatar] ${new Date().toISOString()} | model=${MODEL} | FAILED ${res.status} | ${elapsed}ms | ${err}`);
       return NextResponse.json({ error: "Gemini API error" }, { status: 502 });
     }
 
     const data = await res.json();
+
+    // Token usage & cost from response metadata
+    const usage = data.usageMetadata ?? {};
+    const inputTokens = usage.promptTokenCount ?? 0;
+    const outputTokens = usage.candidatesTokenCount ?? usage.totalTokenCount ?? IMAGE_OUTPUT_TOKENS;
+    const inputCost = inputTokens * INPUT_COST_PER_TOKEN;
+    const outputCost = outputTokens > 100 ? IMAGE_OUTPUT_COST : outputTokens * OUTPUT_COST_PER_TOKEN;
+    const totalCost = inputCost + outputCost;
 
     // Extract inline image data from response
     const candidates = data.candidates ?? [];
@@ -52,14 +74,19 @@ export async function POST(req: Request) {
         if (part.inlineData) {
           const { mimeType, data: b64 } = part.inlineData;
           const dataUrl = `data:${mimeType};base64,${b64}`;
+          const logLine = { ts: new Date().toISOString(), model: MODEL, status: "ok", elapsedMs: elapsed, mimeType, sizeKB: Math.round(b64.length / 1024), inputTokens, outputTokens, costUSD: +totalCost.toFixed(4), role, name };
+          console.log(`[avatar] ${logLine.ts} | model=${MODEL} | OK | ${elapsed}ms | ${mimeType} | ${logLine.sizeKB}KB | in=${inputTokens} out=${outputTokens} | cost=$${totalCost.toFixed(4)}`);
+          try { appendFileSync(TELEMETRY_LOG, JSON.stringify(logLine) + "\n"); } catch {}
           return NextResponse.json({ success: true, avatar: dataUrl });
         }
       }
     }
 
+    console.error(`[avatar] ${new Date().toISOString()} | model=${MODEL} | NO IMAGE | ${elapsed}ms`);
     return NextResponse.json({ error: "No image in response" }, { status: 502 });
   } catch (err) {
-    console.error("Avatar generation failed:", err);
+    const elapsed = Date.now() - t0;
+    console.error(`[avatar] ${new Date().toISOString()} | model=${MODEL} | ERROR | ${elapsed}ms |`, err);
     return NextResponse.json({ error: "Avatar generation failed" }, { status: 500 });
   }
 }

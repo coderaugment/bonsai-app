@@ -37,7 +37,7 @@ export async function PATCH(
         title: item.title,
         description: item.description,
         type: item.type as "feature" | "bug" | "chore",
-        state: "research",
+        state: "review",
         priority: 500,
         projectId,
         createdBy: user?.id ?? null,

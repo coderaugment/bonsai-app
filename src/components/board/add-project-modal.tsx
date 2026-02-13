@@ -100,7 +100,7 @@ export function AddProjectModal({ open, onClose }: AddProjectModalProps) {
         return;
       }
       onClose();
-      router.refresh();
+      router.push(`/p/${data.project.slug}`);
     } catch {
       setError("Network error. Please try again.");
       setSaving(false);

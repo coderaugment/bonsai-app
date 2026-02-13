@@ -1,11 +1,12 @@
 export type TicketType = "feature" | "bug" | "chore";
 
 export type TicketState =
-  | "research"
-  | "plan"
-  | "build"
+  | "review"
+  | "planning"
+  | "building"
+  | "preview"
   | "test"
-  | "ship";
+  | "shipped";
 
 export interface TicketCreator {
   name: string;
@@ -197,4 +198,29 @@ export interface ExtractedItem {
   type: TicketType;
   status: "pending" | "approved" | "rejected";
   createdAt: string;
+}
+
+// ============================================================================
+// AGENT RUNS - Tracks every agent spawn
+// ============================================================================
+export type AgentRunStatus = "running" | "completed" | "failed" | "timeout" | "abandoned";
+
+export interface AgentRun {
+  id: number;
+  ticketId: string;
+  ticketTitle: string | null;
+  personaId: string;
+  personaName: string | null;
+  personaColor: string | null;
+  personaAvatar: string | null;
+  personaRole: string | null;
+  phase: string;
+  status: AgentRunStatus;
+  tools: string | null;
+  dispatchSource: string | null;
+  startedAt: string | null;
+  lastReportAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+  errorMessage: string | null;
 }

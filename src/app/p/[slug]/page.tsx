@@ -39,7 +39,7 @@ export default async function ProjectBoardPage({
   await setSetting("active_project_id", project.id);
 
   if (!await isTeamComplete(Number(project.id))) {
-    redirect("/onboard/team");
+    redirect(`/p/${slug}/onboard/team`);
   }
 
   const tickets = await getTickets(Number(project.id));
@@ -51,11 +51,11 @@ export default async function ProjectBoardPage({
   const personas = await getPersonas(Number(project.id));
 
   const ticketStats = {
-    research: tickets.filter((t) => t.state === "research").length,
-    plan: tickets.filter((t) => t.state === "plan").length,
-    build: tickets.filter((t) => t.state === "build").length,
+    review: tickets.filter((t) => t.state === "review").length,
+    planning: tickets.filter((t) => t.state === "planning").length,
+    building: tickets.filter((t) => t.state === "building").length,
     test: tickets.filter((t) => t.state === "test").length,
-    ship: tickets.filter((t) => t.state === "ship").length,
+    shipped: tickets.filter((t) => t.state === "shipped").length,
   };
 
   // eslint-disable-next-line react-hooks/purity
@@ -71,7 +71,7 @@ export default async function ProjectBoardPage({
       <BoardHeader
         project={project}
         allProjects={allProjects}
-        shippedCount={ticketStats.ship}
+        shippedCount={ticketStats.shipped}
         hasCommands={!!(project.buildCommand && project.runCommand)}
       />
       <ProjectInfoPanel

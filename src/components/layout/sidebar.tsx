@@ -7,13 +7,14 @@ import { SettingsPanel } from "./settings-panel";
 import { ProjectsPanel } from "./projects-panel";
 import { CompanyModal } from "../board/company-modal";
 import { ProjectSettingsModal } from "../board/project-settings-modal";
-import type { Project } from "@/types";
+import type { Project, AgentRun } from "@/types";
+import { AgentActivityPanel } from "../board/agent-activity-panel";
 
 function getNavItems(projectSlug?: string) {
   const boardHref = projectSlug ? `/p/${projectSlug}` : "/board";
   return [
-    { icon: "ideas", label: "Ideas", href: "/ideas", matchPaths: ["/ideas"] },
-    { icon: "board", label: "Project kanban board", href: boardHref, matchPaths: ["/board", "/p/"] },
+    { icon: "ideas", label: "Ideas", href: "/ideas", matchPaths: ["/ideas"], excludePaths: [] as string[] },
+    { icon: "board", label: "Project kanban board", href: boardHref, matchPaths: ["/board", "/p/"], excludePaths: [] as string[] },
   ];
 }
 
@@ -78,6 +79,28 @@ export function Sidebar({ userName }: { userName?: string }) {
   const [clientName, setClientName] = useState(userName ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [activeProjectSlug, setActiveProjectSlug] = useState<string | undefined>(undefined);
+  const [showActivity, setShowActivity] = useState(false);
+  const [activeRunCount, setActiveRunCount] = useState(0);
+
+  // Background poll for active agent count (lightweight, every 5s)
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchCount() {
+      try {
+        const res = await fetch("/api/agent-runs?limit=10");
+        if (!cancelled) {
+          const data = await res.json();
+          const count = Array.isArray(data)
+            ? data.filter((r: AgentRun) => r.status === "running").length
+            : 0;
+          setActiveRunCount(count);
+        }
+      } catch {}
+    }
+    fetchCount();
+    const interval = setInterval(fetchCount, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   // Fetch fresh user data + active project slug client-side
   useEffect(() => {
@@ -167,12 +190,35 @@ export function Sidebar({ userName }: { userName?: string }) {
           );
         })}
 
+        {/* Agent Activity */}
+        <button
+          onClick={() => setShowActivity(!showActivity)}
+          className="group relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/5"
+          style={showActivity ? { backgroundColor: "rgba(91, 141, 249, 0.1)" } : undefined}
+          title="Agent Activity"
+        >
+          <svg
+            className={`w-5 h-5 ${showActivity ? "text-[var(--accent-blue)]" : "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12 19.5h.01" />
+          </svg>
+          {activeRunCount > 0 && (
+            <span
+              className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 rounded-full flex items-center justify-center text-[10px] font-bold text-white px-1"
+              style={{ backgroundColor: "#22c55e" }}
+            >
+              {activeRunCount}
+            </span>
+          )}
+        </button>
+
         {/* Company */}
         <button
           onClick={openCompany}
           className="group relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/5"
           style={showCompany ? { backgroundColor: "rgba(91, 141, 249, 0.1)" } : undefined}
-          title="Company"
+          title="Team"
         >
           <NavIcon icon="company" active={showCompany} />
         </button>
@@ -225,6 +271,7 @@ export function Sidebar({ userName }: { userName?: string }) {
 
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <ProjectsPanel open={showProjects} onClose={() => setShowProjects(false)} />
+      <AgentActivityPanel open={showActivity} onClose={() => setShowActivity(false)} />
       <CompanyModal
         open={showCompany}
         onClose={() => setShowCompany(false)}

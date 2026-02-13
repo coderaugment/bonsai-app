@@ -3,6 +3,7 @@ import { getTicketById } from "@/db/data/tickets";
 import { createCommentAndBumpCount } from "@/db/data/comments";
 import { getPersonaRaw, getProjectPersonasRaw } from "@/db/data/personas";
 import { logAuditEvent } from "@/db/data/audit";
+import { completeAgentRun } from "@/db/data/agent-runs";
 import { fireDispatch } from "@/lib/dispatch-agent";
 
 // Called by the agent wrapper script when claude -p finishes.
@@ -61,6 +62,11 @@ export async function POST(
         silent: true,
       }, `agent-complete/@${p.name}`);
     }
+  }
+
+  // ── Mark agent run completed ────────────────────────────
+  if (personaId) {
+    await completeAgentRun(ticketId, personaId, "completed");
   }
 
   // ── Audit ──────────────────────────────────────────────

@@ -11,6 +11,7 @@ import { getProjectPersonasRaw, getAllPersonasRaw } from "@/db/data/personas";
 import { getRoleBySlug } from "@/db/data/roles";
 import { getSetting } from "@/db/data/settings";
 import { logAuditEvent } from "@/db/data/audit";
+import { insertAgentRun } from "@/db/data/agent-runs";
 
 // ── Config ──────────────────────────────────────────
 const HOME = process.env.HOME || "~";
@@ -260,6 +261,14 @@ async function toolsForRole(role: string): Promise<string[]> {
   return TOOLS_FULL;
 }
 
+// Resolve phase label for agent run tracking
+function resolvePhaseForRun(ticket: typeof tickets.$inferSelect): string {
+  if (!ticket.researchApprovedAt) return "research";
+  if (!ticket.planApprovedAt) return "planning";
+  if (ticket.state === "test") return "test";
+  return "implementation";
+}
+
 // Determine which role should handle based on ticket state
 function resolveTargetRole(ticket: typeof tickets.$inferSelect): string {
   // Research phase → always researcher
@@ -364,8 +373,18 @@ export async function POST(
         await assembleAgentTask(commentContent, ticket, persona, { conversational })
       );
 
-      spawnAgent(sessionDir, cwd, await toolsForRole(persona.role || "developer"), ticketId, persona.id, { conversational, documentId, role: persona.role || "developer" });
+      const personaTools = await toolsForRole(persona.role || "developer");
+      spawnAgent(sessionDir, cwd, personaTools, ticketId, persona.id, { conversational, documentId, role: persona.role || "developer" });
       markPersonaDispatched(ticketId, persona.id);
+
+      insertAgentRun({
+        ticketId,
+        personaId: persona.id,
+        phase: conversational ? "conversational" : resolvePhaseForRun(ticket),
+        tools: personaTools,
+        sessionDir,
+        dispatchSource: "api",
+      });
 
       dispatched.push({
         id: persona.id,
@@ -487,8 +506,18 @@ export async function POST(
   );
 
   // Spawn the agent (fire-and-forget, posts comment when done)
-  spawnAgent(sessionDir, cwd, await toolsForRole(targetPersona.role || "developer"), ticketId, targetPersona.id, { conversational, documentId, role: targetPersona.role || "developer" });
+  const targetTools = await toolsForRole(targetPersona.role || "developer");
+  spawnAgent(sessionDir, cwd, targetTools, ticketId, targetPersona.id, { conversational, documentId, role: targetPersona.role || "developer" });
   markPersonaDispatched(ticketId, targetPersona.id);
+
+  insertAgentRun({
+    ticketId,
+    personaId: targetPersona.id,
+    phase: conversational ? "conversational" : resolvePhaseForRun(ticket),
+    tools: targetTools,
+    sessionDir,
+    dispatchSource: "api",
+  });
 
   // Post a brief "working on it" comment (skip for silent/auto dispatches)
   const ackMsg = `Looking into this now.`;

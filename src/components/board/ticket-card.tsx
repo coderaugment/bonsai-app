@@ -145,7 +145,7 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocum
           >
             {style.label}
           </span>
-          {ticket.state === "ship" && ticket.mergedAt && (
+          {ticket.state === "shipped" && ticket.mergedAt && (
             <span
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold"
               style={{

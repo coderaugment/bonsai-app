@@ -78,7 +78,7 @@ export default function ProjectPage() {
         return;
       }
 
-      router.push("/onboard/team");
+      router.push(`/p/${data.project.slug}/onboard/team`);
     } catch {
       setError("Network error. Please try again.");
       setSaving(false);

@@ -111,9 +111,9 @@ export function getWorkerActivity(projectId?: number) {
       isActive,
       stats: {
         assignedTickets: assignedTickets.length,
-        activeTickets: assignedTickets.filter((t) => t.state !== "ship")
+        activeTickets: assignedTickets.filter((t) => t.state !== "shipped")
           .length,
-        doneTickets: assignedTickets.filter((t) => t.state === "ship")
+        doneTickets: assignedTickets.filter((t) => t.state === "shipped")
           .length,
         totalComments: allTicketComments.filter(
           (c) => c.personaId === p.id

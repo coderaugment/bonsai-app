@@ -18,7 +18,7 @@ export default async function BoardPage() {
   }
 
   if (!await isTeamComplete(Number(project.id))) {
-    redirect("/onboard/team");
+    redirect(`/p/${project.slug}/onboard/team`);
   }
 
   if (!await hasTickets()) {

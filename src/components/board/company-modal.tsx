@@ -6,6 +6,53 @@ import ReactMarkdown from "react-markdown";
 import type { Role, Persona, ClaudeSkillDefinition } from "@/types";
 import { ConfirmDelete } from "@/components/ui/confirm-delete";
 
+// Human-readable labels for prompt keys
+const PROMPT_LABELS: Record<string, string> = {
+  prompt_role_lead: "Role: Lead",
+  prompt_role_researcher: "Role: Researcher",
+  prompt_role_developer: "Role: Developer",
+  prompt_role_designer: "Role: Designer",
+  prompt_role_critic: "Role: Critic",
+  prompt_role_hacker: "Role: Hacker",
+  prompt_phase_planning: "Phase: Planning",
+  prompt_phase_research: "Phase: Research",
+  prompt_phase_research_critic: "Phase: Research Critic",
+  prompt_phase_implementation: "Phase: Implementation",
+  prompt_phase_test: "Phase: Test",
+  prompt_phase_designer: "Phase: Designer",
+  prompt_phase_conversational: "Phase: Conversational",
+  prompt_dispatch_researcher_v3: "Dispatch: Researcher v3",
+  prompt_dispatch_critic_v2: "Dispatch: Critic v2",
+  prompt_dispatch_plan_critic: "Dispatch: Plan Critic",
+  prompt_dispatch_plan_hacker: "Dispatch: Plan Hacker",
+};
+
+// Map role slugs to their associated prompt keys
+const ROLE_PROMPT_MAP: Record<string, string[]> = {
+  lead: ["prompt_role_lead", "prompt_phase_planning", "prompt_phase_conversational"],
+  researcher: ["prompt_role_researcher", "prompt_phase_research", "prompt_dispatch_researcher_v3"],
+  developer: ["prompt_role_developer", "prompt_phase_planning", "prompt_phase_implementation", "prompt_phase_test"],
+  designer: ["prompt_role_designer", "prompt_phase_designer"],
+  critic: ["prompt_role_critic", "prompt_phase_research_critic", "prompt_dispatch_critic_v2", "prompt_dispatch_plan_critic"],
+  hacker: ["prompt_role_hacker", "prompt_dispatch_plan_hacker"],
+};
+
+// Find which roles share a given prompt key
+function getSharedRoles(promptKey: string, currentSlug: string): string[] {
+  const shared: string[] = [];
+  for (const [slug, keys] of Object.entries(ROLE_PROMPT_MAP)) {
+    if (slug !== currentSlug && keys.includes(promptKey)) {
+      shared.push(slug);
+    }
+  }
+  return shared;
+}
+
+interface PromptData {
+  value: string;
+  isDefault: boolean;
+}
+
 interface CompanyModalProps {
   open: boolean;
   onClose: () => void;
@@ -49,6 +96,13 @@ export function CompanyModal({ open, onClose, projectSlug: _projectSlug, persona
   const [savingRole, setSavingRole] = useState(false);
   const [editingSkillIndex, setEditingSkillIndex] = useState<number | null>(null);
 
+  // Prompt editing state
+  const [prompts, setPrompts] = useState<Record<string, PromptData>>({});
+  const [promptDefaults, setPromptDefaults] = useState<Record<string, string>>({});
+  const [promptEdits, setPromptEdits] = useState<Record<string, string>>({});
+  const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null);
+  const [savingPrompt, setSavingPrompt] = useState<string | null>(null);
+
   const _accent = selectedRole ? selectedRole.color : "#6366f1";
 
   async function fetchData() {
@@ -60,6 +114,17 @@ export function CompanyModal({ open, onClose, projectSlug: _projectSlug, persona
       console.error("Failed to fetch data:", err);
     }
     setLoading(false);
+  }
+
+  async function fetchPrompts() {
+    try {
+      const res = await fetch("/api/settings/prompts");
+      const data = await res.json();
+      setPrompts(data.prompts || {});
+      setPromptDefaults(data.defaults || {});
+    } catch (err) {
+      console.error("Failed to fetch prompts:", err);
+    }
   }
 
   // Fetch data on open
@@ -281,6 +346,8 @@ export function CompanyModal({ open, onClose, projectSlug: _projectSlug, persona
 
   function startEditRole(role: Role | null) {
     setEditingSkillIndex(null);
+    setExpandedPrompt(null);
+    setPromptEdits({});
     if (role) {
       setEditingRole(role);
       setRoleForm({
@@ -290,6 +357,7 @@ export function CompanyModal({ open, onClose, projectSlug: _projectSlug, persona
         color: role.color,
         skillDefinitions: role.skillDefinitions || [],
       });
+      fetchPrompts();
     } else {
       setEditingRole({ id: 0 } as Role); // New role marker
       setRoleForm({
@@ -372,6 +440,41 @@ Your skill instructions here...
     setEditingSkillIndex(null);
   }
 
+  async function handleSavePrompt(key: string) {
+    const value = promptEdits[key];
+    if (value === undefined) return;
+    setSavingPrompt(key);
+    try {
+      await fetch("/api/settings/prompts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, value }),
+      });
+      setPrompts({ ...prompts, [key]: { value, isDefault: false } });
+      setPromptEdits((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    } catch (err) {
+      console.error("Failed to save prompt:", err);
+    }
+    setSavingPrompt(null);
+  }
+
+  async function handleResetPrompt(key: string) {
+    setSavingPrompt(key);
+    try {
+      const res = await fetch("/api/settings/prompts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      const data = await res.json();
+      setPrompts({ ...prompts, [key]: { value: data.value || promptDefaults[key] || "", isDefault: true } });
+      setPromptEdits((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    } catch (err) {
+      console.error("Failed to reset prompt:", err);
+    }
+    setSavingPrompt(null);
+  }
+
   async function handleDeleteWorker(personaId: string) {
     try {
       const res = await fetch(`/api/personas?id=${personaId}`, { method: "DELETE" });
@@ -446,8 +549,8 @@ Your skill instructions here...
         {/* Sidebar */}
         <div className="w-56 flex flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-primary)]">
           <div className="p-5 border-b border-[var(--border-subtle)]">
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Company</h2>
-            <p className="text-xs text-[var(--text-muted)] mt-1">Team & Archetypes</p>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Team</h2>
+            <p className="text-xs text-[var(--text-muted)] mt-1">Workers & Archetypes</p>
           </div>
 
           <nav className="flex-1 p-3 space-y-1">
@@ -880,6 +983,125 @@ Instructions for Claude...`}
                           </div>
                         )}
                       </div>
+
+                      {/* Agent Prompts */}
+                      {(() => {
+                        const slug = editingRole?.slug || roleForm.slug;
+                        const promptKeys = ROLE_PROMPT_MAP[slug];
+                        if (!promptKeys) {
+                          return slug ? (
+                            <div className="p-4 rounded-lg border border-dashed border-[var(--border-medium)]">
+                              <p className="text-xs text-[var(--text-muted)]">
+                                Prompts for this role can be edited in Settings &gt; Prompts.
+                              </p>
+                            </div>
+                          ) : null;
+                        }
+                        return (
+                          <div>
+                            <div className="mb-3">
+                              <label className="block text-xs font-medium text-[var(--text-muted)]">Agent Prompts</label>
+                              <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                                System prompts used when dispatching this role
+                              </p>
+                            </div>
+                            <div className="space-y-2">
+                              {promptKeys.map((key) => {
+                                const prompt = prompts[key];
+                                const defaultValue = promptDefaults[key] || "";
+                                const currentValue = prompt?.value || defaultValue;
+                                const isDefault = prompt?.isDefault !== false;
+                                const isExpanded = expandedPrompt === key;
+                                const editValue = promptEdits[key];
+                                const hasEdits = editValue !== undefined && editValue !== currentValue;
+                                const sharedWith = getSharedRoles(key, slug);
+                                const label = PROMPT_LABELS[key] || key;
+
+                                return (
+                                  <div
+                                    key={key}
+                                    className="rounded-lg border border-[var(--border-medium)] bg-[var(--bg-input)] overflow-hidden"
+                                  >
+                                    {/* Prompt header */}
+                                    <div
+                                      className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-white/5"
+                                      onClick={() => setExpandedPrompt(isExpanded ? null : key)}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <svg
+                                          className={`w-4 h-4 text-[var(--text-muted)] transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                                          fill="none"
+                                          viewBox="0 0 24 24"
+                                          stroke="currentColor"
+                                          strokeWidth={2}
+                                        >
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                                        </svg>
+                                        <span className="text-sm font-medium text-[var(--text-primary)]">{label}</span>
+                                        <span
+                                          className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                            isDefault
+                                              ? "bg-white/10 text-[var(--text-muted)]"
+                                              : "bg-blue-500/20 text-blue-400"
+                                          }`}
+                                        >
+                                          {isDefault ? "default" : "customized"}
+                                        </span>
+                                      </div>
+                                      {sharedWith.length > 0 && (
+                                        <span className="text-[10px] text-amber-400/80 flex items-center gap-1">
+                                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z" />
+                                          </svg>
+                                          shared
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Expanded prompt editor */}
+                                    {isExpanded && (
+                                      <div className="px-3 pb-3 border-t border-[var(--border-subtle)]">
+                                        {sharedWith.length > 0 && (
+                                          <div className="mt-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                                            <p className="text-[11px] text-amber-400">
+                                              Changes here affect: {sharedWith.join(", ")}
+                                            </p>
+                                          </div>
+                                        )}
+                                        <textarea
+                                          value={editValue !== undefined ? editValue : currentValue}
+                                          onChange={(e) => setPromptEdits({ ...promptEdits, [key]: e.target.value })}
+                                          rows={8}
+                                          className="w-full mt-2 px-3 py-2 rounded-lg text-xs font-mono bg-[var(--bg-primary)] border border-[var(--border-medium)] text-[var(--text-primary)] outline-none focus:border-[var(--accent-blue)] resize-y"
+                                          style={{ minHeight: "120px" }}
+                                        />
+                                        <div className="flex items-center justify-between mt-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleResetPrompt(key)}
+                                            disabled={isDefault || savingPrompt === key}
+                                            className="px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--text-muted)] hover:bg-white/10 disabled:opacity-30"
+                                          >
+                                            Reset to Default
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSavePrompt(key)}
+                                            disabled={!hasEdits || savingPrompt === key}
+                                            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-[var(--accent-blue)] disabled:opacity-40 hover:opacity-90"
+                                          >
+                                            {savingPrompt === key ? "Saving..." : "Save Prompt"}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       <div className="flex justify-between pt-4">
                         {editingRole.id ? (

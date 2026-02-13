@@ -17,9 +17,9 @@ export async function POST(req: Request, context: RouteContext) {
     return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
   }
 
-  if (ticket.state !== "ship") {
+  if (ticket.state !== "shipped") {
     return NextResponse.json(
-      { error: "Ticket must be in 'ship' state to be marked as merged" },
+      { error: "Ticket must be in 'shipped' state to be marked as merged" },
       { status: 400 }
     );
   }

@@ -140,7 +140,7 @@ export function createTicket(data: {
   id: string;
   title: string;
   type: "feature" | "bug" | "chore";
-  state: "research" | "plan" | "build" | "test" | "ship";
+  state: "review" | "planning" | "building" | "test" | "shipped";
   description?: string | null;
   acceptanceCriteria?: string | null;
   priority: number;
@@ -254,8 +254,8 @@ export function getNextTicket(
       isNull(tickets.lastAgentActivity),
       lt(tickets.lastAgentActivity, thirtyMinutesAgo)
     ),
-    sql`${tickets.state} != 'research'`,
-    sql`${tickets.state} != 'ship'`,
+    sql`${tickets.state} != 'review'`,
+    sql`${tickets.state} != 'shipped'`,
   ];
 
   if (personaId) {
@@ -292,7 +292,7 @@ export function getNextTicket(
   const inProgress = db
     .select()
     .from(tickets)
-    .where(and(...baseFilters, eq(tickets.state, "build")))
+    .where(and(...baseFilters, eq(tickets.state, "building")))
     .orderBy(desc(tickets.priority), asc(tickets.createdAt))
     .limit(1)
     .get();
@@ -302,7 +302,7 @@ export function getNextTicket(
   const backlog = db
     .select()
     .from(tickets)
-    .where(and(...baseFilters, eq(tickets.state, "plan")))
+    .where(and(...baseFilters, eq(tickets.state, "planning")))
     .orderBy(desc(tickets.priority), asc(tickets.createdAt))
     .limit(1)
     .get();

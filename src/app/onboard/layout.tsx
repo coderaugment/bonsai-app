@@ -17,12 +17,12 @@ export default async function OnboardLayout({
 
   // Fully onboarded → board
   if (user && project && await isTeamComplete(Number(project.id)) && await hasTickets()) {
-    redirect("/board");
+    redirect(`/p/${project.slug}`);
   }
 
   // Team done but no tickets → new ticket page (with sidebar visible)
   if (user && project && await isTeamComplete(Number(project.id))) {
-    redirect("/new-ticket");
+    redirect(`/p/${project.slug}/new-ticket`);
   }
 
   return <Modal>{children}</Modal>;

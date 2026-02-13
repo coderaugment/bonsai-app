@@ -44,7 +44,7 @@ export const tickets: Ticket[] = [
     description:
       "Create base color tokens, typography scale, and spacing system for the Bonsai UI. Establish dark theme as default.",
     type: "feature",
-    state: "ship",
+    state: "shipped",
     priority: 900,
     assignee: personas[0],
     commentCount: 3,
@@ -58,7 +58,7 @@ export const tickets: Ticket[] = [
     description:
       "Build the main kanban board with drag-and-drop columns for ticket states. Support filtering by type and assignee.",
     type: "feature",
-    state: "build",
+    state: "building",
     priority: 1000,
     assignee: personas[0],
     commentCount: 5,
@@ -72,7 +72,7 @@ export const tickets: Ticket[] = [
     description:
       "Connect the webapp to the heartbeat status API. Show agent activity, queue depth, and last run time on the dashboard.",
     type: "feature",
-    state: "plan",
+    state: "planning",
     priority: 800,
     assignee: personas[1],
     commentCount: 2,
@@ -86,7 +86,7 @@ export const tickets: Ticket[] = [
     description:
       "Full ticket detail page with description, acceptance criteria, comment thread, and agent activity log.",
     type: "feature",
-    state: "plan",
+    state: "planning",
     priority: 700,
     commentCount: 0,
     hasAttachments: false,
@@ -98,7 +98,7 @@ export const tickets: Ticket[] = [
     description:
       "Settings page for managing agent personas — name, color, avatar, and default tool profile.",
     type: "feature",
-    state: "plan",
+    state: "planning",
     priority: 500,
     commentCount: 1,
     hasAttachments: false,
@@ -110,7 +110,7 @@ export const tickets: Ticket[] = [
     description:
       "Board columns overflow horizontally without scroll indicators on viewports below 1280px.",
     type: "bug",
-    state: "plan",
+    state: "planning",
     priority: 600,
     commentCount: 0,
     hasAttachments: false,
@@ -122,7 +122,7 @@ export const tickets: Ticket[] = [
     description:
       "Set up Prisma with SQLite. Create models for Project, Ticket, Comment, Document, AgentRun, and Persona.",
     type: "feature",
-    state: "plan",
+    state: "planning",
     priority: 850,
     assignee: personas[2],
     commentCount: 4,
@@ -136,7 +136,7 @@ export const tickets: Ticket[] = [
     description:
       "Threaded comment UI for ticket detail view. Support human and agent comments with different styling.",
     type: "feature",
-    state: "plan",
+    state: "planning",
     priority: 650,
     commentCount: 0,
     hasAttachments: false,
@@ -162,7 +162,7 @@ export const tickets: Ticket[] = [
     description:
       "First-run setup wizard: API key entry, project creation, heartbeat service install, vault initialization.",
     type: "feature",
-    state: "plan",
+    state: "planning",
     priority: 750,
     assignee: personas[0],
     commentCount: 3,
@@ -176,7 +176,7 @@ export const tickets: Ticket[] = [
     description:
       "Implement clone, branch, commit, push operations for agent workspaces. Validate paths and prevent escapes.",
     type: "feature",
-    state: "build",
+    state: "building",
     priority: 900,
     assignee: personas[2],
     commentCount: 6,
@@ -204,7 +204,7 @@ export const tickets: Ticket[] = [
     description:
       "Enforce valid state transitions. Backlog can only move to Research, Research to Ready, etc.",
     type: "chore",
-    state: "build",
+    state: "building",
     priority: 700,
     assignee: personas[1],
     commentCount: 1,
@@ -218,7 +218,7 @@ export const tickets: Ticket[] = [
     description:
       "Icon-based sidebar with hover tooltips and active route highlighting. Include home, board, projects, settings.",
     type: "feature",
-    state: "ship",
+    state: "shipped",
     priority: 850,
     assignee: personas[0],
     commentCount: 2,
