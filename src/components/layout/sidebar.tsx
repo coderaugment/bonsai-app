@@ -4,19 +4,7 @@ import { useState, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Image from "next/image";
 import { SettingsPanel } from "./settings-panel";
-import { ProjectsPanel } from "./projects-panel";
-import { CompanyModal } from "../board/company-modal";
-import { ProjectSettingsModal } from "../board/project-settings-modal";
-import type { Project, AgentRun } from "@/types";
-import { AgentActivityPanel } from "../board/agent-activity-panel";
-
-function getNavItems(projectSlug?: string) {
-  const boardHref = projectSlug ? `/p/${projectSlug}` : "/board";
-  return [
-    { icon: "ideas", label: "Ideas", href: "/ideas", matchPaths: ["/ideas"], excludePaths: [] as string[] },
-    { icon: "board", label: "Project kanban board", href: boardHref, matchPaths: ["/board", "/p/"], excludePaths: [] as string[] },
-  ];
-}
+import type { AgentRun } from "@/types";
 
 function NavIcon({ icon, active }: { icon: string; active?: boolean }) {
   const base = active
@@ -36,19 +24,13 @@ function NavIcon({ icon, active }: { icon: string; active?: boolean }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
         </svg>
       );
-    case "projects":
+    case "activity":
       return (
         <svg className={`w-5 h-5 ${base}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.06-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12 19.5h.01" />
         </svg>
       );
-    case "workers":
-      return (
-        <svg className={`w-5 h-5 ${base}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-        </svg>
-      );
-    case "company":
+    case "team":
       return (
         <svg className={`w-5 h-5 ${base}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
@@ -66,23 +48,30 @@ function NavIcon({ icon, active }: { icon: string; active?: boolean }) {
   }
 }
 
+// Extract active project slug from pathname like /p/my-project/board
+function getSlugFromPath(pathname: string): string | undefined {
+  const match = pathname.match(/^\/p\/([^/]+)/);
+  return match ? match[1] : undefined;
+}
+
+// Extract the sub-page from pathname like /p/my-project/board → "board"
+function getSubPage(pathname: string): string | undefined {
+  const match = pathname.match(/^\/p\/[^/]+\/(.+)$/);
+  return match ? match[1] : undefined;
+}
+
 export function Sidebar({ userName }: { userName?: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [showProjects, setShowProjects] = useState(false);
-  const [showCompany, setShowCompany] = useState(false);
-  const [companyProjectSlug, setCompanyProjectSlug] = useState("");
-  const [companyPersonas, setCompanyPersonas] = useState<import("@/types").Persona[]>([]);
-  const [showProjectSettings, setShowProjectSettings] = useState(false);
-  const [projectSettingsData, setProjectSettingsData] = useState<Project | null>(null);
   const [clientName, setClientName] = useState(userName ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [activeProjectSlug, setActiveProjectSlug] = useState<string | undefined>(undefined);
-  const [showActivity, setShowActivity] = useState(false);
   const [activeRunCount, setActiveRunCount] = useState(0);
 
-  // Background poll for active agent count (lightweight, every 5s)
+  const activeSlug = getSlugFromPath(pathname);
+  const subPage = getSubPage(pathname);
+
+  // Background poll for active agent count
   useEffect(() => {
     let cancelled = false;
     async function fetchCount() {
@@ -102,7 +91,7 @@ export function Sidebar({ userName }: { userName?: string }) {
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
-  // Fetch fresh user data + active project slug client-side
+  // Fetch user data client-side
   useEffect(() => {
     fetch("/api/onboard/user")
       .then((r) => r.json())
@@ -111,40 +100,23 @@ export function Sidebar({ userName }: { userName?: string }) {
         if (data.user?.avatarUrl) setAvatarUrl(data.user.avatarUrl);
       })
       .catch(() => {});
-    fetch("/api/settings/project")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.slug) setActiveProjectSlug(data.slug);
-      })
-      .catch(() => {});
   }, []);
 
   const displayName = clientName || userName || "User";
 
-  async function openProjectSettings() {
-    try {
-      const res = await fetch("/api/settings/project");
-      const data = await res.json();
-      if (data?.id) {
-        setProjectSettingsData(data);
-        setShowProjectSettings(true);
-      }
-    } catch {}
+  function navTo(subPath: string) {
+    if (activeSlug) {
+      router.push(`/p/${activeSlug}/${subPath}`);
+    }
   }
 
-  async function openCompany() {
-    try {
-      const projRes = await fetch("/api/settings/project");
-      const activeProject = await projRes.json();
-      setCompanyProjectSlug(activeProject?.slug || "");
-      const pid = activeProject?.id;
-      const personasUrl = pid ? `/api/personas?projectId=${pid}` : "/api/personas";
-      const personasRes = await fetch(personasUrl);
-      const personas = await personasRes.json();
-      setCompanyPersonas(Array.isArray(personas) ? personas : []);
-    } catch {}
-    setShowCompany(true);
-  }
+  // Nav items that require an active project
+  const projectNavItems = [
+    { icon: "board", label: "Board", subPath: "board", match: (s: string | undefined) => s === "board" || s === undefined },
+    { icon: "activity", label: "Agent Activity", subPath: "activity", match: (s: string | undefined) => s === "activity" },
+    { icon: "team", label: "Team", subPath: "team", match: (s: string | undefined) => s === "team" },
+    { icon: "settings", label: "Settings", subPath: "settings", match: (s: string | undefined) => s === "settings" },
+  ];
 
   return (
     <aside
@@ -155,7 +127,7 @@ export function Sidebar({ userName }: { userName?: string }) {
       }}
     >
       <div className="flex flex-col items-center gap-1">
-        {/* Logo + App name */}
+        {/* Logo */}
         <div className="flex flex-col items-center mb-4">
           <div className="w-9 h-9 rounded-xl overflow-hidden">
             <Image src="/bonsai-os-logo-l.png" alt="Bonsai" width={36} height={36} className="w-full h-full object-cover" />
@@ -168,80 +140,40 @@ export function Sidebar({ userName }: { userName?: string }) {
           </span>
         </div>
 
-        {/* Nav items */}
-        {getNavItems(activeProjectSlug).map((item) => {
-          const matchesPath = item.matchPaths.some((p) => pathname.startsWith(p) || pathname.includes(p));
-          const excluded = item.excludePaths?.some((p) => pathname.includes(p));
-          const isActive = matchesPath && !excluded;
+        {/* Ideas (global, not project-scoped) */}
+        <button
+          onClick={() => router.push("/ideas")}
+          className="group relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/5"
+          style={pathname.startsWith("/ideas") ? { backgroundColor: "rgba(91, 141, 249, 0.1)" } : undefined}
+          title="Ideas"
+        >
+          <NavIcon icon="ideas" active={pathname.startsWith("/ideas")} />
+        </button>
+
+        {/* Project-scoped nav items */}
+        {activeSlug && projectNavItems.map((item) => {
+          const isActive = item.match(subPage);
           return (
             <button
               key={item.icon}
-              onClick={() => router.push(item.href)}
+              onClick={() => navTo(item.subPath)}
               className="group relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/5"
-              style={
-                isActive
-                  ? { backgroundColor: "rgba(91, 141, 249, 0.1)" }
-                  : undefined
-              }
+              style={isActive ? { backgroundColor: "rgba(91, 141, 249, 0.1)" } : undefined}
               title={item.label}
             >
               <NavIcon icon={item.icon} active={isActive} />
+              {/* Active agent count badge on activity icon */}
+              {item.icon === "activity" && activeRunCount > 0 && (
+                <span
+                  className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 rounded-full flex items-center justify-center text-[10px] font-bold text-white px-1"
+                  style={{ backgroundColor: "#22c55e" }}
+                >
+                  {activeRunCount}
+                </span>
+              )}
             </button>
           );
         })}
-
-        {/* Agent Activity */}
-        <button
-          onClick={() => setShowActivity(!showActivity)}
-          className="group relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/5"
-          style={showActivity ? { backgroundColor: "rgba(91, 141, 249, 0.1)" } : undefined}
-          title="Agent Activity"
-        >
-          <svg
-            className={`w-5 h-5 ${showActivity ? "text-[var(--accent-blue)]" : "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]"}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12 19.5h.01" />
-          </svg>
-          {activeRunCount > 0 && (
-            <span
-              className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 rounded-full flex items-center justify-center text-[10px] font-bold text-white px-1"
-              style={{ backgroundColor: "#22c55e" }}
-            >
-              {activeRunCount}
-            </span>
-          )}
-        </button>
-
-        {/* Company */}
-        <button
-          onClick={openCompany}
-          className="group relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/5"
-          style={showCompany ? { backgroundColor: "rgba(91, 141, 249, 0.1)" } : undefined}
-          title="Team"
-        >
-          <NavIcon icon="company" active={showCompany} />
-        </button>
-
-        {/* Projects */}
-        <button
-          onClick={() => setShowProjects(!showProjects)}
-          className="group relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/5"
-          style={showProjects ? { backgroundColor: "rgba(91, 141, 249, 0.1)" } : undefined}
-          title="Projects"
-        >
-          <NavIcon icon="projects" active={showProjects} />
-        </button>
-
-        {/* Project Settings */}
-        <button
-          onClick={openProjectSettings}
-          className="group relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/5"
-          style={showProjectSettings ? { backgroundColor: "rgba(91, 141, 249, 0.1)" } : undefined}
-          title="Project Settings"
-        >
-          <NavIcon icon="settings" active={showProjectSettings} />
-        </button>
       </div>
 
       <div className="flex flex-col items-center gap-1">
@@ -270,21 +202,6 @@ export function Sidebar({ userName }: { userName?: string }) {
       </div>
 
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <ProjectsPanel open={showProjects} onClose={() => setShowProjects(false)} />
-      <AgentActivityPanel open={showActivity} onClose={() => setShowActivity(false)} />
-      <CompanyModal
-        open={showCompany}
-        onClose={() => setShowCompany(false)}
-        projectSlug={companyProjectSlug}
-        personas={companyPersonas}
-      />
-      {projectSettingsData && (
-        <ProjectSettingsModal
-          open={showProjectSettings}
-          onClose={() => setShowProjectSettings(false)}
-          project={projectSettingsData}
-        />
-      )}
     </aside>
   );
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { formatTicketSlug } from "@/types";
 import { getTicketById, getProjectById, updateTicket, logAuditEvent } from "@/db/data";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -25,7 +26,9 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: ticketId } = await params;
+  const { id } = await params;
+  const ticketId = Number(id);
+  const ticketSlug = formatTicketSlug(ticketId);
 
   const ticket = await getTicketById(ticketId);
   if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
@@ -35,8 +38,8 @@ export async function POST(
 
   const mainRepo = resolveMainRepo(project);
   const slug = project.slug || project.githubRepo || "unknown";
-  const worktreePath = path.join(WORKTREES_DIR, slug, ticketId);
-  const branchName = `ticket/${ticketId}`;
+  const worktreePath = path.join(WORKTREES_DIR, slug, ticketSlug);
+  const branchName = `ticket/${ticketSlug}`;
 
   if (!fs.existsSync(mainRepo)) {
     return NextResponse.json({ error: "Main repo not found" }, { status: 400 });
@@ -77,7 +80,7 @@ export async function POST(
         execFileSync("git", ["add", "-A"], gitOpts(worktreePath));
         const status = execFileSync("git", ["status", "--porcelain"], gitOpts(worktreePath)).trim();
         if (status) {
-          execFileSync("git", ["commit", "-m", `ship ${ticketId}: commit before merge`], gitOpts(worktreePath));
+          execFileSync("git", ["commit", "-m", `ship ${ticketSlug}: commit before merge`], gitOpts(worktreePath));
           log.push("Committed uncommitted work in corrupted worktree.");
         }
       } catch {
@@ -98,7 +101,7 @@ export async function POST(
       execFileSync("git", ["add", "-A"], gitOpts(mainRepo));
       const mainStatus = execFileSync("git", ["status", "--porcelain"], gitOpts(mainRepo)).trim();
       if (mainStatus) {
-        execFileSync("git", ["commit", "-m", `merge ${ticketId}: ${ticket.title}`], gitOpts(mainRepo));
+        execFileSync("git", ["commit", "-m", `merge ${ticketSlug}: ${ticket.title}`], gitOpts(mainRepo));
         log.push("Committed merged code on main.");
       } else {
         log.push("No new changes to commit on main (already up to date).");
@@ -119,7 +122,7 @@ export async function POST(
         execFileSync("git", ["add", "-A"], gitOpts(worktreePath));
         const status = execFileSync("git", ["status", "--porcelain"], gitOpts(worktreePath)).trim();
         if (status) {
-          execFileSync("git", ["commit", "-m", `ship ${ticketId}: commit before merge`], gitOpts(worktreePath));
+          execFileSync("git", ["commit", "-m", `ship ${ticketSlug}: commit before merge`], gitOpts(worktreePath));
           log.push("Committed uncommitted work in worktree.");
         }
       } catch {
@@ -132,7 +135,7 @@ export async function POST(
 
       // Merge branch into main
       try {
-        execFileSync("git", ["merge", branchName, "--no-ff", "-m", `merge ${ticketId}: ${ticket.title}`], gitOpts(mainRepo));
+        execFileSync("git", ["merge", branchName, "--no-ff", "-m", `merge ${ticketSlug}: ${ticket.title}`], gitOpts(mainRepo));
         log.push("Merged branch into main.");
       } catch {
         // Try fast-forward if --no-ff fails
@@ -161,7 +164,7 @@ export async function POST(
       log.push("No worktree found. Checking for branch.");
       try {
         execFileSync("git", ["rev-parse", "--verify", branchName], gitOpts(mainRepo));
-        execFileSync("git", ["merge", branchName, "-m", `merge ${ticketId}: ${ticket.title}`], gitOpts(mainRepo));
+        execFileSync("git", ["merge", branchName, "-m", `merge ${ticketSlug}: ${ticket.title}`], gitOpts(mainRepo));
         mergeCommit = execFileSync("git", ["rev-parse", "HEAD"], gitOpts(mainRepo)).trim();
         execFileSync("git", ["branch", "-d", branchName], gitOpts(mainRepo));
         log.push("Merged and deleted branch.");
@@ -196,7 +199,7 @@ export async function POST(
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[ship] Error shipping ${ticketId}:`, msg);
+    console.error(`[ship] Error shipping ${ticketSlug}:`, msg);
     return NextResponse.json({ error: msg, log }, { status: 500 });
   }
 }

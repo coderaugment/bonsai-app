@@ -89,6 +89,19 @@ export function getTickets(projectId?: number): Promise<Ticket[]> {
       });
   }
 
+  // Compute epic metadata: child counts and epic titles
+  const epicChildStats = new Map<number, { total: number; shipped: number }>();
+  const epicTitleMap = new Map<number, string>();
+  for (const r of rows) {
+    if (r.isEpic) epicTitleMap.set(r.id, r.title);
+    if (r.epicId) {
+      const stats = epicChildStats.get(r.epicId) ?? { total: 0, shipped: 0 };
+      stats.total++;
+      if (r.state === "shipped") stats.shipped++;
+      epicChildStats.set(r.epicId, stats);
+    }
+  }
+
   const result = rows.map((r) => {
     const participantIds = new Set<string>();
     if (r.assigneeId) participantIds.add(r.assigneeId);
@@ -97,6 +110,8 @@ export function getTickets(projectId?: number): Promise<Ticket[]> {
     const participants = [...participantIds]
       .map((id) => personaMap.get(id))
       .filter((p): p is NonNullable<typeof p> => p != null);
+
+    const childStats = epicChildStats.get(r.id);
 
     return {
       id: r.id,
@@ -124,6 +139,11 @@ export function getTickets(projectId?: number): Promise<Ticket[]> {
       returnedFromVerification: r.returnedFromVerification ?? false,
       mergedAt: r.mergedAt ?? undefined,
       mergeCommit: r.mergeCommit ?? undefined,
+      isEpic: r.isEpic ?? false,
+      epicId: r.epicId ?? undefined,
+      epicTitle: r.epicId ? epicTitleMap.get(r.epicId) : undefined,
+      childCount: childStats?.total ?? 0,
+      childrenShipped: childStats?.shipped ?? 0,
       participants,
     } as Ticket;
   });
@@ -131,13 +151,12 @@ export function getTickets(projectId?: number): Promise<Ticket[]> {
   return asAsync(result);
 }
 
-export function getTicketById(id: string) {
+export function getTicketById(id: number) {
   const row = db.select().from(tickets).where(eq(tickets.id, id)).get();
   return asAsync(row ?? null);
 }
 
 export function createTicket(data: {
-  id: string;
   title: string;
   type: "feature" | "bug" | "chore";
   state: "review" | "planning" | "building" | "test" | "shipped";
@@ -148,11 +167,12 @@ export function createTicket(data: {
   createdBy?: number | null;
   commentCount?: number;
   hasAttachments?: boolean;
+  isEpic?: boolean;
+  epicId?: number | null;
 }) {
   const row = db
     .insert(tickets)
     .values({
-      id: data.id,
       title: data.title,
       type: data.type,
       state: data.state,
@@ -163,6 +183,8 @@ export function createTicket(data: {
       createdBy: data.createdBy ?? null,
       commentCount: data.commentCount ?? 0,
       hasAttachments: data.hasAttachments ?? false,
+      isEpic: data.isEpic ?? false,
+      epicId: data.epicId ?? null,
     })
     .returning()
     .get();
@@ -170,7 +192,7 @@ export function createTicket(data: {
 }
 
 export function updateTicket(
-  ticketId: string,
+  ticketId: number,
   data: Record<string, unknown>
 ): Promise<void> {
   return runAsync(() => {
@@ -178,7 +200,7 @@ export function updateTicket(
   });
 }
 
-export function softDeleteTicket(ticketId: string): Promise<void> {
+export function softDeleteTicket(ticketId: number): Promise<void> {
   return runAsync(() => {
     db.update(tickets)
       .set({ deletedAt: new Date().toISOString() })
@@ -195,12 +217,6 @@ export function getTicketCount(): Promise<number> {
   return asAsync(row?.count ?? 0);
 }
 
-export async function generateTicketId(): Promise<string> {
-  const count = await getTicketCount();
-  const num = count + 1;
-  return `tkt_${String(num).padStart(2, "0")}`;
-}
-
 export function hasTickets(): Promise<boolean> {
   const row = db
     .select({ count: sql<number>`count(*)` })
@@ -210,7 +226,7 @@ export function hasTickets(): Promise<boolean> {
 }
 
 export function setTicketWorktree(
-  ticketId: string,
+  ticketId: number,
   worktreePath: string
 ): Promise<void> {
   return runAsync(() => {
@@ -221,7 +237,7 @@ export function setTicketWorktree(
   });
 }
 
-export function clearTicketWorktree(ticketId: string): Promise<void> {
+export function clearTicketWorktree(ticketId: number): Promise<void> {
   return runAsync(() => {
     db.update(tickets)
       .set({ worktreePath: null })
@@ -231,7 +247,7 @@ export function clearTicketWorktree(ticketId: string): Promise<void> {
 }
 
 export function getTicketWorktree(
-  ticketId: string
+  ticketId: number
 ): Promise<string | null> {
   const result = db
     .select({ worktreePath: tickets.worktreePath })
@@ -256,6 +272,7 @@ export function getNextTicket(
     ),
     sql`${tickets.state} != 'review'`,
     sql`${tickets.state} != 'shipped'`,
+    eq(tickets.isEpic, false),
   ];
 
   if (personaId) {
@@ -308,4 +325,24 @@ export function getNextTicket(
     .get();
 
   return asAsync(backlog || null);
+}
+
+export function getEpicChildren(epicId: number) {
+  const rows = db
+    .select()
+    .from(tickets)
+    .where(and(eq(tickets.epicId, epicId), isNull(tickets.deletedAt)))
+    .all();
+  return asAsync(rows);
+}
+
+export function getEpics(projectId?: number) {
+  const filters = [eq(tickets.isEpic, true), isNull(tickets.deletedAt)];
+  if (projectId) filters.push(eq(tickets.projectId, projectId));
+  const rows = db
+    .select()
+    .from(tickets)
+    .where(and(...filters))
+    .all();
+  return asAsync(rows);
 }

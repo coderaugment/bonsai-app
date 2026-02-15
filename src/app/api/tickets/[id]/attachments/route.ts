@@ -9,8 +9,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const ticketId = Number(id);
 
-    const attachments = await getAttachmentsByTicket(id);
+    const attachments = await getAttachmentsByTicket(ticketId);
 
     return NextResponse.json(attachments);
   } catch (error) {
@@ -29,6 +30,7 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const ticketId = Number(id);
     const body = await request.json();
 
     const { filename, mimeType, data, createdByType, createdById } = body;
@@ -42,7 +44,7 @@ export async function POST(
 
     // Insert attachment
     const attachment = await createAttachment({
-      ticketId: id,
+      ticketId,
       filename,
       mimeType,
       data,
@@ -51,7 +53,7 @@ export async function POST(
     });
 
     // Update ticket's hasAttachments flag
-    await updateTicket(id, { hasAttachments: true });
+    await updateTicket(ticketId, { hasAttachments: true });
 
     return NextResponse.json(attachment, { status: 201 });
   } catch (error) {

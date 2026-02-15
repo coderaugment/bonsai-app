@@ -2,7 +2,7 @@ import { db, asAsync, runAsync } from "./_driver";
 import { comments, tickets, users, personas } from "../schema";
 import { eq, and, isNull, asc, desc } from "drizzle-orm";
 
-export function getCommentsByTicket(ticketId: string, limit: number = 10) {
+export function getCommentsByTicket(ticketId: number, limit: number = 10) {
   const rows = db
     .select()
     .from(comments)
@@ -15,7 +15,7 @@ export function getCommentsByTicket(ticketId: string, limit: number = 10) {
 
 /** Get comments filtered by ticketId and optionally by documentId */
 export function getCommentsByTicketOrDocument(
-  ticketId: string,
+  ticketId: number,
   documentId?: number | null
 ) {
   const whereClause = documentId
@@ -90,7 +90,7 @@ export function enrichComments(
 }
 
 export function createComment(data: {
-  ticketId: string;
+  ticketId: number;
   authorType: "human" | "agent" | "system";
   authorId?: number | null;
   personaId?: string | null;
@@ -121,7 +121,7 @@ export function createComment(data: {
  * Optionally updates lastHumanCommentAt for human comments.
  */
 export function createCommentAndBumpCount(data: {
-  ticketId: string;
+  ticketId: number;
   authorType: "human" | "agent" | "system";
   authorId?: number | null;
   personaId?: string | null;
@@ -167,7 +167,7 @@ export function createCommentAndBumpCount(data: {
 
 /** Post an agent comment and bump count (used by dispatch) */
 export function createAgentComment(
-  ticketId: string,
+  ticketId: number,
   personaId: string,
   content: string
 ): Promise<void> {
@@ -191,7 +191,7 @@ export function createAgentComment(
 
 /** Post a system comment and bump count (used by state transitions) */
 export function createSystemCommentAndBumpCount(
-  ticketId: string,
+  ticketId: number,
   content: string
 ): Promise<void> {
   return runAsync(() => {
@@ -213,7 +213,7 @@ export function createSystemCommentAndBumpCount(
 }
 
 /** Get recent comments with persona enrichment (used by dispatch context) */
-export function getRecentCommentsEnriched(ticketId: string, limit = 10) {
+export function getRecentCommentsEnriched(ticketId: number, limit = 10) {
   const recentComments = db
     .select()
     .from(comments)

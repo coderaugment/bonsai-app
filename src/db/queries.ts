@@ -283,7 +283,7 @@ export function createPersona(data: {
 
 // ── Prompt Builder Queries ──────────────────────
 
-export function getCommentsByTicket(ticketId: string, limit: number = 10) {
+export function getCommentsByTicket(ticketId: number, limit: number = 10) {
   return db
     .select()
     .from(comments)
@@ -293,7 +293,7 @@ export function getCommentsByTicket(ticketId: string, limit: number = 10) {
     .all();
 }
 
-export function getTicketDocumentsByTicket(ticketId: string) {
+export function getTicketDocumentsByTicket(ticketId: number) {
   return db
     .select()
     .from(ticketDocuments)
@@ -302,7 +302,7 @@ export function getTicketDocumentsByTicket(ticketId: string) {
     .all();
 }
 
-export function getTicketById(id: string) {
+export function getTicketById(id: number) {
   return db
     .select()
     .from(tickets)
@@ -313,7 +313,7 @@ export function getTicketById(id: string) {
 // ── Worktree Management ──────────────────────
 
 export function setTicketWorktree(
-  ticketId: string,
+  ticketId: number,
   worktreePath: string
 ): void {
   db
@@ -323,7 +323,7 @@ export function setTicketWorktree(
     .run();
 }
 
-export function clearTicketWorktree(ticketId: string): void {
+export function clearTicketWorktree(ticketId: number): void {
   db
     .update(tickets)
     .set({ worktreePath: null })
@@ -331,7 +331,7 @@ export function clearTicketWorktree(ticketId: string): void {
     .run();
 }
 
-export function getTicketWorktree(ticketId: string): string | null {
+export function getTicketWorktree(ticketId: number): string | null {
   const result = db
     .select({ worktreePath: tickets.worktreePath })
     .from(tickets)
@@ -434,7 +434,7 @@ export function hasTickets(): boolean {
 // ── Audit Log ──────────────────────────────
 
 export function logAuditEvent(params: {
-  ticketId: string;
+  ticketId: number;
   event: string;
   actorType: "human" | "agent" | "system";
   actorId?: string | number | null;
@@ -455,7 +455,7 @@ export function logAuditEvent(params: {
     .run();
 }
 
-export function getAuditLog(ticketId: string) {
+export function getAuditLog(ticketId: number) {
   return db
     .select()
     .from(ticketAuditLog)

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { formatTicketSlug } from "@/types";
 import { tickets, personas, projects } from "@/db/schema";
 import { spawn, execFileSync } from "node:child_process";
 import path from "node:path";
@@ -12,6 +13,7 @@ import { getRoleBySlug } from "@/db/data/roles";
 import { getSetting } from "@/db/data/settings";
 import { logAuditEvent } from "@/db/data/audit";
 import { insertAgentRun } from "@/db/data/agent-runs";
+import { CREDITS_PAUSED_UNTIL, isPaused, pauseRemainingMs } from "@/lib/credit-pause";
 
 // ── Config ──────────────────────────────────────────
 const HOME = process.env.HOME || "~";
@@ -41,7 +43,7 @@ const WORKTREES_DIR = path.join(BONSAI_DIR, "worktrees");
 
 function ensureWorktree(
   project: { githubRepo: string | null; slug: string; localPath: string | null },
-  ticketId: string
+  ticketSlug: string
 ): string {
   const mainRepo = resolveMainRepo(project);
   if (!fs.existsSync(mainRepo)) return mainRepo;
@@ -50,8 +52,8 @@ function ensureWorktree(
   if (!fs.existsSync(gitDir)) return mainRepo;
 
   const slug = project.slug || project.githubRepo || "unknown";
-  const worktreePath = path.join(WORKTREES_DIR, slug, ticketId);
-  const branchName = `ticket/${ticketId}`;
+  const worktreePath = path.join(WORKTREES_DIR, slug, ticketSlug);
+  const branchName = `ticket/${ticketSlug}`;
 
   if (fs.existsSync(worktreePath)) return worktreePath;
 
@@ -84,7 +86,7 @@ const recentDispatches = new Map<string, number>();
 const PERSONA_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes (auto-dispatch chains)
 const MENTION_COOLDOWN_MS = 30 * 1000; // 30 seconds (direct human @mentions)
 
-function isPersonaOnCooldown(ticketId: string, personaId: string, isDirectMention = false): boolean {
+function isPersonaOnCooldown(ticketId: number, personaId: string, isDirectMention = false): boolean {
   const key = `${ticketId}:${personaId}`;
   const last = recentDispatches.get(key);
   if (!last) return false;
@@ -92,7 +94,7 @@ function isPersonaOnCooldown(ticketId: string, personaId: string, isDirectMentio
   return Date.now() - last < cooldown;
 }
 
-function markPersonaDispatched(ticketId: string, personaId: string) {
+function markPersonaDispatched(ticketId: number, personaId: string) {
   const key = `${ticketId}:${personaId}`;
   recentDispatches.set(key, Date.now());
   // Prune old entries every 100 dispatches
@@ -109,7 +111,7 @@ function spawnAgent(
   sessionDir: string,
   cwd: string,
   tools: string[],
-  ticketId: string,
+  ticketId: number,
   personaId: string,
   opts?: { conversational?: boolean; documentId?: number; role?: string }
 ) {
@@ -171,6 +173,61 @@ function spawnAgent(
   ].join("\n"));
   fs.chmodSync(checkCriteriaScript, 0o755);
 
+  // Write set-epic helper script (lead can promote a ticket to epic)
+  const setEpicScript = path.join(sessionDir, "set-epic.sh");
+  fs.writeFileSync(setEpicScript, [
+    `#!/usr/bin/env node`,
+    `fetch("${API_BASE}/api/tickets", {`,
+    `  method: "PUT",`,
+    `  headers: { "Content-Type": "application/json" },`,
+    `  body: JSON.stringify({ ticketId: ${ticketId}, isEpic: true }),`,
+    `}).then(r => r.json()).then(d => {`,
+    `  if (d.ok) console.log("Marked ticket ${ticketId} as epic.");`,
+    `  else console.error("Failed:", d.error);`,
+    `}).catch(e => console.error(e));`,
+  ].join("\n"));
+  fs.chmodSync(setEpicScript, 0o755);
+
+  // Write create-sub-ticket helper script (for epic breakdown)
+  // Accepts a JSON file path: { title, type?, description?, acceptanceCriteria? }
+  const createSubTicketScript = path.join(sessionDir, "create-sub-ticket.sh");
+  fs.writeFileSync(createSubTicketScript, [
+    `#!/usr/bin/env node`,
+    `const fs = require("fs");`,
+    `const file = process.argv[2];`,
+    `if (!file) { console.error("Usage: create-sub-ticket.sh <json-file>"); console.error("JSON: { title, type?, description?, acceptanceCriteria? }"); process.exit(1); }`,
+    `let data;`,
+    `try { data = JSON.parse(fs.readFileSync(file, "utf-8")); } catch(e) { console.error("Failed to read/parse JSON:", e.message); process.exit(1); }`,
+    `if (!data.title) { console.error("JSON must include 'title'"); process.exit(1); }`,
+    `fetch("${API_BASE}/api/tickets", {`,
+    `  method: "POST",`,
+    `  headers: { "Content-Type": "application/json" },`,
+    `  body: JSON.stringify({ title: data.title, type: data.type || "feature", description: data.description || "", acceptanceCriteria: data.acceptanceCriteria || "", epicId: ${ticketId} }),`,
+    `}).then(r => r.json()).then(d => {`,
+    `  if (d.success) console.log("Created sub-ticket: " + d.ticket.id + " — " + data.title);`,
+    `  else console.error("Failed:", d.error);`,
+    `}).catch(e => console.error(e));`,
+  ].join("\n"));
+  fs.chmodSync(createSubTicketScript, 0o755);
+
+  // Write credit-status helper script (useful for @lead to check pause state)
+  const creditStatusScript = path.join(sessionDir, "credit-status.sh");
+  fs.writeFileSync(creditStatusScript, [
+    `#!/usr/bin/env node`,
+    `fetch("${API_BASE}/api/credit-pause")`,
+    `  .then(r => r.json())`,
+    `  .then(d => {`,
+    `    if (d.paused) {`,
+    `      const mins = Math.ceil(d.remainingMs / 60000);`,
+    `      console.log("PAUSED — resumes at " + new Date(d.resumesAt).toLocaleTimeString() + " (" + mins + "m remaining)");`,
+    `    } else {`,
+    `      console.log("OK — credits active, no pause");`,
+    `    }`,
+    `  })`,
+    `  .catch(e => console.error("Failed to check:", e.message));`,
+  ].join("\n"));
+  fs.chmodSync(creditStatusScript, 0o755);
+
   // Build --add-dir flags for skill discovery
   const addDirFlags: string[] = [];
   const sharedSkillsDir = path.join(AGENTS_DIR, "_shared");
@@ -200,6 +257,21 @@ function spawnAgent(
   const postScriptFile = path.join(sessionDir, "post-output.mjs");
   fs.writeFileSync(postScriptFile, [
     `import fs from "fs";`,
+    `// Check stderr for credit limit errors before processing output`,
+    `const stderrContent = fs.existsSync(${JSON.stringify(stderrFile)}) ? fs.readFileSync(${JSON.stringify(stderrFile)}, "utf-8") : "";`,
+    `if (stderrContent && /hit your limit|rate limit|out of credits|\\b429\\b|quota exceeded/i.test(stderrContent)) {`,
+    `  try {`,
+    `    await fetch(${JSON.stringify(`${API_BASE}/api/credit-pause`)}, {`,
+    `      method: "POST",`,
+    `      headers: { "Content-Type": "application/json" },`,
+    `      body: JSON.stringify({ reason: stderrContent.slice(0, 500) }),`,
+    `    });`,
+    `    fs.writeFileSync(${JSON.stringify(path.join(sessionDir, "post-error.log"))}, "Credit limit detected — pause activated");`,
+    `  } catch (e) {`,
+    `    fs.writeFileSync(${JSON.stringify(path.join(sessionDir, "post-error.log"))}, "Credit limit detected but failed to set pause: " + String(e));`,
+    `  }`,
+    `  process.exit(0);`,
+    `}`,
     `const raw = fs.readFileSync(${JSON.stringify(outputFile)}, "utf-8").trim();`,
     `if (!raw) {`,
     `  fs.writeFileSync(${JSON.stringify(path.join(sessionDir, "post-error.log"))}, "Empty output file — agent produced no output");`,
@@ -237,13 +309,13 @@ function spawnAgent(
     cwd,
     detached: true,
     stdio: "ignore",
-    env: { ...process.env, DISABLE_AUTOUPDATER: "1", GEMINI_API_KEY: process.env.GEMINI_API_KEY || "" },
+    env: { ...process.env, DISABLE_AUTOUPDATER: "1", CLAUDECODE: "", GEMINI_API_KEY: process.env.GEMINI_API_KEY || "" },
   });
   child.unref();
 }
 
 // ── Helpers ──────────────────────────────────────────
-async function postAgentComment(ticketId: string, personaId: string, content: string) {
+async function postAgentComment(ticketId: number, personaId: string, content: string) {
   await createAgentComment(ticketId, personaId, content);
 }
 
@@ -285,7 +357,7 @@ function resolveTargetRole(ticket: typeof tickets.$inferSelect): string {
 }
 
 // ── Fetch ticket context ─────────────────────────────
-async function getTicketContext(ticketId: string) {
+async function getTicketContext(ticketId: number) {
   const enrichedComments = await getRecentCommentsEnriched(ticketId, 10);
   const docs = await getDocumentsByTicketVersionDesc(ticketId);
 
@@ -302,7 +374,21 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: ticketId } = await params;
+  const { id } = await params;
+  const ticketId = Number(id);
+  const ticketSlug = formatTicketSlug(ticketId);
+
+  // ── Credit pause gate ───────────────────────────
+  const pausedUntil = await getSetting(CREDITS_PAUSED_UNTIL);
+  if (isPaused(pausedUntil)) {
+    const remainingMs = pauseRemainingMs(pausedUntil);
+    console.log(`[dispatch] Rejecting — credits paused until ${pausedUntil}`);
+    return NextResponse.json(
+      { error: "credits_paused", resumesAt: pausedUntil, remainingMs },
+      { status: 503 }
+    );
+  }
+
   const { commentContent, targetRole: requestedRole, targetPersonaName, targetPersonaId, team, silent, conversational, documentId } = await req.json();
 
   if (conversational) {
@@ -324,7 +410,7 @@ export async function POST(
   // Also treat non-mentioned human comments as team dispatch so all personas see them.
   const isUnmentionedHumanComment = !team && !targetPersonaName && !targetPersonaId && !requestedRole && !!commentContent?.trim();
   if ((team || isUnmentionedHumanComment) && projectPersonas.length > 0) {
-    const cwd = ensureWorktree(project, ticketId);
+    const cwd = ensureWorktree(project, ticketSlug);
     if (!fs.existsSync(cwd)) {
       fs.mkdirSync(cwd, { recursive: true });
       console.warn(`[dispatch] Created missing workspace: ${cwd}`);
@@ -361,7 +447,7 @@ export async function POST(
     }
 
     for (const persona of dispatchTargets) {
-      const sessionDir = path.join(BONSAI_DIR, "sessions", `${ticketId}-agent-${Date.now()}-${persona.id}`);
+      const sessionDir = path.join(BONSAI_DIR, "sessions", `${ticketSlug}-agent-${Date.now()}-${persona.id}`);
       fs.mkdirSync(sessionDir, { recursive: true });
 
       fs.writeFileSync(
@@ -484,7 +570,7 @@ export async function POST(
     });
   }
 
-  const cwd = ensureWorktree(project, ticketId);
+  const cwd = ensureWorktree(project, ticketSlug);
 
   // Ensure workspace exists — create if missing so agent doesn't silently fail
   if (!fs.existsSync(cwd)) {
@@ -493,7 +579,7 @@ export async function POST(
   }
 
   // Create agent session
-  const sessionDir = path.join(BONSAI_DIR, "sessions", `${ticketId}-agent-${Date.now()}`);
+  const sessionDir = path.join(BONSAI_DIR, "sessions", `${ticketSlug}-agent-${Date.now()}`);
   fs.mkdirSync(sessionDir, { recursive: true });
 
   fs.writeFileSync(
@@ -569,9 +655,11 @@ async function buildAgentSystemPrompt(
   sessionDir: string,
   teamMembers: (typeof personas.$inferSelect)[] = []
 ): Promise<string> {
-  const workspace = ensureWorktree(project, ticket.id);
+  const workspace = ensureWorktree(project, formatTicketSlug(ticket.id));
   const reportScript = path.join(sessionDir, "report.sh");
   const saveDocScript = path.join(sessionDir, "save-document.sh");
+  const createSubTicketScript = path.join(sessionDir, "create-sub-ticket.sh");
+  const setEpicScript = path.join(sessionDir, "set-epic.sh");
 
   // Role instructions: read from roles table (editable in Settings > Roles)
   const role = persona.role || "developer";
@@ -623,6 +711,9 @@ async function buildAgentSystemPrompt(
       "Bash (read-only commands)",
       "report.sh (post progress updates)",
       "save-document.sh (save research/plan/design documents)",
+      "set-epic.sh (mark ticket as epic)",
+      "create-sub-ticket.sh (create sub-tickets for epic breakdown)",
+      "credit-status.sh (check if API credits are paused)",
     ],
   };
 
@@ -688,6 +779,31 @@ async function buildAgentSystemPrompt(
     "3. Your final chat response should be a brief summary (1-2 sentences), NOT the full document.",
     "",
     "CRITICAL: Do NOT output the full document as your response. Save it with save-document.sh. Your response is just a chat message.",
+    "",
+    "## Epic Evaluation & Breakdown",
+    "When evaluating a new ticket, decide: is this a single focused work item, or should it be an epic broken into sub-tickets?",
+    "If the ticket describes a large feature with multiple distinct phases, components, or deliverables, it should be an epic.",
+    "",
+    "### Marking as Epic",
+    `To mark this ticket as an epic: \`${setEpicScript}\``,
+    "",
+    "### Creating Sub-tickets",
+    "After marking as epic, break it down. Write a JSON file for each sub-ticket, then call the script:",
+    "",
+    "```json",
+    "// /tmp/sub-ticket-1.json",
+    "{",
+    '  "title": "Short descriptive title",',
+    '  "type": "feature",',
+    '  "description": "What needs to be built and why.",',
+    '  "acceptanceCriteria": "- [ ] First criterion\\n- [ ] Second criterion\\n- [ ] Third criterion"',
+    "}",
+    "```",
+    `\`${createSubTicketScript} /tmp/sub-ticket-1.json\``,
+    "",
+    "Types: feature, bug, chore.",
+    "CRITICAL: Every sub-ticket MUST include acceptanceCriteria — a checklist of specific, testable conditions.",
+    "Create one sub-ticket per focused work item. Each should be small enough for a single agent to complete.",
     ticket.acceptanceCriteria ? [
       "",
       "## Acceptance Criteria Verification",
@@ -795,7 +911,7 @@ async function assembleAgentTask(
     const toolPath = path.join(process.cwd(), "scripts", "tools", "nano-banana.mjs");
     const designerPrompt = (await getSetting("prompt_phase_designer") || "")
       .replace(/\{\{toolPath\}\}/g, toolPath)
-      .replace(/\{\{ticketId\}\}/g, ticket.id)
+      .replace(/\{\{ticketId\}\}/g, String(ticket.id))
       .replace(/\{\{personaId\}\}/g, persona.id);
     if (designerPrompt) {
       sections.push("", designerPrompt);

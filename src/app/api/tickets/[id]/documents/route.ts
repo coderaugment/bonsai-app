@@ -27,7 +27,8 @@ const DOC_LABELS: Record<DocType, string> = {
 
 // GET /api/tickets/[id]/documents
 export async function GET(req: Request, context: RouteContext) {
-  const { id: ticketId } = await context.params;
+  const { id } = await context.params;
+  const ticketId = Number(id);
   const docs = await getDocumentsByTicket(ticketId);
   return NextResponse.json({ documents: docs });
 }
@@ -36,7 +37,8 @@ export async function GET(req: Request, context: RouteContext) {
 // Body: { type, content, personaId }
 // Handles: versioning, regression guard, accumulative research, auto-dispatch, audit
 export async function POST(req: Request, context: RouteContext) {
-  const { id: ticketId } = await context.params;
+  const { id } = await context.params;
+  const ticketId = Number(id);
   const { type: typeParam, content, personaId } = await req.json();
 
   if (!typeParam || !DOC_TYPES.includes(typeParam as DocType)) {
@@ -177,7 +179,8 @@ export async function POST(req: Request, context: RouteContext) {
 
 // DELETE /api/tickets/[id]/documents?type=research
 export async function DELETE(req: Request, context: RouteContext) {
-  const { id: ticketId } = await context.params;
+  const { id } = await context.params;
+  const ticketId = Number(id);
   const { searchParams } = new URL(req.url);
   const typeParam = searchParams.get("type");
 

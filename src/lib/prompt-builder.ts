@@ -48,7 +48,7 @@ export interface ProjectRow {
 }
 
 export interface TicketRow {
-  id: string;
+  id: number;
   title: string;
   type: string;
   state: string;

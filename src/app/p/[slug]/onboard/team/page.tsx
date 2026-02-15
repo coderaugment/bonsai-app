@@ -5,17 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { StepHeader } from "@/components/ui/step-header";
 import type { Role, Persona } from "@/types";
 
-const ART_STYLES = [
-  "A real photograph — NOT an illustration, NOT a cartoon, NOT anime, NOT digital art, NOT 3D render. Shot on a Canon EOS R5 camera, 85mm f/1.4 lens. Real skin texture, real lighting, real depth of field. Professional headshot quality. Subject centered in frame for circular crop. Soft bokeh background. Natural warm studio lighting. Friendly, confident expression. No text, no watermarks, no logos. Square format.",
-  "Pixel art character portrait in 32-bit retro RPG style. Clearly visible individual pixels with no smoothing or anti-aliasing. Limited 16-color palette per character. Clean pixel grid — every element is built from crisp square pixels. Inspired by Final Fantasy Tactics, Chrono Trigger character portraits, or Stardew Valley. Dark solid-color background. Square format, centered for circular crop. Expressive face despite low resolution.",
-  "Studio Ghibli inspired anime portrait. Soft watercolor textures, warm natural lighting, gentle expressive eyes, delicate linework. Hayao Miyazaki character design aesthetic — whimsical but grounded. Pastel sky background with soft clouds. Square format, centered for circular crop.",
-  "Synthwave retrowave portrait illustration. Bold neon colors — electric pink, cyan, and purple against a dark gradient background. Chrome reflections, grid lines, sunset gradients. 80s retro-futuristic aesthetic inspired by Kavinsky, Outrun, and Miami Vice. Glowing edges and light trails. Digital airbrushed quality. Square format, centered for circular crop.",
-  "Bold Pop Art portrait in the style of Roy Lichtenstein and Andy Warhol. Ben-Day halftone dots, thick black outlines, limited flat color palette of primary colors (red, blue, yellow) plus black and white. Comic book printing style. Graphic and punchy. Square format, centered for circular crop.",
-  "Claymation stop-motion character portrait. Sculpted clay figure with visible fingerprint textures and subtle imperfections. Warm studio lighting with soft shadows. Inspired by Laika Studios (Coraline, Kubo), Aardman (Wallace & Gromit). Slightly oversized head with expressive features. Matte clay material finish, not glossy. Miniature set background slightly out of focus. Square format, centered for circular crop.",
-  "Adorable kawaii chibi character portrait in cute Japanese illustration style. Soft pastel colors, big sparkly eyes, rosy cheeks, fluffy rounded features. Sanrio/San-X inspired aesthetic — think Sumikko Gurashi or Molang. Gentle gradients, dreamy sparkle effects, tiny blush marks. Plush toy quality softness. Light pastel background with subtle stars or hearts. Square format, centered for circular crop.",
-  "1980s retro airbrush character portrait painting. Bold dramatic lighting with warm orange and magenta rim lights against a dark gradient background. Stylized and slightly exaggerated features with confident expression. Smooth airbrushed skin, vivid saturated colors, subtle lens flare accents. Retro sci-fi or action aesthetic without any text, titles, or logos. Painterly illustration with visible brushwork and soft glowing highlights. Head and shoulders composition, square format, centered for circular crop.",
-];
-const DEFAULT_STYLE = ART_STYLES[0];
+const DEFAULT_STYLE = "A real photograph — NOT an illustration, NOT a cartoon, NOT anime, NOT digital art, NOT 3D render. Shot on a Canon EOS R5 camera, 85mm f/1.4 lens. Real skin texture, real lighting, real depth of field. Professional headshot quality. Subject centered in frame for circular crop. Soft bokeh background. Natural warm studio lighting. Friendly, confident expression. No text, no watermarks, no logos. Square format.";
 
 export default function TeamPage() {
   const router = useRouter();
@@ -34,7 +24,7 @@ export default function TeamPage() {
   const [savedStylePrompt, setSavedStylePrompt] = useState<string | null>(null);
 
   // Step 0: Style prompt state
-  const [stylePromptText, setStylePromptText] = useState(() => ART_STYLES[Math.floor(Math.random() * ART_STYLES.length)]);
+  const [stylePromptText, setStylePromptText] = useState(DEFAULT_STYLE);
   const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
   const [generatingPreview, setGeneratingPreview] = useState(false);
   const [randomizing, setRandomizing] = useState(false);
@@ -153,14 +143,17 @@ export default function TeamPage() {
   }
 
   async function randomizeStyle() {
-    // Pick a random style different from current
-    let pick;
-    do {
-      pick = ART_STYLES[Math.floor(Math.random() * ART_STYLES.length)];
-    } while (pick === stylePromptText && ART_STYLES.length > 1);
-    setStylePromptText(pick);
     setRandomizing(true);
-    await generateStylePreview(pick);
+    try {
+      const res = await fetch("/api/generate-style", { method: "POST" });
+      const data = await res.json();
+      if (data.style) {
+        setStylePromptText(data.style);
+        await generateStylePreview(data.style);
+      }
+    } catch (err) {
+      console.error("[randomizeStyle] failed:", err);
+    }
     setRandomizing(false);
   }
 
@@ -266,7 +259,6 @@ export default function TeamPage() {
       if (signal.aborted) return;
       if (genData.name) setName(genData.name);
       if (genData.appearance) setAppearance(genData.appearance);
-      if (genData.style) setCommStyle(genData.style);
 
       setGeneratingPhase("avatar");
       const avatarRes = await fetch("/api/avatar", {
@@ -338,7 +330,7 @@ export default function TeamPage() {
     generateWorker(role.slug, g);
   }
 
-  async function rerollIdentity() {
+  async function rerollName() {
     const role = currentRole();
     if (!role) return;
     setRerolling("name");
@@ -346,10 +338,33 @@ export default function TeamPage() {
       const res = await fetch("/api/generate-worker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: role.slug, field: "appearance", name: name.trim() || undefined, gender }),
+        body: JSON.stringify({
+          role: role.slug,
+          field: "name",
+          gender,
+          existingNames: [
+            ...existingPersonas.map((p) => p.name),
+            ...hiredWorkers.map((p) => p.name),
+          ],
+        }),
       });
       const data = await res.json();
       if (data.name) setName(data.name);
+    } catch {}
+    setRerolling("");
+  }
+
+  async function rerollAppearance() {
+    const role = currentRole();
+    if (!role) return;
+    setRerolling("appearance");
+    try {
+      const res = await fetch("/api/generate-worker", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: role.slug, field: "appearance", gender }),
+      });
+      const data = await res.json();
       if (data.appearance) setAppearance(data.appearance);
       // Chain avatar regen to match new appearance
       if (data.appearance) {
@@ -359,7 +374,7 @@ export default function TeamPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              name: data.name || name,
+              name,
               role: role.slug,
               personality: data.appearance,
               style: getStylePrompt(),
@@ -373,21 +388,6 @@ export default function TeamPage() {
     setRerolling("");
   }
 
-  async function rerollStyle() {
-    const role = currentRole();
-    if (!role) return;
-    setRerolling("style");
-    try {
-      const res = await fetch("/api/generate-worker", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: role.slug, field: "style", name: name.trim() || undefined, gender }),
-      });
-      const data = await res.json();
-      if (data.style) setCommStyle(data.style);
-    } catch {}
-    setRerolling("");
-  }
 
   async function rerollAvatar() {
     const role = currentRole();
@@ -751,97 +751,94 @@ export default function TeamPage() {
         </div>
 
         {/* Party slots */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-end gap-3">
           {/* Already-hired from previous sessions */}
           {existingPersonas.map((w) => (
-            <div
-              key={`existing-${w.id}`}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: "50%",
-                border: `2px solid ${w.color || "var(--border-medium)"}`,
-                overflow: "hidden",
-                position: "relative" as const,
-                flexShrink: 0,
-              }}
-            >
-              {w.avatar ? (
-                <img src={w.avatar} alt={w.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              ) : (
-                <div style={{ width: "100%", height: "100%", backgroundColor: w.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff" }}>
-                  {w.name[0].toUpperCase()}
-                </div>
-              )}
-              <div style={{ position: "absolute", bottom: -1, right: -1, width: 16, height: 16, borderRadius: "50%", backgroundColor: "#22c55e", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+            <div key={`existing-${w.id}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flexShrink: 0 }}>
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: "50%",
+                  border: `2px solid ${w.color || "var(--border-medium)"}`,
+                  overflow: "hidden",
+                }}
+              >
+                {w.avatar ? (
+                  <img src={w.avatar} alt={w.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <div style={{ width: "100%", height: "100%", backgroundColor: w.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff" }}>
+                    {w.name[0].toUpperCase()}
+                  </div>
+                )}
               </div>
+              <span style={{ fontSize: 9, fontWeight: 600, color: w.color || "var(--text-muted)", maxWidth: 52, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.name}</span>
             </div>
           ))}
           {/* Newly hired this session */}
           {hiredWorkers.map((w) => (
-            <div
-              key={`hired-${w.id}`}
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: "50%",
-                border: `2px solid ${w.color || "var(--border-medium)"}`,
-                overflow: "hidden",
-                position: "relative" as const,
-                flexShrink: 0,
-              }}
-            >
-              {w.avatar ? (
-                <img src={w.avatar} alt={w.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              ) : (
-                <div style={{ width: "100%", height: "100%", backgroundColor: w.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff" }}>
-                  {w.name[0].toUpperCase()}
-                </div>
-              )}
-              <div style={{ position: "absolute", bottom: -1, right: -1, width: 16, height: 16, borderRadius: "50%", backgroundColor: "#22c55e", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+            <div key={`hired-${w.id}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flexShrink: 0 }}>
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: "50%",
+                  border: `2px solid ${w.color || "var(--border-medium)"}`,
+                  overflow: "hidden",
+                }}
+              >
+                {w.avatar ? (
+                  <img src={w.avatar} alt={w.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <div style={{ width: "100%", height: "100%", backgroundColor: w.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff" }}>
+                    {w.name[0].toUpperCase()}
+                  </div>
+                )}
               </div>
+              <span style={{ fontSize: 9, fontWeight: 600, color: w.color || "var(--text-muted)", maxWidth: 52, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.name}</span>
             </div>
           ))}
           {/* Current role slot — pulsing ring */}
-          <div
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: "50%",
-              border: `2px solid ${accent}`,
-              boxShadow: `0 0 12px ${accent}50`,
-              overflow: "hidden",
-              animation: "gauntlet-pulse 2s ease-in-out infinite",
-              flexShrink: 0,
-            }}
-          >
-            {avatarUrl ? (
-              <img src={avatarUrl} alt={name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            ) : (
-              <div style={{ width: "100%", height: "100%", backgroundColor: `${accent}30`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: accent }}>
-                {initial}
-              </div>
-            )}
-          </div>
-          {/* Remaining locked slots */}
-          {unfilledRoles.slice(step).map((r, i) => (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flexShrink: 0 }}>
             <div
-              key={`locked-${i}`}
               style={{
                 width: 44,
                 height: 44,
                 borderRadius: "50%",
-                border: `2px solid ${r.color}25`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: `${r.color}08`,
-                flexShrink: 0,
+                border: `2px solid ${accent}`,
+                boxShadow: `0 0 12px ${accent}50`,
+                overflow: "hidden",
+                animation: "gauntlet-pulse 2s ease-in-out infinite",
               }}
             >
-              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke={`${r.color}40`} strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+              {avatarUrl ? (
+                <img src={avatarUrl} alt={name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                <div style={{ width: "100%", height: "100%", backgroundColor: `${accent}30`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: accent }}>
+                  {initial}
+                </div>
+              )}
+            </div>
+            <span style={{ fontSize: 9, fontWeight: 600, color: accent, maxWidth: 52, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name.trim() || role.title}</span>
+          </div>
+          {/* Remaining locked slots */}
+          {unfilledRoles.slice(step).map((r, i) => (
+            <div key={`locked-${i}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flexShrink: 0 }}>
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: "50%",
+                  border: `2px solid ${r.color}25`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: `${r.color}08`,
+                }}
+              >
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke={`${r.color}40`} strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
+              </div>
+              <span style={{ fontSize: 9, fontWeight: 600, color: `${r.color}40`, maxWidth: 52, textAlign: "center" }}>{r.title}</span>
             </div>
           ))}
         </div>
@@ -1098,9 +1095,9 @@ export default function TeamPage() {
                   onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-medium)"; }}
                 />
                 <button
-                  onClick={rerollIdentity}
+                  onClick={rerollName}
                   disabled={!!rerolling || generating}
-                  title="Reroll name & appearance"
+                  title="Reroll name"
                   style={{
                     width: 34,
                     height: 34,
@@ -1151,7 +1148,7 @@ export default function TeamPage() {
                     onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-medium)"; }}
                   />
                   <button
-                    onClick={rerollIdentity}
+                    onClick={rerollAppearance}
                     disabled={!!rerolling || generating}
                     title="Reroll appearance"
                     style={{
@@ -1203,29 +1200,6 @@ export default function TeamPage() {
                     onFocus={(e) => { e.currentTarget.style.borderColor = accent; }}
                     onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-medium)"; }}
                   />
-                  <button
-                    onClick={rerollStyle}
-                    disabled={!!rerolling || generating}
-                    title="Reroll communication style"
-                    style={{
-                      position: "absolute",
-                      right: 6,
-                      bottom: 6,
-                      width: 28,
-                      height: 28,
-                      borderRadius: 6,
-                      border: `1px solid ${accent}40`,
-                      backgroundColor: `${accent}15`,
-                      color: accent,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      cursor: rerolling || generating ? "not-allowed" : "pointer",
-                      opacity: rerolling || generating ? 0.4 : 1,
-                    }}
-                  >
-                    {diceIcon(rerolling === "style")}
-                  </button>
                 </div>
               </div>
             </div>

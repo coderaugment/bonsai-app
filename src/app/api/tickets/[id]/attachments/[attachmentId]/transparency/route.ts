@@ -9,11 +9,12 @@ export async function POST(
 ) {
   try {
     const { id, attachmentId } = await params;
+    const ticketId = Number(id);
 
     // Get the attachment to verify it exists
     const attachment = await getAttachment(parseInt(attachmentId));
 
-    if (!attachment || attachment.ticketId !== id) {
+    if (!attachment || attachment.ticketId !== ticketId) {
       return NextResponse.json(
         { error: "Attachment not found" },
         { status: 404 }

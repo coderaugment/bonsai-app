@@ -7,7 +7,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: ticketId } = await params;
+  const { id } = await params;
+  const ticketId = Number(id);
   const body = await request.json();
   const { reason, authorType = "human" } = body;
 

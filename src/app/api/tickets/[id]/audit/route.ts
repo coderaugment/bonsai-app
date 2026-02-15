@@ -5,7 +5,8 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: ticketId } = await params;
+  const { id } = await params;
+  const ticketId = Number(id);
   const entries = await getAuditLog(ticketId);
 
   const parsed = entries.map((e) => ({

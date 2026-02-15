@@ -7,7 +7,7 @@ import { ticketTypes } from "@/lib/ticket-types";
 
 interface TicketCardProps {
   ticket: Ticket;
-  onDragStart?: (ticketId: string) => void;
+  onDragStart?: (ticketId: number) => void;
   onDragEnd?: () => void;
   onEdit?: (ticket: Ticket) => void;
   onViewDocument?: (ticket: Ticket, docType: "research" | "implementation_plan") => void;
@@ -88,7 +88,7 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocum
       onDragStart={(e) => {
         setDragging(true);
         e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", ticket.id);
+        e.dataTransfer.setData("text/plain", String(ticket.id));
         onDragStart?.(ticket.id);
       }}
       onDragEnd={() => {
@@ -145,6 +145,20 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocum
           >
             {style.label}
           </span>
+          {ticket.isEpic && (
+            <span
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold"
+              style={{
+                backgroundColor: "rgba(249, 115, 22, 0.18)",
+                color: "#fb923c",
+              }}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+              </svg>
+              Epic
+            </span>
+          )}
           {ticket.state === "shipped" && ticket.mergedAt && (
             <span
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold"
@@ -191,6 +205,19 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocum
         {ticket.title}
       </h3>
 
+      {/* Parent epic label */}
+      {ticket.epicId && ticket.epicTitle && (
+        <div
+          className="flex items-center gap-1.5 mb-2.5 text-xs font-medium"
+          style={{ color: "#fb923c" }}
+        >
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+          </svg>
+          Epic: {ticket.epicTitle}
+        </div>
+      )}
+
       {/* Description */}
       <div
         className="text-[15px] leading-relaxed mb-5 font-normal"
@@ -213,6 +240,29 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocum
             : ticket.description}
         </ReactMarkdown>
       </div>
+
+      {/* Epic progress bar */}
+      {ticket.isEpic && (ticket.childCount ?? 0) > 0 && (
+        <div className="mb-5">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-medium" style={{ color: "#fb923c" }}>
+              {ticket.childrenShipped} / {ticket.childCount} shipped
+            </span>
+            <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>
+              {Math.round(((ticket.childrenShipped ?? 0) / (ticket.childCount ?? 1)) * 100)}%
+            </span>
+          </div>
+          <div className="w-full h-2 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(249, 115, 22, 0.15)" }}>
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${((ticket.childrenShipped ?? 0) / (ticket.childCount ?? 1)) * 100}%`,
+                backgroundColor: "#fb923c",
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Footer: avatar stack + action icons */}
       <div className="flex items-center justify-between">

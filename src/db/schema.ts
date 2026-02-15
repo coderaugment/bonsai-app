@@ -103,7 +103,7 @@ export const personas = sqliteTable("personas", {
 });
 
 export const tickets = sqliteTable("tickets", {
-  id: text("id").primaryKey(),
+  id: integer("id").primaryKey({ autoIncrement: true }),
   title: text("title").notNull(),
   description: text("description"),
   type: text("type", { enum: ["feature", "bug", "chore"] }).notNull(),
@@ -139,13 +139,16 @@ export const tickets = sqliteTable("tickets", {
   // Merge tracking
   mergedAt: text("merged_at"),
   mergeCommit: text("merge_commit"),
+  // Epic hierarchy
+  isEpic: integer("is_epic", { mode: "boolean" }).default(false),
+  epicId: integer("epic_id"), // references tickets.id (self-ref handled at app layer)
   // Soft delete
   deletedAt: text("deleted_at"),
 });
 
 export const comments = sqliteTable("comments", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  ticketId: text("ticket_id").notNull().references(() => tickets.id),
+  ticketId: integer("ticket_id").notNull().references(() => tickets.id),
   authorType: text("author_type", { enum: ["human", "agent", "system"] }).notNull(),
   authorId: integer("author_id"), // user id if human
   personaId: text("persona_id").references(() => personas.id), // persona id if agent
@@ -157,7 +160,7 @@ export const comments = sqliteTable("comments", {
 
 export const ticketDocuments = sqliteTable("ticket_documents", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  ticketId: text("ticket_id").notNull().references(() => tickets.id),
+  ticketId: integer("ticket_id").notNull().references(() => tickets.id),
   type: text("type", { enum: ["research", "implementation_plan", "research_critique", "plan_critique", "design"] }).notNull(),
   content: text("content").notNull(),
   version: integer("version").default(1),
@@ -168,7 +171,7 @@ export const ticketDocuments = sqliteTable("ticket_documents", {
 
 export const ticketAttachments = sqliteTable("ticket_attachments", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  ticketId: text("ticket_id").notNull().references(() => tickets.id, { onDelete: "cascade" }),
+  ticketId: integer("ticket_id").notNull().references(() => tickets.id, { onDelete: "cascade" }),
   filename: text("filename").notNull(),
   mimeType: text("mime_type").notNull(),
   data: text("data").notNull(), // base64 data URL
@@ -214,7 +217,7 @@ export const extractedItems = sqliteTable("extracted_items", {
 // ============================================================================
 export const ticketAuditLog = sqliteTable("ticket_audit_log", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  ticketId: text("ticket_id").notNull(), // No FK — audit survives ticket deletion
+  ticketId: integer("ticket_id").notNull(), // No FK — audit survives ticket deletion
   event: text("event").notNull(), // e.g. "ticket_created", "state_changed", "comment_added"
   actorType: text("actor_type", { enum: ["human", "agent", "system"] }).notNull(),
   actorId: text("actor_id"), // user.id or persona.id
@@ -231,7 +234,7 @@ export type TicketAuditLogRow = typeof ticketAuditLog.$inferSelect;
 // ============================================================================
 export const agentRuns = sqliteTable("agent_runs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  ticketId: text("ticket_id").notNull(),
+  ticketId: integer("ticket_id").notNull(),
   personaId: text("persona_id").notNull(),
   phase: text("phase").notNull(), // research, planning, implementation, conversational, test
   status: text("status", {

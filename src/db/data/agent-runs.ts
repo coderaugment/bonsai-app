@@ -5,7 +5,7 @@ import { eq, and, desc, sql } from "drizzle-orm";
 const STALE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 export function insertAgentRun(params: {
-  ticketId: string;
+  ticketId: number;
   personaId: string;
   phase: string;
   tools?: string[];
@@ -44,7 +44,7 @@ export function insertAgentRun(params: {
 }
 
 export function completeAgentRun(
-  ticketId: string,
+  ticketId: number,
   personaId: string,
   status: "completed" | "failed" | "timeout",
   errorMessage?: string
@@ -85,7 +85,7 @@ export function completeAgentRun(
 }
 
 export function touchAgentRunReport(
-  ticketId: string,
+  ticketId: number,
   personaId: string
 ): Promise<void> {
   // Update lastReportAt on the active run
@@ -115,7 +115,7 @@ export function touchAgentRunReport(
 
 interface AgentRunWithContext {
   id: number;
-  ticketId: string;
+  ticketId: number;
   ticketTitle: string | null;
   personaId: string;
   personaName: string | null;
@@ -133,7 +133,7 @@ interface AgentRunWithContext {
   errorMessage: string | null;
 }
 
-export function getAgentRuns(limit: number = 50): Promise<AgentRunWithContext[]> {
+export function getAgentRuns(limit: number = 50, projectId?: number): Promise<AgentRunWithContext[]> {
   // First, mark stale runs (>30 min) as timeout
   const cutoff = new Date(Date.now() - STALE_TIMEOUT_MS).toISOString();
   db.update(agentRuns)
@@ -148,6 +148,8 @@ export function getAgentRuns(limit: number = 50): Promise<AgentRunWithContext[]>
       )
     )
     .run();
+
+  const projectFilter = projectId ? sql`AND t.project_id = ${projectId}` : sql``;
 
   // Return runs joined with persona + ticket info
   const rows = db.all(sql`
@@ -172,6 +174,7 @@ export function getAgentRuns(limit: number = 50): Promise<AgentRunWithContext[]>
     FROM agent_runs ar
     LEFT JOIN personas p ON p.id = ar.persona_id
     LEFT JOIN tickets t ON t.id = ar.ticket_id
+    WHERE 1=1 ${projectFilter}
     ORDER BY ar.started_at DESC
     LIMIT ${limit}
   `) as AgentRunWithContext[];

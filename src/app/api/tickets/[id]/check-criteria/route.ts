@@ -8,7 +8,8 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: ticketId } = await params;
+  const { id } = await params;
+  const ticketId = Number(id);
   const { index } = await req.json();
 
   if (typeof index !== "number" || index < 0) {
@@ -52,7 +53,7 @@ export async function POST(
   const newCriteria = lines.join("\n");
 
   // Check if ALL criteria are now checked off
-  const hasUnchecked = lines.some((l) => /^(\s*)-\s*\[ \]/.test(l));
+  const hasUnchecked = lines.some((l: string) => /^(\s*)-\s*\[ \]/.test(l));
   const allChecked = !hasUnchecked;
 
   const updates: Record<string, unknown> = { acceptanceCriteria: newCriteria };

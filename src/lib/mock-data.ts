@@ -39,7 +39,7 @@ export const project: Project = {
 
 export const tickets: Ticket[] = [
   {
-    id: "tkt_01",
+    id: 1,
     title: "Design System Foundation",
     description:
       "Create base color tokens, typography scale, and spacing system for the Bonsai UI. Establish dark theme as default.",
@@ -53,7 +53,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-01-28",
   },
   {
-    id: "tkt_02",
+    id: 2,
     title: "Project Board Kanban View",
     description:
       "Build the main kanban board with drag-and-drop columns for ticket states. Support filtering by type and assignee.",
@@ -67,7 +67,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-01-30",
   },
   {
-    id: "tkt_03",
+    id: 3,
     title: "Heartbeat Service Integration",
     description:
       "Connect the webapp to the heartbeat status API. Show agent activity, queue depth, and last run time on the dashboard.",
@@ -81,7 +81,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-01-31",
   },
   {
-    id: "tkt_04",
+    id: 4,
     title: "Ticket Detail View",
     description:
       "Full ticket detail page with description, acceptance criteria, comment thread, and agent activity log.",
@@ -93,7 +93,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-02-01",
   },
   {
-    id: "tkt_05",
+    id: 5,
     title: "Agent Persona Configuration",
     description:
       "Settings page for managing agent personas — name, color, avatar, and default tool profile.",
@@ -105,7 +105,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-02-01",
   },
   {
-    id: "tkt_06",
+    id: 6,
     title: "Fix Column Overflow on Small Screens",
     description:
       "Board columns overflow horizontally without scroll indicators on viewports below 1280px.",
@@ -117,7 +117,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-02-02",
   },
   {
-    id: "tkt_07",
+    id: 7,
     title: "SQLite Database Schema",
     description:
       "Set up Prisma with SQLite. Create models for Project, Ticket, Comment, Document, AgentRun, and Persona.",
@@ -131,7 +131,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-01-29",
   },
   {
-    id: "tkt_08",
+    id: 8,
     title: "Comment Thread Component",
     description:
       "Threaded comment UI for ticket detail view. Support human and agent comments with different styling.",
@@ -143,7 +143,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-02-02",
   },
   {
-    id: "tkt_09",
+    id: 9,
     title: "Startup Token Auth",
     description:
       "Implement Jupyter-style token auth. Generate token on first run, validate via cookie and Authorization header.",
@@ -157,7 +157,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-01-28",
   },
   {
-    id: "tkt_10",
+    id: 10,
     title: "Onboarding Wizard Flow",
     description:
       "First-run setup wizard: API key entry, project creation, heartbeat service install, vault initialization.",
@@ -171,7 +171,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-02-01",
   },
   {
-    id: "tkt_11",
+    id: 11,
     title: "Git Operations Module",
     description:
       "Implement clone, branch, commit, push operations for agent workspaces. Validate paths and prevent escapes.",
@@ -185,7 +185,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-01-30",
   },
   {
-    id: "tkt_12",
+    id: 12,
     title: "Clean Up Stale Agent Locks",
     description:
       "Add automated cleanup of agent locks older than 45 minutes. Prevent stuck tickets after heartbeat crashes.",
@@ -199,7 +199,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-02-03",
   },
   {
-    id: "tkt_13",
+    id: 13,
     title: "Ticket State Transition Validation",
     description:
       "Enforce valid state transitions. Backlog can only move to Research, Research to Ready, etc.",
@@ -213,7 +213,7 @@ export const tickets: Ticket[] = [
     createdAt: "2026-02-03",
   },
   {
-    id: "tkt_14",
+    id: 14,
     title: "Sidebar Navigation with Active States",
     description:
       "Icon-based sidebar with hover tooltips and active route highlighting. Include home, board, projects, settings.",

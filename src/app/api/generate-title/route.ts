@@ -24,22 +24,31 @@ export async function POST(req: Request) {
       text: `Generate acceptance criteria for this task as a markdown checklist. Each item should be a concrete, testable condition. Use "- [ ]" format. Return 3-6 items, ONLY the checklist, no other text.\n\nDescription:\n${description.trim()}`,
     },
     enhance: {
-      text: `You are a copy editor for kanban tickets. Reorganize and clean up the messy text below into a well-structured ticket description.
+      text: `You are a copy editor for kanban tickets. Clean up the text below into a well-structured ticket description.
 
 What to fix:
-- Turn bare word lists into inline comma-separated mentions within sentences
-- Turn sentence fragments into complete sentences
-- Group related ideas into short paragraphs
 - Fix typos, spelling, grammar
+- Turn sentence fragments into complete sentences
 - Strip filler words ("so basically", "like", "I think", "right")
+- Group related ideas into coherent paragraphs
 
-What to keep:
-- ALL details, requirements, and specifics — never drop information
-- The author's casual/developer voice — don't make it sound corporate
-- No "please", "utilize", "including but not limited to", or other formal padding
-- Plain text only, no markdown, no headers, no bullet points, no quotes
+What to PRESERVE exactly as-is:
+- ALL details, numbers, specifics, technical terms — never drop or summarize information
+- Markdown formatting: headers, bullet points, tables, code blocks, bold/italic
+- ALL image references: ![...](...) tags MUST be kept exactly as-is, including their data URLs — do NOT modify, remove, or summarize them
+- ASCII diagrams, directory trees, architecture diagrams
+- Citations, references, links, footnotes
+- The author's voice and tone — don't make it formal or corporate
+- Structure and hierarchy — if the author used sections, keep them
 
-The goal is: messy notes in, organized readable ticket out. Same info, same voice, better structure.
+What NOT to do:
+- Do NOT flatten structured content (tables, lists, code blocks) into prose paragraphs
+- Do NOT remove or rewrite citations/references
+- Do NOT remove, modify, or drop any ![image](...) references — they are attached screenshots
+- Do NOT add filler ("please", "utilize", "including but not limited to")
+- Do NOT summarize — the output should be the same length or longer than the input
+
+The goal is: messy notes in, polished version out. Same info, same structure, same voice, just cleaner.
 
 Return ONLY the cleaned text, nothing else.
 

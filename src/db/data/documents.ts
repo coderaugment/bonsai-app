@@ -9,7 +9,7 @@ type DocType =
   | "plan_critique"
   | "design";
 
-export function getDocumentsByTicket(ticketId: string) {
+export function getDocumentsByTicket(ticketId: number) {
   const rows = db
     .select()
     .from(ticketDocuments)
@@ -19,7 +19,7 @@ export function getDocumentsByTicket(ticketId: string) {
   return asAsync(rows);
 }
 
-export function getDocumentByType(ticketId: string, type: DocType) {
+export function getDocumentByType(ticketId: number, type: DocType) {
   const row = db
     .select()
     .from(ticketDocuments)
@@ -34,7 +34,7 @@ export function getDocumentByType(ticketId: string, type: DocType) {
 }
 
 export function getLatestDocumentVersion(
-  ticketId: string,
+  ticketId: number,
   type: DocType
 ): Promise<number> {
   const row = db
@@ -53,7 +53,7 @@ export function getLatestDocumentVersion(
 }
 
 export function createDocument(data: {
-  ticketId: string;
+  ticketId: number;
   type: DocType;
   content: string;
   version: number;
@@ -93,7 +93,7 @@ export function updateDocument(
 }
 
 export function deleteDocumentsByType(
-  ticketId: string,
+  ticketId: number,
   type: DocType
 ): Promise<void> {
   return runAsync(() => {
@@ -109,7 +109,7 @@ export function deleteDocumentsByType(
 }
 
 /** Get the latest document for a ticket by type (highest version) */
-export function getLatestDocumentByType(ticketId: string, type: DocType) {
+export function getLatestDocumentByType(ticketId: number, type: DocType) {
   const row = db
     .select()
     .from(ticketDocuments)
@@ -126,7 +126,7 @@ export function getLatestDocumentByType(ticketId: string, type: DocType) {
 }
 
 /** Get documents for a ticket ordered by version desc (used in queries.ts compat) */
-export function getDocumentsByTicketVersionDesc(ticketId: string) {
+export function getDocumentsByTicketVersionDesc(ticketId: number) {
   const rows = db
     .select()
     .from(ticketDocuments)

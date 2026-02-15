@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { formatTicketSlug } from "@/types";
 import { getTicketById, getProjectById } from "@/db/data";
 import { spawn, execSync } from "node:child_process";
 import * as path from "node:path";
@@ -11,11 +12,12 @@ const WORKTREES_DIR = path.join(BONSAI_DIR, "worktrees");
 
 function resolveWorkspace(
   project: { githubRepo: string | null; slug: string; localPath: string | null },
-  ticketId: string
+  ticketId: number
 ): string {
   // Check for existing worktree first
   const slug = project.slug || project.githubRepo || "unknown";
-  const worktreePath = path.join(WORKTREES_DIR, slug, ticketId);
+  const ticketSlug = formatTicketSlug(ticketId);
+  const worktreePath = path.join(WORKTREES_DIR, slug, ticketSlug);
   if (fs.existsSync(worktreePath)) return worktreePath;
 
   // Fall back to main repo
@@ -40,7 +42,8 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: ticketId } = await params;
+  const { id } = await params;
+  const ticketId = Number(id);
 
   const ticket = await getTicketById(ticketId);
   if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
@@ -73,7 +76,8 @@ export async function POST(
   }
 
   // Spawn dev server in background
-  const logFile = path.join(BONSAI_DIR, "sessions", `preview-${ticketId}.log`);
+  const ticketSlug = formatTicketSlug(ticketId);
+  const logFile = path.join(BONSAI_DIR, "sessions", `preview-${ticketSlug}.log`);
   const logDir = path.dirname(logFile);
   if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 

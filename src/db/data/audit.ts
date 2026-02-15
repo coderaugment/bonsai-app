@@ -3,7 +3,7 @@ import { ticketAuditLog } from "../schema";
 import { eq, asc } from "drizzle-orm";
 
 export function logAuditEvent(params: {
-  ticketId: string;
+  ticketId: number;
   event: string;
   actorType: "human" | "agent" | "system";
   actorId?: string | number | null;
@@ -26,7 +26,7 @@ export function logAuditEvent(params: {
   });
 }
 
-export function getAuditLog(ticketId: string) {
+export function getAuditLog(ticketId: number) {
   const rows = db
     .select()
     .from(ticketAuditLog)

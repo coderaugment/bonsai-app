@@ -13,8 +13,13 @@ export interface TicketCreator {
   avatarUrl?: string;
 }
 
+/** Format integer ticket ID as display slug: 1 → "tkt_01" */
+export function formatTicketSlug(id: number): string {
+  return `tkt_${String(id).padStart(2, "0")}`;
+}
+
 export interface Ticket {
-  id: string;
+  id: number;
   title: string;
   description: string;
   type: TicketType;
@@ -41,6 +46,12 @@ export interface Ticket {
   // Merge tracking
   mergedAt?: string;
   mergeCommit?: string;
+  // Epic hierarchy
+  isEpic?: boolean;
+  epicId?: number;
+  epicTitle?: string;       // parent epic's title (for child cards)
+  childCount?: number;      // how many children (for epic cards)
+  childrenShipped?: number; // how many children shipped (for progress)
   // All personas who have interacted with this ticket
   participants?: Persona[];
 }
@@ -49,7 +60,7 @@ export type TicketDocumentType = "research" | "implementation_plan" | "research_
 
 export interface TicketDocument {
   id: number;
-  ticketId: string;
+  ticketId: number;
   type: TicketDocumentType;
   content: string;
   version: number;
@@ -151,7 +162,7 @@ export interface CommentAttachment {
 
 export interface TicketAttachment {
   id: number;
-  ticketId: string;
+  ticketId: number;
   filename: string;
   mimeType: string;
   data: string; // base64 data URL
@@ -162,7 +173,7 @@ export interface TicketAttachment {
 
 export interface Comment {
   id: number;
-  ticketId: string;
+  ticketId: number;
   authorType: "human" | "agent" | "system";
   author?: {
     name: string;
@@ -207,7 +218,7 @@ export type AgentRunStatus = "running" | "completed" | "failed" | "timeout" | "a
 
 export interface AgentRun {
   id: number;
-  ticketId: string;
+  ticketId: number;
   ticketTitle: string | null;
   personaId: string;
   personaName: string | null;

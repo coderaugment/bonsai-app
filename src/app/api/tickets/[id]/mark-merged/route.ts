@@ -7,7 +7,8 @@ interface RouteContext {
 
 // POST /api/tickets/[id]/mark-merged - Mark a ticket as merged to main
 export async function POST(req: Request, context: RouteContext) {
-  const { id: ticketId } = await context.params;
+  const { id } = await context.params;
+  const ticketId = Number(id);
   const { mergeCommit } = await req.json();
 
   // Validate that ticket exists and is in 'ship' state
@@ -40,7 +41,8 @@ export async function POST(req: Request, context: RouteContext) {
 
 // DELETE /api/tickets/[id]/mark-merged - Unmark as merged
 export async function DELETE(req: Request, context: RouteContext) {
-  const { id: ticketId } = await context.params;
+  const { id } = await context.params;
+  const ticketId = Number(id);
 
   await updateTicket(ticketId, {
     mergedAt: null,

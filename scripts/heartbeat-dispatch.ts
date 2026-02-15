@@ -22,6 +22,7 @@ import { plannerRole } from "../../agent/src/roles/planner.js";
 import { developerRole } from "../../agent/src/roles/developer.js";
 import { buildSystemPrompt } from "../src/lib/prompt-builder.js";
 import { getVault } from "../src/lib/vault.js";
+import { isCreditError, computePauseUntil, isPaused, pauseRemainingMs } from "../src/lib/credit-pause.js";
 
 const execAsync = promisify(exec);
 
@@ -67,7 +68,7 @@ db.pragma("foreign_keys = ON");
 
 // ── Types ───────────────────────────────────────
 interface TicketRow {
-  id: string;
+  id: number;
   title: string;
   description: string | null;
   type: string;
@@ -116,6 +117,27 @@ interface ProjectRow {
 
 interface DocRow {
   content: string;
+}
+
+// ── Settings (direct SQL, no Drizzle) ───────────
+const getSettingStmt = db.prepare(`SELECT value FROM settings WHERE key = ?`);
+const upsertSettingStmt = db.prepare(`
+  INSERT INTO settings (key, value) VALUES (?, ?)
+  ON CONFLICT(key) DO UPDATE SET value = excluded.value
+`);
+const deleteSettingStmt = db.prepare(`DELETE FROM settings WHERE key = ?`);
+
+function getSettingSync(key: string): string | null {
+  const row = getSettingStmt.get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+function setSettingSync(key: string, value: string) {
+  upsertSettingStmt.run(key, value);
+}
+
+function deleteSettingSync(key: string) {
+  deleteSettingStmt.run(key);
 }
 
 // ── Queries ─────────────────────────────────────
@@ -237,7 +259,7 @@ const completeRunByLookupStmt = db.prepare(`
   )
 `);
 
-function postAgentComment(ticketId: string, personaId: string, content: string) {
+function postAgentComment(ticketId: number, personaId: string, content: string) {
   insertComment.run(ticketId, personaId, content);
   bumpCommentCount.run(ticketId);
 }
@@ -284,7 +306,7 @@ function extractSummary(markdown: string, maxLen: number = 2000): string {
   return text;
 }
 
-function markTicketPickedUp(ticketId: string) {
+function markTicketPickedUp(ticketId: number) {
   markTicketPickedUpStmt.run(new Date().toISOString(), ticketId);
 }
 
@@ -321,7 +343,11 @@ const WORKTREES_DIR = path.join(process.env.HOME || "~", ".bonsai", "worktrees")
  * @param ticketId - Ticket ID (used for branch and worktree names)
  * @returns Absolute path to worktree or null if main repo not found
  */
-function ensureWorktree(project: ProjectRow, ticketId: string): string | null {
+function formatTicketSlug(id: number): string {
+  return `tkt_${String(id).padStart(2, "0")}`;
+}
+
+function ensureWorktree(project: ProjectRow, ticketId: number): string | null {
   const mainRepo = resolveMainRepo(project);
   if (!fs.existsSync(mainRepo)) {
     log(`  ERROR: main repo not found at ${mainRepo}`);
@@ -336,8 +362,9 @@ function ensureWorktree(project: ProjectRow, ticketId: string): string | null {
   }
 
   const slug = project.slug || project.github_repo || "unknown";
-  const worktreePath = path.join(WORKTREES_DIR, slug, ticketId);
-  const branchName = `ticket/${ticketId}`;
+  const ticketSlug = formatTicketSlug(ticketId);
+  const worktreePath = path.join(WORKTREES_DIR, slug, ticketSlug);
+  const branchName = `ticket/${ticketSlug}`;
 
   // If worktree already exists, reuse it
   if (fs.existsSync(worktreePath)) {
@@ -453,7 +480,7 @@ async function runClaude(
   try {
     await execAsync(cmd, {
       cwd,
-      env: { ...process.env, ...extraEnv, DISABLE_AUTOUPDATER: "1" },
+      env: { ...process.env, ...extraEnv, DISABLE_AUTOUPDATER: "1", CLAUDECODE: "" },
       timeout: timeoutMs,
       maxBuffer: 1024,
       killSignal: "SIGTERM",
@@ -713,6 +740,17 @@ async function runAgentPhase(
 
     log(`  [${ticket.id}] ${phase} finished: code=${result.code}, output=${result.stdout.length} chars, timedOut=${result.timedOut}`);
 
+    // ── Credit error detection ──────────────────
+    if (result.code !== 0 && isCreditError(result.stderr)) {
+      const pauseUntil = computePauseUntil(result.stderr);
+      setSettingSync("credits_paused_until", pauseUntil);
+      setSettingSync("credits_pause_reason", result.stderr.slice(0, 500));
+      log(`  [${ticket.id}] CREDIT LIMIT HIT — pausing all dispatches until ${pauseUntil}`);
+      // Clear agent activity so ticket can be retried after resume
+      markAgentActivity.run(null, null, ticket.id);
+      return null;
+    }
+
     const content = result.stdout.trim();
     if (!result.timedOut && result.code === 0 && content.length > 100) {
       return content;
@@ -737,6 +775,21 @@ async function runAgentPhase(
 async function dispatch(maxTickets: number) {
   log("heartbeat dispatch starting (work scheduler mode)...");
 
+  // ── Credit pause check ──────────────────────────
+  const pausedUntil = getSettingSync("credits_paused_until");
+  if (isPaused(pausedUntil)) {
+    const remaining = pauseRemainingMs(pausedUntil);
+    const mins = Math.ceil(remaining / 60_000);
+    log(`SKIPPED: credits paused until ${pausedUntil} (${mins}m remaining)`);
+    return;
+  }
+  // Auto-clear expired pause
+  if (pausedUntil) {
+    log(`credits pause expired (was ${pausedUntil}), clearing`);
+    deleteSettingSync("credits_paused_until");
+    deleteSettingSync("credits_pause_reason");
+  }
+
   // Load API keys from vault for agent environment
   const vaultEnv = await loadVaultEnv();
   const vaultKeyCount = Object.keys(vaultEnv).length;
@@ -755,7 +808,7 @@ async function dispatch(maxTickets: number) {
   let completed = 0;
   const skipped = 0;
 
-  const claimedTickets = new Set<string>(); // prevent two personas grabbing same ticket
+  const claimedTickets = new Set<number>(); // prevent two personas grabbing same ticket
   const busyPersonas = new Set<string>(); // prevent one persona doing two jobs at once
 
   // ── Phase 1: Collect all dispatchable jobs ──────────

@@ -23,7 +23,7 @@ interface DispatchParams {
 
 export function fireDispatch(
   origin: string,
-  ticketId: string,
+  ticketId: number,
   params: DispatchParams,
   label: string = "dispatch"
 ): void {
@@ -48,7 +48,7 @@ function retryOnce(
   url: string,
   headers: Record<string, string>,
   body: string,
-  ticketId: string,
+  ticketId: number,
   label: string
 ): void {
   fetch(url, { method: "POST", headers, body })

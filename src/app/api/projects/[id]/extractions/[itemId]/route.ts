@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateExtractionStatus, getExtractionById } from "@/db/data/notes";
 import { getUser } from "@/db/data/users";
-import { generateTicketId, createTicket } from "@/db/data/tickets";
+import { createTicket } from "@/db/data/tickets";
 
 export async function PATCH(
   req: NextRequest,
@@ -29,11 +29,7 @@ export async function PATCH(
     if (item) {
       const user = await getUser();
 
-      // Generate next ticket ID
-      const ticketId = await generateTicketId();
-
       const ticket = await createTicket({
-        id: ticketId,
         title: item.title,
         description: item.description,
         type: item.type as "feature" | "bug" | "chore",

@@ -44,6 +44,9 @@ function scoreTicket(t: Ticket): number {
   // Returned from verification = needs attention
   if (t.returnedFromVerification) score += 150;
 
+  // Epics near top of columns
+  if (t.isEpic) score += 30;
+
   // Bugs above features above chores
   if (t.type === "bug") score += 50;
   else if (t.type === "chore") score -= 10;
@@ -68,13 +71,15 @@ function scoreTicket(t: Ticket): number {
 interface BoardViewProps {
   tickets: Ticket[];
   projectId: string;
+  leadAvatar?: string;
+  leadName?: string;
 }
 
-export function BoardView({ tickets: initialTickets, projectId }: BoardViewProps) {
+export function BoardView({ tickets: initialTickets, projectId, leadAvatar, leadName }: BoardViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tickets, setTickets] = useState(initialTickets);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<number | null>(null);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [initialDocType, setInitialDocType] = useState<"research" | "implementation_plan" | undefined>();
 
@@ -113,7 +118,7 @@ export function BoardView({ tickets: initialTickets, projectId }: BoardViewProps
   const openTicketParam = searchParams.get("openTicket");
   useEffect(() => {
     if (!openTicketParam) return;
-    const match = tickets.find((t) => t.id === openTicketParam);
+    const match = tickets.find((t) => t.id === Number(openTicketParam));
     if (match) {
       setSelectedTicket(match);
       // Clean the query param from the URL
@@ -132,7 +137,7 @@ export function BoardView({ tickets: initialTickets, projectId }: BoardViewProps
     {} as Record<TicketState, Ticket[]>
   );
 
-  function handleDragStart(ticketId: string) {
+  function handleDragStart(ticketId: number) {
     setDraggingId(ticketId);
   }
 
@@ -193,6 +198,8 @@ export function BoardView({ tickets: initialTickets, projectId }: BoardViewProps
         ticket={selectedTicket}
         initialDocType={initialDocType}
         projectId={projectId}
+        leadAvatar={leadAvatar}
+        leadName={leadName}
         onClose={() => { setSelectedTicket(null); setInitialDocType(undefined); }}
         onDelete={(ticketId) => {
           setTickets((prev) => prev.filter((t) => t.id !== ticketId));

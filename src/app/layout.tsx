@@ -17,6 +17,13 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Bonsai",
   description: "AI-powered developer workspace",
+  icons: {
+    icon: [
+      { url: "/bonsai-os-logo-l.png", media: "(prefers-color-scheme: dark)" },
+      { url: "/bonsai-os-logo-d.png", media: "(prefers-color-scheme: light)" },
+    ],
+    apple: "/bonsai-os-logo-d.png",
+  },
 };
 
 export default async function RootLayout({

@@ -4,6 +4,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
+import { formatTicketSlug } from "@/types";
 import type { Ticket, TicketType, TicketState, Comment, CommentAttachment, TicketDocument, TicketAttachment, Persona } from "@/types";
 import { ticketTypes } from "@/lib/ticket-types";
 import { useVoiceInput } from "@/hooks/use-voice-input";
@@ -14,8 +15,10 @@ interface TicketDetailModalProps {
   ticket: Ticket | null;
   initialDocType?: "research" | "implementation_plan";
   projectId?: string;
+  leadAvatar?: string;
+  leadName?: string;
   onClose: () => void;
-  onDelete?: (ticketId: string) => void;
+  onDelete?: (ticketId: number) => void;
 }
 
 const typeOptions: TicketType[] = ["feature", "bug", "chore"];
@@ -110,7 +113,7 @@ function highlightMentionsInChildren(children: React.ReactNode, personas: Person
   });
 }
 
-export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, onDelete }: TicketDetailModalProps) {
+export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvatar, leadName, onClose, onDelete }: TicketDetailModalProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -124,11 +127,19 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   const [type, setType] = useState<TicketType>("feature");
   const [state, setState] = useState<TicketState>("planning");
 
+  // Epic state
+  const [isEpic, setIsEpic] = useState(false);
+  const [epicChildren, setEpicChildren] = useState<Array<{ id: string; title: string; type: string; state: string }>>([]);
+  const [showCreateChild, setShowCreateChild] = useState(false);
+  const [newChildTitle, setNewChildTitle] = useState("");
+  const [creatingChild, setCreatingChild] = useState(false);
+
   // Attachments state
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [processingAttachmentId, setProcessingAttachmentId] = useState<number | null>(null);
+  const [attachmentDragOver, setAttachmentDragOver] = useState(false);
 
   // Comments state
   const [comments, setComments] = useState<Comment[]>([]);
@@ -229,6 +240,11 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
       setAcceptanceCriteria(ticket.acceptanceCriteria || "");
       setType(ticket.type);
       setState(ticket.state);
+      setIsEpic(ticket.isEpic ?? false);
+      setEpicChildren([]);
+      setShowCreateChild(false);
+      setNewChildTitle("");
+      if (ticket.isEpic) loadEpicChildren(ticket.id);
       baselineRef.current = {
         title: ticket.title,
         description: ticket.description || "",
@@ -389,7 +405,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     return () => clearInterval(poll);
   }, [ticketId, expandedDocId]);
 
-  async function loadComments(ticketId: string) {
+  async function loadComments(ticketId: number) {
     setLoadingComments(true);
     try {
       const res = await fetch(`/api/comments?ticketId=${ticketId}`);
@@ -402,7 +418,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   }
 
   // Lightweight refresh for docs & attachments (called when new comments arrive)
-  async function refreshDocumentsAndAttachments(tid: string) {
+  async function refreshDocumentsAndAttachments(tid: number) {
     try {
       const [docRes, attRes] = await Promise.all([
         fetch(`/api/tickets/${tid}/documents`),
@@ -433,7 +449,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     } catch { /* non-critical */ }
   }
 
-  async function loadDocuments(ticketId: string, autoExpandType?: "research" | "implementation_plan") {
+  async function loadDocuments(ticketId: number, autoExpandType?: "research" | "implementation_plan") {
     setLoadingDocuments(true);
     try {
       const res = await fetch(`/api/tickets/${ticketId}/documents`);
@@ -455,7 +471,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
-  async function loadAttachments(ticketId: string) {
+  async function loadAttachments(ticketId: number) {
     try {
       const res = await fetch(`/api/tickets/${ticketId}/attachments`);
       const data = await res.json();
@@ -465,7 +481,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
-  async function loadAuditLog(ticketId: string) {
+  async function loadAuditLog(ticketId: number) {
     setLoadingAudit(true);
     try {
       const res = await fetch(`/api/tickets/${ticketId}/audit`);
@@ -473,6 +489,78 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
       setAuditLog(data.audit || []);
     } finally {
       setLoadingAudit(false);
+    }
+  }
+
+  async function loadEpicChildren(tid: number) {
+    try {
+      const res = await fetch(`/api/tickets/${tid}/children`);
+      const data = await res.json();
+      setEpicChildren(Array.isArray(data) ? data : []);
+    } catch { /* non-critical */ }
+  }
+
+  async function handleToggleEpic() {
+    if (!ticket) return;
+    const newValue = !isEpic;
+    setIsEpic(newValue);
+    await fetch("/api/tickets", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticketId: ticket.id, isEpic: newValue }),
+    });
+    if (newValue) {
+      loadEpicChildren(ticket.id);
+      // Auto-dispatch lead to break down the epic
+      handleAIBreakdown();
+    } else {
+      setEpicChildren([]);
+    }
+    router.refresh();
+  }
+
+  async function handleCreateChild() {
+    if (!ticket || !newChildTitle.trim()) return;
+    setCreatingChild(true);
+    try {
+      await fetch("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newChildTitle.trim(),
+          type: ticket.type,
+          epicId: ticket.id,
+        }),
+      });
+      setNewChildTitle("");
+      setShowCreateChild(false);
+      loadEpicChildren(ticket.id);
+      router.refresh();
+    } finally {
+      setCreatingChild(false);
+    }
+  }
+
+  const [breakingDown, setBreakingDown] = useState(false);
+  async function handleAIBreakdown() {
+    if (!ticket) return;
+    setBreakingDown(true);
+    try {
+      const epicSummary = `${ticket.title}${ticket.description ? `\n\n${ticket.description}` : ""}${ticket.acceptanceCriteria ? `\n\nAcceptance Criteria:\n${ticket.acceptanceCriteria}` : ""}`;
+      await fetch(`/api/tickets/${ticket.id}/dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          commentContent: `This is an epic ticket. Break it down into smaller, focused sub-tickets using the create-sub-ticket tool. Each sub-ticket should be a single, independently workable item.\n\nEpic:\n${epicSummary}`,
+          targetRole: "lead",
+        }),
+      });
+      // Poll for children after a delay (agent takes time)
+      setTimeout(() => loadEpicChildren(ticket.id), 5000);
+      setTimeout(() => loadEpicChildren(ticket.id), 15000);
+      setTimeout(() => loadEpicChildren(ticket.id), 30000);
+    } finally {
+      setBreakingDown(false);
     }
   }
 
@@ -918,6 +1006,48 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
+  async function handleAttachmentDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setAttachmentDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (!files.length || !ticket) return;
+
+    setUploadingAttachment(true);
+    try {
+      for (const file of files) {
+        const reader = new FileReader();
+        const dataUrl = await new Promise<string>((resolve) => {
+          reader.onload = (event) => resolve(event.target?.result as string);
+          reader.readAsDataURL(file);
+        });
+
+        const res = await fetch(`/api/tickets/${ticket.id}/attachments`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: file.name,
+            mimeType: file.type,
+            data: dataUrl,
+            createdByType: "human",
+            createdById: "1",
+          }),
+        });
+
+        if (!res.ok) {
+          console.error("Failed to upload attachment");
+          continue;
+        }
+
+        const newAttachment = await res.json();
+        setAttachments((prev) => [...prev, newAttachment]);
+      }
+      router.refresh();
+    } finally {
+      setUploadingAttachment(false);
+    }
+  }
+
   async function removeAttachment(id: number) {
     if (!ticket) return;
 
@@ -1058,6 +1188,13 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
             className="flex items-start justify-between px-8 py-6 border-b flex-shrink-0"
             style={{ borderColor: "var(--border-subtle)" }}
           >
+            {leadAvatar && (
+              <img
+                src={leadAvatar}
+                alt={leadName || "Lead"}
+                className="w-14 h-14 rounded-full object-cover ring-2 ring-[var(--border-medium)] flex-shrink-0 mt-1 mr-5"
+              />
+            )}
             <div className="flex-1 pr-4">
               <div className="flex items-center gap-3 mb-4">
                 <select
@@ -1078,7 +1215,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                   ))}
                 </select>
                 <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
-                  {ticket.id}
+                  {formatTicketSlug(ticket.id)}
                 </span>
                 <select
                   value={state}
@@ -1111,11 +1248,27 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
               />
             </div>
             <div className="flex items-center gap-1">
+              {/* Make Epic toggle */}
+              <button
+                onClick={handleToggleEpic}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors"
+                style={{
+                  backgroundColor: isEpic ? "rgba(249, 115, 22, 0.18)" : "rgba(255,255,255,0.06)",
+                  color: isEpic ? "#fb923c" : "var(--text-muted)",
+                  border: isEpic ? "1px solid rgba(249, 115, 22, 0.3)" : "1px solid transparent",
+                }}
+                title={isEpic ? "This is an epic — click to demote" : "Make this ticket an epic"}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                </svg>
+                {isEpic ? "Epic" : "Make Epic"}
+              </button>
               {onDelete && (
                 <button
                   onClick={async () => {
                     if (!ticket) return;
-                    if (!confirm(`Delete ${ticket.id}?`)) return;
+                    if (!confirm(`Delete ${formatTicketSlug(ticket.id)}?`)) return;
                     await fetch("/api/tickets", {
                       method: "DELETE",
                       headers: { "Content-Type": "application/json" },
@@ -1234,6 +1387,158 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
               </div>
             </div>
 
+            {/* Sub-tickets (when epic) */}
+            {isEpic && (
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-semibold" style={{ color: "#fb923c" }}>
+                    Sub-tickets
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleAIBreakdown}
+                      disabled={breakingDown}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:brightness-110"
+                      style={{ backgroundColor: "rgba(249, 115, 22, 0.18)", color: "#fb923c" }}
+                      title="Have @lead analyze this epic and create sub-tickets"
+                    >
+                      {breakingDown ? (
+                        <>
+                          <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          Breaking down...
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                          </svg>
+                          @lead break down
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setShowCreateChild(!showCreateChild)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/10"
+                      style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}
+                      title="Manually add a sub-ticket"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                      </svg>
+                      Add manual
+                    </button>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                {epicChildren.length > 0 && (
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-xs font-medium" style={{ color: "#fb923c" }}>
+                        {epicChildren.filter((c) => c.state === "shipped").length} / {epicChildren.length} shipped
+                      </span>
+                      <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>
+                        {Math.round((epicChildren.filter((c) => c.state === "shipped").length / epicChildren.length) * 100)}%
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(249, 115, 22, 0.15)" }}>
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${(epicChildren.filter((c) => c.state === "shipped").length / epicChildren.length) * 100}%`,
+                          backgroundColor: "#fb923c",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Inline child creation form */}
+                {showCreateChild && (
+                  <div className="mb-4 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newChildTitle}
+                      onChange={(e) => setNewChildTitle(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleCreateChild(); if (e.key === "Escape") { setShowCreateChild(false); setNewChildTitle(""); } }}
+                      placeholder="Sub-ticket title..."
+                      autoFocus
+                      className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
+                      style={{
+                        backgroundColor: "var(--bg-input)",
+                        border: "1px solid rgba(249, 115, 22, 0.3)",
+                        color: "var(--text-primary)",
+                      }}
+                    />
+                    <button
+                      onClick={handleCreateChild}
+                      disabled={!newChildTitle.trim() || creatingChild}
+                      className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition-colors disabled:opacity-40"
+                      style={{ backgroundColor: "#f97316" }}
+                    >
+                      {creatingChild ? "..." : "Add"}
+                    </button>
+                  </div>
+                )}
+
+                {/* Children list */}
+                {epicChildren.length > 0 ? (
+                  <div className="space-y-2">
+                    {epicChildren.map((child) => {
+                      const childTypeStyle = ticketTypes[child.type as keyof typeof ticketTypes] || ticketTypes.feature;
+                      const childState = BOARD_STATES.find((s) => s.name === child.state);
+                      return (
+                        <div
+                          key={child.id}
+                          className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-colors hover:bg-white/5"
+                          style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid var(--border-subtle)" }}
+                          onClick={() => {
+                            const url = new URL(window.location.href);
+                            url.searchParams.set("openTicket", String(child.id));
+                            window.location.href = url.toString();
+                          }}
+                        >
+                          <span
+                            className="px-2 py-0.5 rounded text-[10px] font-semibold flex-shrink-0"
+                            style={{
+                              backgroundColor: `color-mix(in srgb, ${childTypeStyle.bg} 15%, transparent)`,
+                              color: childTypeStyle.text,
+                            }}
+                          >
+                            {childTypeStyle.label}
+                          </span>
+                          <span className="text-sm font-medium flex-1 truncate" style={{ color: "var(--text-primary)" }}>
+                            {child.title}
+                          </span>
+                          {childState && (
+                            <span
+                              className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex-shrink-0"
+                              style={{
+                                backgroundColor: `color-mix(in srgb, ${childState.color} 15%, transparent)`,
+                                color: childState.color,
+                              }}
+                            >
+                              {childState.label}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : !showCreateChild && !breakingDown ? (
+                  <div
+                    className="rounded-xl p-5 text-center text-sm"
+                    style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid var(--border-subtle)", color: "var(--text-muted)" }}
+                  >
+                    @lead is analyzing this epic and will create sub-tickets shortly...
+                  </div>
+                ) : null}
+              </div>
+            )}
+
             {/* Research & Plan Documents */}
             <div>
               <label className="block text-sm font-semibold mb-3" style={{ color: "var(--text-secondary)" }}>
@@ -1343,8 +1648,11 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
               {attachments.length === 0 ? (
                 <div
                   className="rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors hover:bg-white/5"
-                  style={{ border: "1px dashed var(--border-medium)", color: "var(--text-muted)" }}
+                  style={{ border: `1px dashed ${attachmentDragOver ? "var(--accent-blue)" : "var(--border-medium)"}`, color: "var(--text-muted)", backgroundColor: attachmentDragOver ? "rgba(59,130,246,0.05)" : undefined }}
                   onClick={() => fileInputRef.current?.click()}
+                  onDrop={handleAttachmentDrop}
+                  onDragOver={(e) => { e.preventDefault(); setAttachmentDragOver(true); }}
+                  onDragLeave={() => setAttachmentDragOver(false)}
                 >
                   <svg className="w-6 h-6 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
@@ -1453,8 +1761,11 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                   })}
                   <div
                     className="aspect-square rounded-lg flex items-center justify-center cursor-pointer transition-colors hover:bg-white/10"
-                    style={{ border: "1px dashed var(--border-medium)", color: "var(--text-muted)" }}
+                    style={{ border: `1px dashed ${attachmentDragOver ? "var(--accent-blue)" : "var(--border-medium)"}`, color: "var(--text-muted)", backgroundColor: attachmentDragOver ? "rgba(59,130,246,0.05)" : undefined }}
                     onClick={() => fileInputRef.current?.click()}
+                    onDrop={handleAttachmentDrop}
+                    onDragOver={(e) => { e.preventDefault(); setAttachmentDragOver(true); }}
+                    onDragLeave={() => setAttachmentDragOver(false)}
                   >
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -1915,7 +2226,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
           {/* Comment input */}
           <CommentInput
             personasList={personasList}
-            placeholder="Write a comment\u2026 @ to mention, # for columns"
+            placeholder="Write a comment… @ to mention, # for columns"
             onPost={handleCommentPost}
             enableVoice
           />

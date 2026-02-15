@@ -22,8 +22,8 @@ interface ColumnProps {
   tickets: Ticket[];
   collapsed: boolean;
   onToggleCollapse: (collapsed: boolean) => void;
-  draggingId: string | null;
-  onDragStart: (ticketId: string) => void;
+  draggingId: number | null;
+  onDragStart: (ticketId: number) => void;
   onDragEnd: () => void;
   onDrop: (targetState: TicketState) => void;
   onEdit?: (ticket: Ticket) => void;

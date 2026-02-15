@@ -13,7 +13,8 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: ticketId } = await params;
+  const { id } = await params;
+  const ticketId = Number(id);
   const { personaId, content, documentId } = await req.json();
 
   if (!content?.trim()) {
@@ -62,6 +63,31 @@ export async function POST(
         silent: true,
       }, `agent-complete/@${p.name}`);
     }
+  }
+
+  // ── Lead triage handoff ─────────────────────────────────
+  // When @lead finishes evaluating a new ticket and didn't promote it to epic,
+  // auto-dispatch researcher and designer with proper phase prompts.
+  const freshTicket = await getTicketById(ticketId);
+  if (
+    completingPersona?.role === "lead" &&
+    freshTicket &&
+    freshTicket.state === "review" &&
+    !freshTicket.isEpic
+  ) {
+    const ticketSummary = `${freshTicket.title}${freshTicket.description ? `\n\n${freshTicket.description}` : ""}${freshTicket.acceptanceCriteria ? `\n\nAcceptance Criteria:\n${freshTicket.acceptanceCriteria}` : ""}`;
+
+    console.log(`[agent-complete] Lead finished triage for ${ticketId} (not epic) — dispatching researcher + designer`);
+
+    fireDispatch("http://localhost:3000", ticketId, {
+      commentContent: `Lead has reviewed this ticket. Research it now.\n\n${ticketSummary}`,
+    }, "lead-triage/research");
+
+    fireDispatch("http://localhost:3000", ticketId, {
+      commentContent: `Lead has reviewed this ticket. Review the UI/UX implications and propose design direction.\n\n${ticketSummary}`,
+      targetRole: "designer",
+      silent: true,
+    }, "lead-triage/designer");
   }
 
   // ── Mark agent run completed ────────────────────────────

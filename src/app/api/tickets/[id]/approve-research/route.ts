@@ -12,7 +12,8 @@ interface RouteContext {
 
 // POST /api/tickets/[id]/approve-research - Human approves research document
 export async function POST(req: Request, context: RouteContext) {
-  const { id: ticketId } = await context.params;
+  const { id } = await context.params;
+  const ticketId = Number(id);
 
   // Get current user (first user for now - in production would use auth)
   const user = await getUser();
@@ -87,7 +88,8 @@ export async function POST(req: Request, context: RouteContext) {
 
 // DELETE /api/tickets/[id]/approve-research - Revoke research approval
 export async function DELETE(req: Request, context: RouteContext) {
-  const { id: ticketId } = await context.params;
+  const { id } = await context.params;
+  const ticketId = Number(id);
 
   await updateTicket(ticketId, {
     researchApprovedAt: null,

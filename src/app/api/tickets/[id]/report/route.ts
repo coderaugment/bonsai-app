@@ -7,7 +7,8 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: ticketId } = await params;
+  const { id } = await params;
+  const ticketId = Number(id);
   const { personaId, content } = await req.json();
 
   if (!content?.trim()) {

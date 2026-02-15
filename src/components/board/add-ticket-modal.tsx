@@ -69,6 +69,9 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
   const [saving, setSaving] = useState(false);
   const [generatingTitle, setGeneratingTitle] = useState(false);
   const [generatingCriteria, setGeneratingCriteria] = useState(false);
+  const [epicId, setEpicId] = useState<string>("");
+  const [isEpic, setIsEpic] = useState(false);
+  const [epicOptions, setEpicOptions] = useState<Array<{ id: string; title: string }>>([]);
   const descRef = useRef<HTMLTextAreaElement>(null);
   const pendingVoiceBlurRef = useRef(false);
 
@@ -89,6 +92,16 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
   const worktreePath = titleSlug
     ? `~/.bonsai/worktrees/${projectSlug}/${titleSlug}`
     : "";
+
+  // Load epic options when modal opens
+  useEffect(() => {
+    if (open) {
+      fetch(`/api/epics`)
+        .then((r) => r.json())
+        .then((data) => setEpicOptions(Array.isArray(data) ? data.map((e: { id: string; title: string }) => ({ id: e.id, title: e.title })) : []))
+        .catch(() => setEpicOptions([]));
+    }
+  }, [open]);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -120,6 +133,13 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [description]);
+
+  // Auto-detect epic when description is large (1000+ chars)
+  useEffect(() => {
+    if (description.length >= 1000 && !isEpic && !epicId) {
+      setIsEpic(true);
+    }
+  }, [description, isEpic, epicId]);
 
   if (!open) return null;
 
@@ -301,6 +321,8 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
         type,
         description: description.trim() || undefined,
         acceptanceCriteria: acceptanceCriteria.trim() || undefined,
+        epicId: epicId || undefined,
+        isEpic: isEpic || undefined,
       }),
     });
     setSaving(false);
@@ -308,6 +330,8 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
     setDescription("");
     setType("feature");
     setAcceptanceCriteria("");
+    setEpicId("");
+    setIsEpic(false);
     onClose();
     router.refresh();
   }
@@ -502,6 +526,66 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
               </div>
             </div>
 
+            {/* Epic toggle */}
+            <div>
+              <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">
+                Scope
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !isEpic;
+                  setIsEpic(next);
+                  if (next) setEpicId(""); // epics can't be children
+                }}
+                className="w-full px-4 py-2.5 rounded-lg text-sm font-medium transition-colors text-left border flex items-center gap-2"
+                style={{
+                  backgroundColor: isEpic ? "rgba(249, 115, 22, 0.12)" : "transparent",
+                  borderColor: isEpic ? "rgba(249, 115, 22, 0.5)" : "var(--border-medium)",
+                  color: isEpic ? "#fb923c" : "var(--text-secondary)",
+                }}
+              >
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                </svg>
+                {isEpic ? "Epic — will be broken down" : "Normal ticket"}
+              </button>
+              {isEpic && (
+                <p className="text-xs mt-1.5 text-[var(--text-muted)]">
+                  {description.length >= 1000 ? "Auto-detected: large description" : "The lead will break this into sub-tickets"}
+                </p>
+              )}
+            </div>
+
+            {/* Parent Epic */}
+            {epicOptions.length > 0 && !isEpic && (
+              <div>
+                <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">
+                  Parent Epic
+                </label>
+                <select
+                  value={epicId}
+                  onChange={(e) => setEpicId(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer appearance-none"
+                  style={{
+                    backgroundColor: epicId ? "rgba(249, 115, 22, 0.12)" : "var(--bg-input)",
+                    border: epicId ? "1px solid rgba(249, 115, 22, 0.3)" : "1px solid var(--border-medium)",
+                    color: epicId ? "#fb923c" : "var(--text-secondary)",
+                    outline: "none",
+                  }}
+                >
+                  <option value="" style={{ backgroundColor: "#1a1a2e", color: "#fff" }}>
+                    None (standalone)
+                  </option>
+                  {epicOptions.map((epic) => (
+                    <option key={epic.id} value={epic.id} style={{ backgroundColor: "#1a1a2e", color: "#fff" }}>
+                      {epic.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* Artifacts */}
             <div>
               <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">
@@ -550,7 +634,7 @@ export function AddTicketModal({ open, onClose, projectSlug }: AddTicketModalPro
             className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
             style={{ backgroundColor: accent }}
           >
-            {saving ? "Creating..." : `Create ${ticketTypes[type].label.toLowerCase()}`}
+            {saving ? "Creating..." : isEpic ? "Create epic" : `Create ${ticketTypes[type].label.toLowerCase()}`}
           </button>
         </div>
       </div>

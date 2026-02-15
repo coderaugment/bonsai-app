@@ -2,7 +2,7 @@ import { db, asAsync, runAsync } from "./_driver";
 import { ticketAttachments } from "../schema";
 import { eq } from "drizzle-orm";
 
-export function getAttachmentsByTicket(ticketId: string) {
+export function getAttachmentsByTicket(ticketId: number) {
   const rows = db
     .select()
     .from(ticketAttachments)
@@ -21,7 +21,7 @@ export function getAttachment(id: number) {
 }
 
 export function createAttachment(data: {
-  ticketId: string;
+  ticketId: number;
   filename: string;
   mimeType: string;
   data: string;
