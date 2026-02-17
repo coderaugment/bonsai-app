@@ -134,9 +134,9 @@ export function Sidebar({ userName }: { userName?: string }) {
           </div>
           <span
             className="text-[9px] font-semibold mt-1 tracking-wide uppercase"
-            style={{ color: "var(--text-muted)" }}
           >
-            Bonsai
+            <span style={{ color: "var(--text-primary)" }}>BONS</span>
+            <span style={{ color: "var(--accent-pink)" }}>AI</span>
           </span>
         </div>
 

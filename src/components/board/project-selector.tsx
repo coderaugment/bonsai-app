@@ -64,6 +64,7 @@ export function ProjectSelector({ project, allProjects, onSwitch }: ProjectSelec
           className="flex items-center gap-1.5 text-lg font-semibold transition-colors hover:opacity-70"
           style={{ color: "var(--text-primary)" }}
         >
+          <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>project</span>{" "}
           {project.name}
           <svg
             className="w-4 h-4"
