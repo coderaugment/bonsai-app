@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { createPortal } from "react-dom";
 import type { Persona, ProjectMessage, CommentAttachment } from "@/types";
 import { CommentInput } from "./comment-input";
 import { usePolling } from "@/hooks/use-polling";
@@ -115,34 +114,18 @@ export function ProjectChatPanel({
 
   if (!open) return null;
 
-  return createPortal(
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 49,
-          backgroundColor: "rgba(0,0,0,0.3)",
-        }}
-      />
-      {/* Panel */}
-      <div
-        style={{
-          position: "fixed",
-          top: 0,
-          right: 0,
-          width: "420px",
-          height: "100vh",
-          zIndex: 50,
-          display: "flex",
-          flexDirection: "column",
-          backgroundColor: "var(--bg-primary)",
-          borderLeft: "1px solid var(--border-medium)",
-          boxShadow: "-4px 0 24px rgba(0,0,0,0.3)",
-        }}
-      >
+  return (
+    <div
+      style={{
+        width: "380px",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        backgroundColor: "var(--bg-primary)",
+        borderLeft: "1px solid var(--border-medium)",
+        flexShrink: 0,
+      }}
+    >
         {/* Header */}
         <div
           className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0"
@@ -285,15 +268,13 @@ export function ProjectChatPanel({
           enableVoice={false}
         />
 
-        <style>{`
-          @keyframes chat-typing-dot {
-            0%, 60%, 100% { opacity: 0.2; transform: translateY(0); }
-            30% { opacity: 1; transform: translateY(-3px); }
-          }
-        `}</style>
-      </div>
-    </>,
-    document.body
+      <style>{`
+        @keyframes chat-typing-dot {
+          0%, 60%, 100% { opacity: 0.2; transform: translateY(0); }
+          30% { opacity: 1; transform: translateY(-3px); }
+        }
+      `}</style>
+    </div>
   );
 }
 

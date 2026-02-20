@@ -247,78 +247,82 @@ export function BoardView({
         />
       )}
 
-      <div className="flex gap-6 overflow-x-auto px-6 py-5 flex-1 h-full">
-        {columnOrder.map((state) => {
-          const defaultCollapsed = state === "shipped";
-          const collapsed = state in collapseOverrides ? collapseOverrides[state] : defaultCollapsed;
-          return (
-            <Column
-              key={state}
-              state={state}
-              tickets={grouped[state]}
-              collapsed={collapsed}
-              onToggleCollapse={(val) => setCollapseOverrides((prev) => ({ ...prev, [state]: val }))}
-              draggingId={draggingId}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              onDrop={handleDrop}
-              onEdit={(ticket) => {
-                setInitialDocType(undefined);
-                setSelectedTicket(ticket);
-                const url = new URL(window.location.href);
-                url.searchParams.set("ticket", String(ticket.id));
-                url.searchParams.delete("doc");
-                router.replace(url.pathname + url.search, { scroll: false });
-              }}
-              onViewDocument={(ticket, docType) => {
-                setInitialDocType(docType);
-                setSelectedTicket(ticket);
-                const url = new URL(window.location.href);
-                url.searchParams.set("ticket", String(ticket.id));
-                url.searchParams.set("doc", docType === "research" ? "research" : "plan");
-                router.replace(url.pathname + url.search, { scroll: false });
-              }}
-              onOpenEpic={handleOpenEpic}
-            />
-          );
-        })}
+      {/* Main content area: columns + chat sidebar */}
+      <div className="flex flex-1 h-full overflow-hidden">
+        {/* Board columns */}
+        <div className="flex gap-6 overflow-x-auto px-6 py-5 flex-1">
+          {columnOrder.map((state) => {
+            const defaultCollapsed = state === "shipped";
+            const collapsed = state in collapseOverrides ? collapseOverrides[state] : defaultCollapsed;
+            return (
+              <Column
+                key={state}
+                state={state}
+                tickets={grouped[state]}
+                collapsed={collapsed}
+                onToggleCollapse={(val) => setCollapseOverrides((prev) => ({ ...prev, [state]: val }))}
+                draggingId={draggingId}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                onDrop={handleDrop}
+                onEdit={(ticket) => {
+                  setInitialDocType(undefined);
+                  setSelectedTicket(ticket);
+                  const url = new URL(window.location.href);
+                  url.searchParams.set("ticket", String(ticket.id));
+                  url.searchParams.delete("doc");
+                  router.replace(url.pathname + url.search, { scroll: false });
+                }}
+                onViewDocument={(ticket, docType) => {
+                  setInitialDocType(docType);
+                  setSelectedTicket(ticket);
+                  const url = new URL(window.location.href);
+                  url.searchParams.set("ticket", String(ticket.id));
+                  url.searchParams.set("doc", docType === "research" ? "research" : "plan");
+                  router.replace(url.pathname + url.search, { scroll: false });
+                }}
+                onOpenEpic={handleOpenEpic}
+              />
+            );
+          })}
 
-        <TicketDetailModal
-          ticket={selectedTicket}
-          initialDocType={initialDocType}
+          <TicketDetailModal
+            ticket={selectedTicket}
+            initialDocType={initialDocType}
+            projectId={projectId}
+            leadAvatar={leadAvatar}
+            leadName={leadName}
+            onClose={() => {
+              setSelectedTicket(null);
+              setInitialDocType(undefined);
+              // Remove ticket and doc params from URL
+              const url = new URL(window.location.href);
+              url.searchParams.delete("ticket");
+              url.searchParams.delete("doc");
+              router.replace(url.pathname + url.search, { scroll: false });
+            }}
+            onDelete={(ticketId) => {
+              setTickets((prev) => prev.filter((t) => t.id !== ticketId));
+              setSelectedTicket(null);
+              setInitialDocType(undefined);
+              // Remove ticket and doc params from URL
+              const url = new URL(window.location.href);
+              url.searchParams.delete("ticket");
+              url.searchParams.delete("doc");
+              router.replace(url.pathname + url.search, { scroll: false });
+            }}
+          />
+        </div>
+
+        {/* Project Chat Sidebar */}
+        <ProjectChatPanel
           projectId={projectId}
-          leadAvatar={leadAvatar}
-          leadName={leadName}
-          onClose={() => {
-            setSelectedTicket(null);
-            setInitialDocType(undefined);
-            // Remove ticket and doc params from URL
-            const url = new URL(window.location.href);
-            url.searchParams.delete("ticket");
-            url.searchParams.delete("doc");
-            router.replace(url.pathname + url.search, { scroll: false });
-          }}
-          onDelete={(ticketId) => {
-            setTickets((prev) => prev.filter((t) => t.id !== ticketId));
-            setSelectedTicket(null);
-            setInitialDocType(undefined);
-            // Remove ticket and doc params from URL
-            const url = new URL(window.location.href);
-            url.searchParams.delete("ticket");
-            url.searchParams.delete("doc");
-            router.replace(url.pathname + url.search, { scroll: false });
-          }}
+          personas={personas}
+          open={chatOpen}
+          onClose={() => { setChatOpen(false); setChatMentionPersonaId(null); }}
+          initialMentionPersonaId={chatMentionPersonaId}
         />
       </div>
-
-      {/* Project Chat Panel */}
-      <ProjectChatPanel
-        projectId={projectId}
-        personas={personas}
-        open={chatOpen}
-        onClose={() => { setChatOpen(false); setChatMentionPersonaId(null); }}
-        initialMentionPersonaId={chatMentionPersonaId}
-      />
     </>
   );
 }
