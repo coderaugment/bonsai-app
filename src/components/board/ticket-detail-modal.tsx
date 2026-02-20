@@ -2232,7 +2232,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
               className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors"
               style={{ backgroundColor: "var(--accent-blue)", color: "#fff", opacity: saving || !title.trim() || !hasChanges ? 0.5 : 1 }}
             >
-              {saving ? "Saving..." : "Save Changes"}
+              {saving ? "Saving..." : (ticket?.state === "building" || ticket?.state === "review") ? "Accept and Ship" : "Save Changes"}
             </button>
             {ticket?.state === "planning" && (
               <button
