@@ -24,12 +24,10 @@ const stateOptions: TicketState[] = ["planning", "building", "preview", "test", 
 
 // Board state mentions — referenceable via #review, #planning, etc.
 const BOARD_STATES = [
-  { name: "review", label: "Review", color: "var(--column-research)", icon: "🔍" },
-  { name: "planning", label: "Planning", color: "var(--column-plan)", icon: "📋" },
-  { name: "building", label: "Building", color: "var(--column-build)", icon: "🔨" },
-  { name: "preview", label: "Preview", color: "var(--column-preview)", icon: "👁" },
-  { name: "test", label: "Test", color: "var(--column-test)", icon: "🧪" },
-  { name: "shipped", label: "Shipped", color: "var(--column-ship)", icon: "🚀" },
+  { name: "planning", label: "Planning", color: "var(--column-planning)", icon: "📋" },
+  { name: "building", label: "Building", color: "var(--column-building)", icon: "🔨" },
+  { name: "review", label: "Review", color: "var(--column-review)", icon: "🔍" },
+  { name: "shipped", label: "Shipped", color: "var(--column-shipped)", icon: "🚀" },
 ] as const;
 // Render comment text with highlighted @mentions (personas + team) and #columns (board states)
 function renderCommentContent(text: string, personas: Persona[]) {
@@ -162,6 +160,56 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   const [approvingResearch, setApprovingResearch] = useState(false);
   const [approvingPlan, setApprovingPlan] = useState(false);
 
+  // Live preview state
+  const [viewMode, setViewMode] = useState<"info" | "preview">("info");
+  const [project, setProject] = useState<{ buildCommand?: string; runCommand?: string; id?: string } | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [startingPreview, setStartingPreview] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // Reset viewMode to info when ticket leaves preview-allowed states
+  useEffect(() => {
+    if (ticket && ticket.state === "planning") {
+      setViewMode("info");
+    }
+  }, [ticket?.state]);
+
+  // Start preview server when switching to preview mode (in ticket's worktree)
+  useEffect(() => {
+    if (viewMode === "preview" && ticket && !previewUrl && !startingPreview && !previewError) {
+      setStartingPreview(true);
+      setPreviewError(null);
+      fetch(`/api/tickets/${ticket.id}/start-preview`, { method: "POST" })
+        .then(res => res.json())
+        .then(data => {
+          if (data.error) {
+            setPreviewError(data.error + (data.details ? `\n${data.details}` : ''));
+            setStartingPreview(false);
+          } else if (data.url) {
+            const url = data.url.replace('0.0.0.0', 'localhost');
+
+            // If server was just started (not already running), wait for it to be ready
+            if (!data.alreadyRunning) {
+              setTimeout(() => {
+                setPreviewUrl(url);
+                setStartingPreview(false);
+              }, 3000);
+            } else {
+              setPreviewUrl(url);
+              setStartingPreview(false);
+            }
+          } else {
+            setStartingPreview(false);
+          }
+        })
+        .catch(err => {
+          console.error("Failed to start preview:", err);
+          setPreviewError("Failed to start preview server");
+          setStartingPreview(false);
+        });
+    }
+  }, [viewMode, ticket, previewUrl, startingPreview, previewError]);
+
   // Description cleanup state
   const [enhancingDescription, setEnhancingDescription] = useState(false);
   const descOnFocusRef = useRef<string>("");
@@ -254,6 +302,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
       loadDocuments(ticket.id, initialDocType);
       loadAttachments(ticket.id);
       loadPersonas();
+      loadProject();
 
       // Clear any pending dispatch from previous ticket
       if (dispatchTimerRef.current) {
@@ -570,6 +619,19 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
       setPersonasList(Array.isArray(data) ? data : []);
     } catch {
       // non-critical — autocomplete just won't work
+    }
+  }
+
+  async function loadProject() {
+    if (!projectId) return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setProject(data);
+      }
+    } catch {
+      // non-critical — preview toggle just won't show
     }
   }
 
@@ -1309,22 +1371,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
               })()}
             </div>
             <div className="flex items-center gap-1">
-              {/* Make Epic toggle */}
-              <button
-                onClick={handleToggleEpic}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors"
-                style={{
-                  backgroundColor: isEpic ? "rgba(249, 115, 22, 0.18)" : "rgba(255,255,255,0.06)",
-                  color: isEpic ? "#fb923c" : "var(--text-muted)",
-                  border: isEpic ? "1px solid rgba(249, 115, 22, 0.3)" : "1px solid transparent",
-                }}
-                title={isEpic ? "This is an epic — click to demote" : "Make this ticket an epic"}
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-                </svg>
-                {isEpic ? "Epic" : "Make Epic"}
-              </button>
+              {/* EPIC FEATURES DISABLED - Make Epic toggle removed */}
               {onDelete && (
                 <button
                   onClick={async () => {
@@ -1347,6 +1394,31 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                   </svg>
                 </button>
               )}
+              {/* Live preview toggle - enabled for building/review/shipped */}
+              {(() => {
+                const canPreview = ticket.state === "building" || ticket.state === "review" || ticket.state === "shipped";
+                return (
+                  <button
+                    onClick={() => canPreview && setViewMode(viewMode === "info" ? "preview" : "info")}
+                    disabled={!canPreview}
+                    className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors"
+                    style={{
+                      color: canPreview && viewMode === "preview" ? "var(--accent-blue)" : "var(--text-muted)",
+                      backgroundColor: canPreview && viewMode === "preview" ? "rgba(59, 130, 246, 0.1)" : "transparent",
+                      opacity: canPreview ? 1 : 0.4,
+                      cursor: canPreview ? "pointer" : "not-allowed",
+                    }}
+                    title={
+                      !canPreview ? "Live preview available when building" :
+                      viewMode === "info" ? "Show live preview" : "Show ticket info"
+                    }
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  </button>
+                );
+              })()}
               <button
                 onClick={onClose}
                 className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors hover:bg-white/10"
@@ -1361,6 +1433,49 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
 
           {/* Body - scrollable */}
           <div className="flex-1 overflow-y-auto px-8 py-6 space-y-8">
+            {viewMode === "preview" ? (
+              /* Live preview iframe - auto-starts dev server if needed */
+              <div className="h-full w-full -mx-8 -my-6">
+                {previewError ? (
+                  <div className="flex items-center justify-center h-full p-8" style={{ color: "var(--text-secondary)" }}>
+                    <div className="flex flex-col items-center gap-3 text-center max-w-md">
+                      <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                      </svg>
+                      <div>
+                        <div className="font-semibold mb-2" style={{ color: "var(--text-primary)" }}>Preview not available</div>
+                        <pre className="text-xs text-left whitespace-pre-wrap" style={{ color: "var(--text-muted)" }}>{previewError}</pre>
+                      </div>
+                      <button
+                        onClick={() => { setPreviewError(null); setViewMode("info"); }}
+                        className="px-4 py-2 rounded-lg text-sm hover:opacity-80 transition-opacity"
+                        style={{ backgroundColor: "var(--bg-input)", color: "var(--text-secondary)" }}
+                      >
+                        Back to ticket
+                      </button>
+                    </div>
+                  </div>
+                ) : startingPreview ? (
+                  <div className="flex items-center justify-center h-full" style={{ color: "var(--text-secondary)" }}>
+                    <div className="flex flex-col items-center gap-3">
+                      <svg className="animate-spin h-8 w-8" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      <span className="text-sm">Starting dev server...</span>
+                    </div>
+                  </div>
+                ) : (
+                  <iframe
+                    src={previewUrl || `http://localhost:${3100 + (Number(projectId) % 100)}`}
+                    className="w-full h-full border-0"
+                    title="Live Preview"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                  />
+                )}
+              </div>
+            ) : (
+              <>
             {/* Description */}
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -1982,7 +2097,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                 </div>
               </div>
             </div>
-          </div>
 
           {/* Build state preview bar */}
           {ticket.state === "building" && (
@@ -2069,6 +2183,9 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
               </div>
             </div>
           )}
+              </>
+            )}
+          </div>
 
           {/* Footer */}
           <div className="flex justify-end gap-3 px-8 py-5 border-t flex-shrink-0" style={{ borderColor: "var(--border-subtle)" }}>

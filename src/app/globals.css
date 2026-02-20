@@ -30,11 +30,10 @@
   --badge-chore: #22c55e;
   --badge-chore-text: #86efac;
 
-  --column-research: #60a5fa;
-  --column-plan: #6b7280;
-  --column-build: #fbbf24;
-  --column-test: #a78bfa;
-  --column-ship: #34d399;
+  --column-planning: #6b7280;
+  --column-building: #fbbf24;
+  --column-review: #a78bfa;
+  --column-shipped: #34d399;
 
   --background: var(--bg-primary);
   --foreground: var(--text-primary);

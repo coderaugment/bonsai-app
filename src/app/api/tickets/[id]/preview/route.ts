@@ -1,169 +1,98 @@
-import { NextResponse } from "next/server";
-import { formatTicketSlug } from "@/types";
-import { getTicketById, getProjectById } from "@/db/data";
-import { spawn, execSync } from "node:child_process";
-import * as path from "node:path";
-import * as fs from "node:fs";
-import * as net from "node:net";
+import { NextRequest, NextResponse } from "next/server";
+import { getTicketById } from "@/db/data/tickets";
+import { getProjectById } from "@/db/data/projects";
 
-const BONSAI_DIR = path.join(process.env.HOME || "~", ".bonsai");
-const PROJECTS_DIR = path.join(process.env.HOME || "~", "development", "bonsai", "projects");
-
-function resolveProjectRoot(project: { githubRepo: string | null; slug: string; localPath: string | null }): string {
-  if (project.localPath) return project.localPath;
-  return path.join(PROJECTS_DIR, project.githubRepo || project.slug);
-}
-
-function resolveMainRepo(project: { githubRepo: string | null; slug: string; localPath: string | null }): string {
-  // If localPath is set, it already points to the repo directory
-  if (project.localPath) return project.localPath;
-  const projectRoot = path.join(PROJECTS_DIR, project.githubRepo || project.slug);
-  return path.join(projectRoot, "repo");
-}
-
-function resolveWorkspace(
-  project: { githubRepo: string | null; slug: string; localPath: string | null },
-  ticketId: number
-): string {
-  const projectRoot = resolveProjectRoot(project);
-  const ticketSlug = formatTicketSlug(ticketId);
-
-  // Check for existing worktree at {projectRoot}/worktrees/{ticketSlug}
-  const worktreePath = path.join(projectRoot, "worktrees", ticketSlug);
-  if (fs.existsSync(worktreePath)) return worktreePath;
-
-  // Fall back to main repo at {projectRoot}/repo
-  return resolveMainRepo(project);
-}
-
-function isPortInUse(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const server = net.createServer();
-    server.once("error", () => resolve(true));
-    server.once("listening", () => {
-      server.close();
-      resolve(false);
-    });
-    server.listen(port, "127.0.0.1");
-  });
-}
-
-// POST /api/tickets/[id]/preview — start dev server and return URL
-export async function POST(
-  req: Request,
+export async function GET(
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   const ticketId = Number(id);
 
+  // Get ticket and its project
   const ticket = await getTicketById(ticketId);
-  if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
-
-  const project = ticket.projectId ? await getProjectById(ticket.projectId) : null;
-  if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-
-  const workspace = resolveWorkspace(project, ticketId);
-  if (!fs.existsSync(workspace)) {
-    return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
+  if (!ticket) {
+    return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
   }
 
-  // Derive a stable port from project ID (3100–3199 range)
+  const project = await getProjectById(ticket.projectId);
+  if (!project) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+
+  // Derive the preview port from project ID (same logic as /api/projects/[id]/preview)
   const port = 3100 + (project.id % 100);
+  const devServerUrl = `http://localhost:${port}`;
 
-  // Use the requesting host so URLs work from LAN devices (phone, etc.)
-  const reqHost = new URL(req.url).hostname;
-  const host = reqHost === "0.0.0.0" ? "localhost" : reqHost;
+  // Get the path after /preview (everything after the base URL)
+  const url = new URL(request.url);
+  const previewPath = url.pathname.replace(`/api/tickets/${ticketId}/preview`, "") || "/";
+  const queryString = url.search;
 
-  // Check if dev server is already running on this port
-  const inUse = await isPortInUse(port);
-  if (inUse) {
-    return NextResponse.json({ url: `http://${host}:${port}`, alreadyRunning: true });
-  }
+  try {
+    // Proxy the request to the dev server
+    const targetUrl = `${devServerUrl}${previewPath}${queryString}`;
 
-  // Detect project type and start dev server
-  const pkgPath = path.join(workspace, "package.json");
-  if (!fs.existsSync(pkgPath)) {
-    return NextResponse.json({ error: "No package.json found in workspace" }, { status: 400 });
-  }
+    const response = await fetch(targetUrl, {
+      headers: {
+        "User-Agent": request.headers.get("User-Agent") || "Bonsai-Preview",
+        "Accept": request.headers.get("Accept") || "*/*",
+        "Accept-Language": request.headers.get("Accept-Language") || "en-US,en;q=0.9",
+      },
+    });
 
-  // Spawn dev server in background
-  const ticketSlug = formatTicketSlug(ticketId);
-  const logFile = path.join(BONSAI_DIR, "sessions", `preview-${ticketSlug}.log`);
-  const logDir = path.dirname(logFile);
-  if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    // Get the response body
+    const contentType = response.headers.get("content-type") || "";
 
-  // Copy env files from main repo into worktree so builds have DB credentials, etc.
-  const mainRepo = resolveMainRepo(project);
-  if (workspace !== mainRepo && fs.existsSync(mainRepo)) {
-    for (const envFile of [".env", ".env.local", ".env.development", ".env.development.local"]) {
-      const src = path.join(mainRepo, envFile);
-      const dst = path.join(workspace, envFile);
-      if (fs.existsSync(src) && !fs.existsSync(dst)) {
-        fs.copyFileSync(src, dst);
+    let body: Buffer | string;
+    if (contentType.includes("text/") || contentType.includes("application/json") || contentType.includes("application/javascript")) {
+      body = await response.text();
+    } else {
+      // Binary content (images, fonts, etc.)
+      body = Buffer.from(await response.arrayBuffer());
+    }
+
+    const headers = new Headers();
+
+    // Copy relevant headers from the dev server response
+    response.headers.forEach((value, key) => {
+      // Skip headers that might cause issues in iframe context
+      if (!["content-encoding", "transfer-encoding", "connection", "content-length"].includes(key.toLowerCase())) {
+        headers.set(key, value);
       }
+    });
+
+    // Allow iframe embedding
+    headers.delete("X-Frame-Options");
+    headers.delete("Content-Security-Policy");
+
+    return new NextResponse(body, {
+      status: response.status,
+      headers,
+    });
+  } catch (error) {
+    // Construct the path to the ticket's worktree for error message
+    const ticketSlug = `${ticket.id}-${ticket.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+    const worktreePath = `${project.localPath}/.bonsai-worktrees/${ticketSlug}`;
+
+    // Only return HTML error page for HTML requests (not for assets)
+    const accept = request.headers.get("Accept") || "";
+    if (accept.includes("text/html")) {
+      return new NextResponse(
+        `<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui;color:#666;">
+          <div style="text-align:center;max-width:600px;padding:20px;">
+            <h2 style="margin:0 0 8px 0;color:#333;">Dev server not running</h2>
+            <p style="margin:0 0 16px 0;">Start the dev server to see live changes:</p>
+            <pre style="background:#f5f5f5;padding:16px;border-radius:8px;text-align:left;margin:0 0 16px 0;font-size:13px;overflow-x:auto;">cd ${worktreePath}
+${project.runCommand || "npm run dev"}</pre>
+            <p style="margin:0;font-size:14px;color:#999;">Error: ${error instanceof Error ? error.message : "Could not connect to dev server"}</p>
+          </div>
+        </body></html>`,
+        { headers: { "Content-Type": "text/html" }, status: 502 }
+      );
+    } else {
+      // For asset requests, return a simple error
+      return new NextResponse(null, { status: 502 });
     }
   }
-
-  // Load workspace env files into envVars so build commands (drizzle-kit, etc.) see them
-  const envVars: Record<string, string> = { ...process.env, PORT: String(port) } as Record<string, string>;
-  for (const envFile of [".env", ".env.local"]) {
-    const envPath = path.join(workspace, envFile);
-    if (fs.existsSync(envPath)) {
-      const content = fs.readFileSync(envPath, "utf-8");
-      for (const line of content.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const eqIdx = trimmed.indexOf("=");
-        if (eqIdx > 0) {
-          const key = trimmed.slice(0, eqIdx).trim();
-          const val = trimmed.slice(eqIdx + 1).trim();
-          envVars[key] = val;
-        }
-      }
-    }
-  }
-
-  // Run build command synchronously before starting the dev server
-  if (project.buildCommand) {
-    console.log(`[preview] Running build command for ${ticketId}: ${project.buildCommand}`);
-    try {
-      execSync(project.buildCommand, {
-        cwd: workspace,
-        timeout: 120_000,
-        env: envVars as NodeJS.ProcessEnv,
-        stdio: ["ignore", fs.openSync(logFile, "a"), fs.openSync(logFile, "a")],
-      });
-    } catch (buildErr) {
-      console.error(`[preview] Build command failed for ${ticketId}:`, buildErr);
-      return NextResponse.json({ error: "Build command failed" }, { status: 500 });
-    }
-  }
-
-  const out = fs.openSync(logFile, "a");
-  const err = fs.openSync(logFile, "a");
-
-  // Parse run command or fall back to default
-  let cmd: string;
-  let args: string[];
-  if (project.runCommand) {
-    const expanded = project.runCommand.replace(/\{\{PORT\}\}/g, String(port));
-    const parts = expanded.split(/\s+/);
-    cmd = parts[0];
-    args = parts.slice(1);
-  } else {
-    cmd = "npm";
-    args = ["run", "dev", "--", "--port", String(port), "--hostname", "0.0.0.0"];
-  }
-
-  const child = spawn(cmd, args, {
-    cwd: workspace,
-    detached: true,
-    stdio: ["ignore", out, err],
-    env: envVars as NodeJS.ProcessEnv,
-  });
-  child.unref();
-
-  console.log(`[preview] Started dev server for ${ticketId} on port ${port} (pid ${child.pid})`);
-
-  return NextResponse.json({ url: `http://${host}:${port}`, pid: child.pid, port });
 }

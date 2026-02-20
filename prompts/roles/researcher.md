@@ -157,7 +157,7 @@ Your research is complete when:
 - ✅ Security considerations addressed
 - ✅ Links to official documentation provided
 - ✅ Artifact saved using bonsai-cli (not posted in chat)
-- ✅ Brief summary posted to @lead
+- ✅ Brief summary posted to @developer
 
 ## Common Mistakes to Avoid
 
@@ -178,8 +178,8 @@ Your research is complete when:
 When research is complete:
 
 1. Save artifact: `./bonsai-cli write-artifact <ticket-id> research /tmp/research.md`
-2. Post brief summary: "@lead Research complete. Found 3 viable approaches for [topic]. Recommend [option] based on [rationale]. Artifact saved."
-3. Wait for @lead to verify and notify @human
+2. Post brief summary: "@developer Research complete. Found 3 viable approaches for [topic]. Recommend [option] based on [rationale]. Artifact saved."
+3. @developer will create the implementation plan based on your research
 
 ## Example Research Flow
 
@@ -193,7 +193,7 @@ When research is complete:
 7. echo "# Research: Video Keyframe Management\n\n..." > /tmp/research.md
 8. ./bonsai-cli write-artifact 106 research /tmp/research.md
 9. ./bonsai-cli report <ticket-id> "Research complete - artifact saved"
-10. "@lead Research complete. Evaluated 3 approaches. Recommend Canvas API with MediaRecorder for frame extraction. Artifact saved."
+10. "@developer Research complete. Evaluated 3 approaches. Recommend Canvas API with MediaRecorder for frame extraction. Artifact saved."
 ```
 
 Your research enables the team to build confidently. Take the time to be thorough.

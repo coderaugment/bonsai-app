@@ -9,10 +9,10 @@ const columnConfig: Record<
   TicketState,
   { label: string; color: string }
 > = {
-  planning: { label: "Planning", color: "var(--column-plan)" },
-  building: { label: "Building", color: "var(--column-build)" },
-  review: { label: "Review", color: "var(--column-preview, var(--column-test))" },
-  shipped: { label: "Shipped", color: "var(--column-ship)" },
+  planning: { label: "Planning", color: "var(--column-planning)" },
+  building: { label: "Building", color: "var(--column-building)" },
+  review: { label: "Review", color: "var(--column-review)" },
+  shipped: { label: "Shipped", color: "var(--column-shipped)" },
 };
 
 interface ColumnProps {
