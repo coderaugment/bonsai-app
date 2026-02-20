@@ -22,11 +22,7 @@ export default function GithubPage() {
   const isValid = token.trim().startsWith("ghp_") && token.trim().length > 10;
   const canContinue = existingUser || isValid;
 
-  async function handleContinue() {
-    if (existingUser && !token.trim()) {
-      router.push("/onboard/project");
-      return;
-    }
+  async function handleTokenBlur() {
     if (!isValid) return;
     setSaving(true);
     await fetch("/api/onboard/token", {
@@ -34,6 +30,17 @@ export default function GithubPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: token.trim() }),
     });
+    const userRes = await fetch("/api/github/user");
+    const userData = await userRes.json();
+    if (userData.login) {
+      setExistingUser(userData.login);
+      setToken("");
+    }
+    setSaving(false);
+  }
+
+  function handleContinue() {
+    if (!canContinue || saving) return;
     router.push("/onboard/project");
   }
 
@@ -78,6 +85,7 @@ export default function GithubPage() {
                 type="password"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
+                onBlur={handleTokenBlur}
                 placeholder="Paste new token to replace"
                 className="w-full max-w-lg px-4 py-2.5 rounded-lg text-sm outline-none font-mono transition-colors focus:ring-2 focus:ring-[var(--accent-blue)]"
                 style={{
@@ -198,6 +206,7 @@ export default function GithubPage() {
                   type="password"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
+                  onBlur={handleTokenBlur}
                   placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
                   className="w-full max-w-lg px-4 py-2.5 rounded-lg text-sm outline-none font-mono transition-colors focus:ring-2 focus:ring-[var(--accent-blue)]"
                   style={{
@@ -216,13 +225,7 @@ export default function GithubPage() {
       </div>
 
       <div className="flex justify-between items-center px-10 pb-10 pt-4">
-        <button
-          onClick={() => router.push("/onboard/welcome")}
-          className="px-6 py-3 rounded-lg text-base font-medium transition-colors hover:bg-white/5"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          Back
-        </button>
+        <div>{/* Removed back button to prevent redirect loop */}</div>
         <button
           onClick={handleContinue}
           disabled={!canContinue || saving}

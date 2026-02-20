@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { Ticket, TicketState } from "@/types";
+import type { Ticket, TicketState, Persona, Project } from "@/types";
 import { Column } from "./column";
 import { TicketDetailModal } from "./ticket-detail-modal";
+import { ProjectInfoPanel } from "./project-info-panel";
+import { ProjectChatPanel } from "./project-chat-panel";
 
 const columnOrder: TicketState[] = [
-  "review",
   "planning",
   "building",
   "preview",
@@ -73,9 +74,22 @@ interface BoardViewProps {
   projectId: string;
   leadAvatar?: string;
   leadName?: string;
+  personas?: Persona[];
+  project?: Project;
+  ticketStats?: { planning: number; building: number; test: number; shipped: number };
+  awakePersonaIds?: string[];
 }
 
-export function BoardView({ tickets: initialTickets, projectId, leadAvatar, leadName }: BoardViewProps) {
+export function BoardView({
+  tickets: initialTickets,
+  projectId,
+  leadAvatar,
+  leadName,
+  personas = [],
+  project,
+  ticketStats,
+  awakePersonaIds: awakePersonaIdsList = [],
+}: BoardViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tickets, setTickets] = useState(initialTickets);
@@ -83,8 +97,31 @@ export function BoardView({ tickets: initialTickets, projectId, leadAvatar, lead
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [initialDocType, setInitialDocType] = useState<"research" | "implementation_plan" | undefined>();
 
-  // User-overridden collapse state — null means "use default"
+  // Chat panel state
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMentionPersonaId, setChatMentionPersonaId] = useState<string | null>(null);
+
+  const awakePersonaIds = useMemo(() => new Set(awakePersonaIdsList), [awakePersonaIdsList]);
+
+  // User-overridden collapse state — persisted per project in localStorage
+  const storageKey = `bonsai-col-collapse-${projectId}`;
   const [collapseOverrides, setCollapseOverrides] = useState<Record<string, boolean>>({});
+  const [mounted, setMounted] = useState(false);
+
+  // Hydrate from localStorage after mount (avoids hydration mismatch)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) setCollapseOverrides(JSON.parse(saved));
+    } catch {}
+    setMounted(true);
+  }, [storageKey]);
+
+  // Persist collapse overrides when they change (only after mount)
+  useEffect(() => {
+    if (!mounted) return;
+    try { localStorage.setItem(storageKey, JSON.stringify(collapseOverrides)); } catch {}
+  }, [storageKey, collapseOverrides, mounted]);
 
   // Poll for ticket updates every 15 seconds (+ immediate first fetch)
   const refreshTickets = useCallback(async () => {
@@ -114,28 +151,47 @@ export function BoardView({ tickets: initialTickets, projectId, leadAvatar, lead
     setTickets(initialTickets);
   }, [initialTickets]);
 
-  // Auto-open ticket from URL query param (e.g. after creating a new ticket)
-  const openTicketParam = searchParams.get("openTicket");
+  // Auto-open ticket from URL query param (e.g. after creating a new ticket or sharing a link)
+  const openTicketParam = searchParams.get("openTicket") || searchParams.get("ticket");
+  const openDocParam = searchParams.get("doc");
   useEffect(() => {
     if (!openTicketParam) return;
     const match = tickets.find((t) => t.id === Number(openTicketParam));
     if (match) {
+      // Set doc type if specified in URL
+      if (openDocParam === "research") setInitialDocType("research");
+      else if (openDocParam === "plan") setInitialDocType("implementation_plan");
       setSelectedTicket(match);
-      // Clean the query param from the URL
-      const url = new URL(window.location.href);
-      url.searchParams.delete("openTicket");
-      router.replace(url.pathname, { scroll: false });
+      // Clean the openTicket param from the URL (but keep ticket= for sharing)
+      if (searchParams.get("openTicket")) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("openTicket");
+        router.replace(url.pathname + url.search, { scroll: false });
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openTicketParam, tickets]);
+  }, [openTicketParam, openDocParam, tickets]);
 
   const grouped = columnOrder.reduce(
     (acc, state) => {
-      acc[state] = sortTickets(tickets.filter((t) => t.state === state));
+      acc[state] = sortTickets(tickets.filter((t) => t.state === state && !t.isEpic));
       return acc;
     },
     {} as Record<TicketState, Ticket[]>
   );
+
+  function handleOpenEpic(epicId: number) {
+    const epic = tickets.find((t) => t.id === epicId);
+    if (epic) {
+      setInitialDocType(undefined);
+      setSelectedTicket(epic);
+      // Update URL to include ticket ID
+      const url = new URL(window.location.href);
+      url.searchParams.set("ticket", String(epicId));
+      url.searchParams.delete("doc");
+      router.replace(url.pathname + url.search, { scroll: false });
+    }
+  }
 
   function handleDragStart(ticketId: number) {
     setDraggingId(ticketId);
@@ -172,41 +228,97 @@ export function BoardView({ tickets: initialTickets, projectId, leadAvatar, lead
     router.refresh();
   }
 
-  return (
-    <div className="flex gap-6 overflow-x-auto px-6 py-5 flex-1 h-full">
-      {columnOrder.map((state) => {
-        const defaultCollapsed = state === "shipped";
-        const collapsed = state in collapseOverrides ? collapseOverrides[state] : defaultCollapsed;
-        return (
-          <Column
-            key={state}
-            state={state}
-            tickets={grouped[state]}
-            collapsed={collapsed}
-            onToggleCollapse={(val) => setCollapseOverrides((prev) => ({ ...prev, [state]: val }))}
-            draggingId={draggingId}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-            onDrop={handleDrop}
-            onEdit={(ticket) => { setInitialDocType(undefined); setSelectedTicket(ticket); }}
-            onViewDocument={(ticket, docType) => { setInitialDocType(docType); setSelectedTicket(ticket); }}
-          />
-        );
-      })}
+  function handlePersonaClick(personaId: string) {
+    setChatMentionPersonaId(personaId);
+    setChatOpen(true);
+  }
 
-      <TicketDetailModal
-        ticket={selectedTicket}
-        initialDocType={initialDocType}
+  return (
+    <>
+      {/* Project info panel with clickable avatars */}
+      {project && ticketStats && (
+        <ProjectInfoPanel
+          project={project}
+          personas={personas}
+          ticketStats={ticketStats}
+          awakePersonaIds={awakePersonaIds}
+          onPersonaClick={handlePersonaClick}
+          onChatOpen={() => { setChatMentionPersonaId(null); setChatOpen(true); }}
+        />
+      )}
+
+      <div className="flex gap-6 overflow-x-auto px-6 py-5 flex-1 h-full">
+        {columnOrder.map((state) => {
+          const defaultCollapsed = state === "shipped";
+          const collapsed = state in collapseOverrides ? collapseOverrides[state] : defaultCollapsed;
+          return (
+            <Column
+              key={state}
+              state={state}
+              tickets={grouped[state]}
+              collapsed={collapsed}
+              onToggleCollapse={(val) => setCollapseOverrides((prev) => ({ ...prev, [state]: val }))}
+              draggingId={draggingId}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDrop={handleDrop}
+              onEdit={(ticket) => {
+                setInitialDocType(undefined);
+                setSelectedTicket(ticket);
+                const url = new URL(window.location.href);
+                url.searchParams.set("ticket", String(ticket.id));
+                url.searchParams.delete("doc");
+                router.replace(url.pathname + url.search, { scroll: false });
+              }}
+              onViewDocument={(ticket, docType) => {
+                setInitialDocType(docType);
+                setSelectedTicket(ticket);
+                const url = new URL(window.location.href);
+                url.searchParams.set("ticket", String(ticket.id));
+                url.searchParams.set("doc", docType === "research" ? "research" : "plan");
+                router.replace(url.pathname + url.search, { scroll: false });
+              }}
+              onOpenEpic={handleOpenEpic}
+            />
+          );
+        })}
+
+        <TicketDetailModal
+          ticket={selectedTicket}
+          initialDocType={initialDocType}
+          projectId={projectId}
+          leadAvatar={leadAvatar}
+          leadName={leadName}
+          onClose={() => {
+            setSelectedTicket(null);
+            setInitialDocType(undefined);
+            // Remove ticket and doc params from URL
+            const url = new URL(window.location.href);
+            url.searchParams.delete("ticket");
+            url.searchParams.delete("doc");
+            router.replace(url.pathname + url.search, { scroll: false });
+          }}
+          onDelete={(ticketId) => {
+            setTickets((prev) => prev.filter((t) => t.id !== ticketId));
+            setSelectedTicket(null);
+            setInitialDocType(undefined);
+            // Remove ticket and doc params from URL
+            const url = new URL(window.location.href);
+            url.searchParams.delete("ticket");
+            url.searchParams.delete("doc");
+            router.replace(url.pathname + url.search, { scroll: false });
+          }}
+        />
+      </div>
+
+      {/* Project Chat Panel */}
+      <ProjectChatPanel
         projectId={projectId}
-        leadAvatar={leadAvatar}
-        leadName={leadName}
-        onClose={() => { setSelectedTicket(null); setInitialDocType(undefined); }}
-        onDelete={(ticketId) => {
-          setTickets((prev) => prev.filter((t) => t.id !== ticketId));
-          setSelectedTicket(null);
-          setInitialDocType(undefined);
-        }}
+        personas={personas}
+        open={chatOpen}
+        onClose={() => { setChatOpen(false); setChatMentionPersonaId(null); }}
+        initialMentionPersonaId={chatMentionPersonaId}
       />
-    </div>
+    </>
   );
 }

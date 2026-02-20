@@ -183,7 +183,14 @@ export function getPersonasByRole(
 }
 
 export function isTeamComplete(projectId?: number): Promise<boolean> {
-  const allRoles = db.select({ id: roles.id }).from(roles).all();
+  // ONLY CHECK FOR ENABLED ROLES: lead, researcher, developer
+  const enabledRoleSlugs = ["lead", "researcher", "developer"];
+  const allRoles = db
+    .select({ id: roles.id, slug: roles.slug })
+    .from(roles)
+    .all()
+    .filter((r) => enabledRoleSlugs.includes(r.slug));
+
   if (allRoles.length === 0) return asAsync(false);
   const personaQuery = projectId
     ? db

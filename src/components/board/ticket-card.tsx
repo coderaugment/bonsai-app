@@ -11,6 +11,7 @@ interface TicketCardProps {
   onDragEnd?: () => void;
   onEdit?: (ticket: Ticket) => void;
   onViewDocument?: (ticket: Ticket, docType: "research" | "implementation_plan") => void;
+  onOpenEpic?: (epicId: number) => void;
 }
 
 const AGENT_ACTIVE_THRESHOLD_MS = 30 * 60 * 1000; // 30 min
@@ -36,7 +37,7 @@ const statusColors = {
 };
 
 
-export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocument }: TicketCardProps) {
+export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocument, onOpenEpic }: TicketCardProps) {
   const style = ticketTypes[ticket.type];
   const [dragging, setDragging] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -45,18 +46,16 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocum
   const planStatus = getDocStatus(ticket.planCompletedAt, ticket.planApprovedAt);
 
   const agentActive = isAgentActive(ticket.lastAgentActivity);
-  const activeAgentId = agentActive ? ticket.assignee?.id : undefined;
+  // Use running agent_runs for accurate working status (not just assigneeId)
+  const activeRunIds = new Set(ticket.activeRunPersonaIds ?? []);
+  // Fallback to assignee if no active runs tracked yet (e.g. first 15s after dispatch)
+  const effectiveActiveIds = activeRunIds.size > 0
+    ? activeRunIds
+    : agentActive && ticket.assignee ? new Set([ticket.assignee.id]) : new Set<string>();
 
-  // Build avatar list: creator first, then all agent participants
+  // Build avatar list: all agent participants
   const avatars: { label: string; color?: string; imageUrl?: string; isAgent?: boolean; isWorking?: boolean }[] = [];
-  if (ticket.creator) {
-    avatars.push({
-      label: ticket.creator.name,
-      imageUrl: ticket.creator.avatarUrl,
-      color: "var(--accent-indigo)",
-    });
-  }
-  // Add all unique agent participants (assignee + research/plan authors)
+  // Add all unique agent participants (assignee + research/plan authors + running agents)
   const seen = new Set<string>();
   for (const p of ticket.participants ?? []) {
     if (seen.has(p.id)) continue;
@@ -66,7 +65,7 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocum
       color: p.color,
       imageUrl: p.avatar,
       isAgent: true,
-      isWorking: p.id === activeAgentId,
+      isWorking: effectiveActiveIds.has(p.id),
     });
   }
   // Fallback: if no participants but there's an assignee, show them
@@ -175,21 +174,27 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocum
             </span>
           )}
         </div>
-        {agentActive && ticket.assignee && (
-          <span
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold"
-            style={{
-              backgroundColor: "rgba(74, 222, 128, 0.12)",
-              color: "#4ade80",
-            }}
-          >
+        {agentActive && effectiveActiveIds.size > 0 && (() => {
+          // Show the first running agent's name (from activeRunPersonaIds if available, else assignee)
+          const runningPersona = ticket.participants?.find(p => effectiveActiveIds.has(p.id))
+            ?? ticket.assignee;
+          if (!runningPersona) return null;
+          return (
             <span
-              className="w-1.5 h-1.5 rounded-full animate-pulse"
-              style={{ backgroundColor: "#4ade80" }}
-            />
-            {ticket.assignee.name} working
-          </span>
-        )}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold"
+              style={{
+                backgroundColor: "rgba(74, 222, 128, 0.12)",
+                color: "#4ade80",
+              }}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full animate-pulse"
+                style={{ backgroundColor: "#4ade80" }}
+              />
+              {runningPersona.name} working
+            </span>
+          );
+        })()}
         {!agentActive && ticket.createdAt && (
           <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>
             {ticket.createdAt}
@@ -205,17 +210,21 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocum
         {ticket.title}
       </h3>
 
-      {/* Parent epic label */}
+      {/* Parent epic label — clickable */}
       {ticket.epicId && ticket.epicTitle && (
-        <div
-          className="flex items-center gap-1.5 mb-2.5 text-xs font-medium"
-          style={{ color: "#fb923c" }}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenEpic?.(ticket.epicId!);
+          }}
+          className="flex items-center gap-1.5 mb-2.5 text-xs font-medium transition-opacity hover:opacity-80"
+          style={{ color: "#fb923c", background: "none", border: "none", padding: 0, cursor: "pointer" }}
         >
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
           </svg>
           Epic: {ticket.epicTitle}
-        </div>
+        </button>
       )}
 
       {/* Description */}

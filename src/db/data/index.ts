@@ -5,7 +5,6 @@
 export * from "./tickets";
 export * from "./comments";
 export * from "./documents";
-export * from "./users";
 export * from "./projects";
 export * from "./personas";
 export * from "./roles";

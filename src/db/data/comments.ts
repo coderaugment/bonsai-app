@@ -1,5 +1,5 @@
 import { db, asAsync, runAsync } from "./_driver";
-import { comments, tickets, users, personas } from "../schema";
+import { comments, tickets, personas, settings } from "../schema";
 import { eq, and, isNull, asc, desc } from "drizzle-orm";
 
 export function getCommentsByTicket(ticketId: number, limit: number = 10) {
@@ -38,20 +38,21 @@ export function getCommentsByTicketOrDocument(
 export function enrichComments(
   rows: (typeof comments.$inferSelect)[]
 ) {
+  // Get user name from settings once for all human comments
+  const userName =
+    db
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, "user_name"))
+      .get()?.value ?? "User";
+
   const enriched = rows.map((row) => {
     let author:
       | { name: string; avatarUrl?: string; color?: string; role?: string }
       | undefined;
 
-    if (row.authorType === "human" && row.authorId) {
-      const user = db
-        .select()
-        .from(users)
-        .where(eq(users.id, row.authorId))
-        .get();
-      if (user) {
-        author = { name: user.name, avatarUrl: user.avatarUrl || undefined };
-      }
+    if (row.authorType === "human") {
+      author = { name: userName };
     } else if (row.authorType === "agent" && row.personaId) {
       const persona = db
         .select()

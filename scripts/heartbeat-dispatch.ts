@@ -22,7 +22,7 @@ import { plannerRole } from "../../agent/src/roles/planner.js";
 import { developerRole } from "../../agent/src/roles/developer.js";
 import { buildSystemPrompt } from "../src/lib/prompt-builder.js";
 import { getVault } from "../src/lib/vault.js";
-import { isCreditError, computePauseUntil, isPaused, pauseRemainingMs } from "../src/lib/credit-pause.js";
+import { isCreditError, computePauseUntil, isPaused, pauseRemainingMs, isAuthError, AUTH_EXPIRED } from "../src/lib/credit-pause.js";
 
 const execAsync = promisify(exec);
 
@@ -241,7 +241,7 @@ const markTicketPickedUpStmt = db.prepare(`
 const abandonPersonaRunsStmt = db.prepare(`
   UPDATE agent_runs
   SET status = 'abandoned', completed_at = ?
-  WHERE persona_id = ? AND status = 'running'
+  WHERE ticket_id = ? AND persona_id = ? AND status = 'running'
 `);
 
 const insertAgentRunStmt = db.prepare(`
@@ -313,8 +313,20 @@ function markTicketPickedUp(ticketId: number) {
 // ── Workspace resolution ────────────────────────
 const PROJECTS_DIR = path.join(process.env.HOME || "~", "development", "bonsai", "projects");
 
-function resolveMainRepo(project: ProjectRow): string {
+function resolveProjectRoot(project: ProjectRow): string {
   if (project.local_path) return project.local_path;
+  const home = process.env.HOME || "~";
+  if (project.github_repo === "bonsai-app") {
+    return path.join(home, "development", "bonsai");
+  }
+  if (project.github_repo === "bonsai-agent") {
+    return path.join(home, "development", "bonsai");
+  }
+  return path.join(PROJECTS_DIR, project.github_repo || project.slug);
+}
+
+function resolveMainRepo(project: ProjectRow): string {
+  if (project.local_path) return path.join(project.local_path, "repo");
   const home = process.env.HOME || "~";
   if (project.github_repo === "bonsai-app") {
     return path.join(home, "development", "bonsai", "webapp");
@@ -322,17 +334,16 @@ function resolveMainRepo(project: ProjectRow): string {
   if (project.github_repo === "bonsai-agent") {
     return path.join(home, "development", "bonsai", "agent");
   }
-  return path.join(PROJECTS_DIR, project.github_repo || project.slug);
+  const projectRoot = path.join(PROJECTS_DIR, project.github_repo || project.slug);
+  return path.join(projectRoot, "repo");
 }
-
-const WORKTREES_DIR = path.join(process.env.HOME || "~", ".bonsai", "worktrees");
 
 /**
  * Creates or reuses a git worktree for isolated ticket work.
  *
  * Worktrees provide isolated workspaces for each ticket to prevent
  * interference between concurrent agent runs. Creates a feature branch
- * `ticket/{ticketId}` and worktree at `~/.bonsai/worktrees/{project}/{ticketId}`.
+ * `ticket/{ticketId}` and worktree at `{projectRoot}/worktrees/{ticketId}`.
  *
  * Falls back to main repo if:
  * - Not a git repository
@@ -361,9 +372,12 @@ function ensureWorktree(project: ProjectRow, ticketId: number): string | null {
     return mainRepo;
   }
 
-  const slug = project.slug || project.github_repo || "unknown";
   const ticketSlug = formatTicketSlug(ticketId);
-  const worktreePath = path.join(WORKTREES_DIR, slug, ticketSlug);
+
+  // Worktrees live at {projectRoot}/worktrees/{ticketSlug}
+  const projectRoot = resolveProjectRoot(project);
+  const worktreesDir = path.join(projectRoot, "worktrees");
+  const worktreePath = path.join(worktreesDir, ticketSlug);
   const branchName = `ticket/${ticketSlug}`;
 
   // If worktree already exists, reuse it
@@ -372,7 +386,8 @@ function ensureWorktree(project: ProjectRow, ticketId: number): string | null {
     return worktreePath;
   }
 
-  fs.mkdirSync(path.join(WORKTREES_DIR, slug), { recursive: true });
+  // Create worktrees directory if needed
+  fs.mkdirSync(worktreesDir, { recursive: true });
 
   try {
     // Get default branch name
@@ -424,10 +439,10 @@ async function loadVaultEnv(): Promise<Record<string, string>> {
 // ── Claude CLI ──────────────────────────────────
 const CLAUDE_CLI = path.join(process.env.HOME || "", ".local", "bin", "claude");
 const MODEL = "opus";
-const API_BASE = "http://localhost:3000";
+const API_BASE = process.env.API_BASE || "http://localhost:3080";
 
-const TOOLS_READONLY = ["Read", "Grep", "Glob", "Bash"];
-const TOOLS_FULL = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
+const TOOLS_READONLY = ["Read", "Grep", "Glob", "Bash", "Skill"];
+const TOOLS_FULL = ["Read", "Grep", "Glob", "Write", "Edit", "Bash", "Skill"];
 
 function shellEscape(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
@@ -499,11 +514,11 @@ async function runClaude(
 }
 
 // ── Build system prompts ────────────────────────
-function buildResearchPrompt(persona: PersonaRow, project: ProjectRow, ticket: TicketRow, workspacePath: string): string {
+async function buildResearchPrompt(persona: PersonaRow, project: ProjectRow, ticket: TicketRow, workspacePath: string): Promise<string> {
   const roleId = persona.role_id;
   const role = roleId ? (getRoleStmt.get(roleId) as RoleRow | undefined) : undefined;
 
-  const basePrompt = buildSystemPrompt(persona, project, ticket, {
+  const basePrompt = await buildSystemPrompt(persona, project, ticket, {
     workspacePath,
     includeComments: true,
     commentLimit: 10,
@@ -519,11 +534,11 @@ function buildResearchPrompt(persona: PersonaRow, project: ProjectRow, ticket: T
   ].join("\n");
 }
 
-function buildPlannerPrompt(persona: PersonaRow, project: ProjectRow, ticket: TicketRow, workspacePath: string): string {
+async function buildPlannerPrompt(persona: PersonaRow, project: ProjectRow, ticket: TicketRow, workspacePath: string): Promise<string> {
   const roleId = persona.role_id;
   const role = roleId ? (getRoleStmt.get(roleId) as RoleRow | undefined) : undefined;
 
-  const basePrompt = buildSystemPrompt(persona, project, ticket, {
+  const basePrompt = await buildSystemPrompt(persona, project, ticket, {
     workspacePath,
     includeComments: true,
     commentLimit: 10,
@@ -539,11 +554,11 @@ function buildPlannerPrompt(persona: PersonaRow, project: ProjectRow, ticket: Ti
   ].join("\n");
 }
 
-function buildDeveloperPrompt(persona: PersonaRow, project: ProjectRow, ticket: TicketRow, workspacePath: string): string {
+async function buildDeveloperPrompt(persona: PersonaRow, project: ProjectRow, ticket: TicketRow, workspacePath: string): Promise<string> {
   const roleId = persona.role_id;
   const role = roleId ? (getRoleStmt.get(roleId) as RoleRow | undefined) : undefined;
 
-  const basePrompt = buildSystemPrompt(persona, project, ticket, {
+  const basePrompt = await buildSystemPrompt(persona, project, ticket, {
     workspacePath,
     includeComments: true,
     commentLimit: 10,
@@ -594,7 +609,7 @@ async function runAgentPhase(
   ].join("\n"));
   fs.chmodSync(reportScript, 0o755);
 
-  // Write save-document helper — agent calls: save-document.sh <type> <file>
+  // Write save-document helper (LEGACY — agents should use /write-artifact skill instead)
   const saveDocScript = path.join(sessionDir, "save-document.sh");
   fs.writeFileSync(saveDocScript, [
     `#!/usr/bin/env node`,
@@ -697,14 +712,23 @@ async function runAgentPhase(
   // Inject save-document instructions
   const saveDocInstructions = [
     `\n## Saving Documents`,
-    `When you produce a research document, implementation plan, or design document, you MUST save it using the save-document tool.`,
-    `1. Write your document to a file (e.g. /tmp/doc.md)`,
-    `2. Run: \`${saveDocScript} <type> <file>\``,
+    `When you produce a research document, implementation plan, or design document, you MUST save it using the /write-artifact skill.`,
+    ``,
+    `**Steps:**`,
+    `1. Write your document to a temporary file (e.g. /tmp/research.md)`,
+    `2. Use the Skill tool to invoke write-artifact:`,
+    `   Skill(skill: "write-artifact", args: "${ticket.id} <type> /tmp/research.md")`,
     `   Types: research, implementation_plan, design`,
-    `   Example: \`${saveDocScript} research /tmp/doc.md\``,
+    `   Example: Skill(skill: "write-artifact", args: "${ticket.id} research /tmp/research.md")`,
     `3. Your final chat response should be a brief summary (1-2 sentences), NOT the full document.`,
     ``,
-    `CRITICAL: Do NOT output the full document as your response. Save it with save-document.sh. Your response is just a chat message.`,
+    `**CRITICAL:** Do NOT output the full document as your response. Save it using the write-artifact skill. Your response is just a chat message saying you've saved the document.`,
+    ``,
+    `**Available artifact skills:**`,
+    `- /write-artifact <ticket-id> <type> <file> — Save a document artifact`,
+    `- /read-artifact <ticket-id> <type> — Read the latest artifact`,
+    `- /search-artifacts <query> — Search past artifacts using semantic search`,
+    `- /sync-artifacts — Sync all artifacts to QMD for search`,
   ].join("\n");
 
   const fullPrompt = systemPrompt + reportInstructions + saveDocInstructions + nanoBananaInstructions + attachFileInstructions + checkCriteriaInstructions;
@@ -716,8 +740,11 @@ async function runAgentPhase(
 
   // Track agent run
   const runStartedAt = new Date().toISOString();
-  try { abandonPersonaRunsStmt.run(runStartedAt, persona.id); } catch {}
+  try { abandonPersonaRunsStmt.run(runStartedAt, ticket.id, persona.id); } catch {}
   try { insertAgentRunStmt.run(ticket.id, persona.id, phase, JSON.stringify(tools), sessionDir, runStartedAt); } catch {}
+
+  // Stamp lastAgentActivity NOW so the board card shows the working indicator immediately
+  try { markAgentActivity.run(runStartedAt, persona.id, ticket.id); } catch {}
 
   try {
     const result = await runClaude(sessionDir, systemPrompt, workspacePath, timeoutMs, tools, extraEnv);
@@ -739,6 +766,30 @@ async function runAgentPhase(
     );
 
     log(`  [${ticket.id}] ${phase} finished: code=${result.code}, output=${result.stdout.length} chars, timedOut=${result.timedOut}`);
+
+    // ── Auth error detection ─────────────────────
+    if (result.code !== 0 && isAuthError(result.stdout + result.stderr)) {
+      log(`  [${ticket.id}] AUTH EXPIRED — Claude OAuth token expired, triggering Chrome re-auth`);
+      setSettingSync(AUTH_EXPIRED, "true");
+      markAgentActivity.run(null, null, ticket.id);
+      // Trigger autonomous re-auth: opens Chrome with API key + --chrome flag
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/reauth`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        const body = await res.json() as { ok: boolean; error?: string; message?: string };
+        if (body.ok) {
+          log(`  [${ticket.id}] Re-auth triggered: ${body.message}`);
+        } else {
+          log(`  [${ticket.id}] Re-auth failed: ${body.error || "unknown error"} — add ANTHROPIC_API_KEY to vault via Settings > API Keys`);
+        }
+      } catch (e) {
+        log(`  [${ticket.id}] Failed to trigger re-auth: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return null;
+    }
 
     // ── Credit error detection ──────────────────
     if (result.code !== 0 && isCreditError(result.stderr)) {
@@ -774,6 +825,15 @@ async function runAgentPhase(
 // ── Main dispatch with work scheduler ──────────
 async function dispatch(maxTickets: number) {
   log("heartbeat dispatch starting (work scheduler mode)...");
+  setSettingSync("heartbeat_last_ping", new Date().toISOString());
+  setSettingSync("heartbeat_status", "running");
+
+  // ── Auth expired check ──────────────────────────
+  const authExpired = getSettingSync(AUTH_EXPIRED);
+  if (authExpired === "true") {
+    log(`SKIPPED: Claude OAuth token expired — waiting for re-authentication`);
+    return;
+  }
 
   // ── Credit pause check ──────────────────────────
   const pausedUntil = getSettingSync("credits_paused_until");
@@ -857,8 +917,8 @@ async function dispatch(maxTickets: number) {
         neededRole = "developer";
       }
 
-      // Find a persona with the needed role that isn't already busy this cycle
-      const persona = allPersonas.find((p) => p.role === neededRole && !busyPersonas.has(p.id));
+      // Find a persona with the needed role scoped to this ticket's project
+      const persona = allPersonas.find((p) => p.role === neededRole && p.project_id === proj.id && !busyPersonas.has(p.id));
       if (!persona) {
         // No available persona with the right role — skip
         continue;
@@ -878,13 +938,13 @@ async function dispatch(maxTickets: number) {
       if (!ticket.research_completed_at) {
         phase = "research";
         const workspacePath = resolveMainRepo(project);
-        systemPrompt = buildResearchPrompt(persona, project, ticket, workspacePath);
+        systemPrompt = await buildResearchPrompt(persona, project, ticket, workspacePath);
         taskContent = [
           `# Research Ticket: ${ticket.id}`,
           `## ${ticket.title}`,
           ticket.description ? `\n### Description\n${ticket.description}` : "",
           ticket.acceptance_criteria ? `\n### Acceptance Criteria\n${ticket.acceptance_criteria}` : "",
-          `\nResearch this ticket thoroughly. Explore the codebase, understand the current state, identify constraints and edge cases. Output your complete research document in markdown format.`,
+          `\nResearch this ticket thoroughly. Explore the files inside your workspace (${resolveMainRepo(project)}), understand the current state, identify constraints and edge cases. ONLY read files inside your workspace directory. Output your complete research document in markdown format.`,
         ].join("\n");
         tools = TOOLS_READONLY;
         timeoutMs = AGENT_MAX_DURATION_MS;
@@ -894,7 +954,7 @@ async function dispatch(maxTickets: number) {
         const researchDoc = getDocumentContent.get(ticket.id, "research") as DocRow | undefined;
         const researchContent = researchDoc?.content || "(No research document found)";
         const workspacePath = resolveMainRepo(project);
-        systemPrompt = buildPlannerPrompt(persona, project, ticket, workspacePath);
+        systemPrompt = await buildPlannerPrompt(persona, project, ticket, workspacePath);
         taskContent = [
           `# Implementation Plan for: ${ticket.id}`,
           `## ${ticket.title}`,
@@ -913,7 +973,7 @@ async function dispatch(maxTickets: number) {
         const researchContent = researchDoc?.content || "(No research document)";
         const planContent = planDoc?.content || "(No implementation plan)";
         const workspacePath = resolveMainRepo(project);
-        systemPrompt = buildDeveloperPrompt(persona, project, ticket, workspacePath);
+        systemPrompt = await buildDeveloperPrompt(persona, project, ticket, workspacePath);
         taskContent = [
           `# Implement: ${ticket.id}`,
           `## ${ticket.title}`,
@@ -1017,12 +1077,94 @@ async function dispatch(maxTickets: number) {
   }
 
   log(`dispatch complete: ${dispatched} dispatched, ${completed} completed, ${skipped} skipped`);
+  setSettingSync("heartbeat_last_completed", new Date().toISOString());
+  setSettingSync("heartbeat_last_result", JSON.stringify({ dispatched, completed, skipped }));
+  setSettingSync("heartbeat_status", "idle");
+
+  // ── Phase 3: @mention scan ─────────────────────────────────────────────────
+  // Find recent agent comments with @name/@role mentions where the mentioned
+  // persona hasn't responded yet — dispatch them via the webapp API.
+  await scanAndDispatchMentions();
+}
+
+// ── @mention scan ───────────────────────────────────────────────────────────
+interface CommentRow { id: number; ticket_id: number; content: string; persona_id: string | null; created_at: string; project_id: number; }
+interface PersonaRow2 { id: string; name: string; role: string | null; project_id: number; }
+
+async function scanAndDispatchMentions() {
+  const pausedUntil = getSettingSync("credits_paused_until");
+  if (pausedUntil && isPaused(pausedUntil)) return;
+
+  // Recent agent comments (last 15 min) on active tickets
+  const recentComments = db.prepare(`
+    SELECT c.id, c.ticket_id, c.content, c.persona_id, c.created_at, t.project_id
+    FROM comments c
+    JOIN tickets t ON t.id = c.ticket_id
+    WHERE c.author_type = 'agent'
+      AND c.created_at > datetime('now', '-15 minutes')
+      AND t.state NOT IN ('shipped', 'cancelled')
+      AND t.deleted_at IS NULL
+    ORDER BY c.created_at DESC
+    LIMIT 50
+  `).all() as CommentRow[];
+
+  if (recentComments.length === 0) return;
+
+  for (const comment of recentComments) {
+    const projectPersonas = db.prepare(
+      `SELECT id, name, role, project_id FROM personas WHERE project_id = ?`
+    ).all(comment.project_id) as PersonaRow2[];
+
+    for (const p of projectPersonas) {
+      if (p.id === comment.persona_id) continue; // skip self-mention
+
+      const escapedName = p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escapedRole = p.role ? p.role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : null;
+      const namePattern = new RegExp(`@${escapedName}\\b`, 'i');
+      const rolePattern = escapedRole ? new RegExp(`@${escapedRole}\\b`, 'i') : null;
+
+      if (!namePattern.test(comment.content) && !(rolePattern && rolePattern.test(comment.content))) continue;
+
+      // Check if persona already has a running agent_run for this ticket
+      const running = db.prepare(
+        `SELECT id FROM agent_runs WHERE ticket_id = ? AND persona_id = ? AND status = 'running'`
+      ).get(comment.ticket_id, p.id);
+      if (running) continue;
+
+      // Check if persona has responded AFTER this comment
+      const replied = db.prepare(
+        `SELECT id FROM comments WHERE ticket_id = ? AND persona_id = ? AND created_at > ?`
+      ).get(comment.ticket_id, p.id, comment.created_at);
+      if (replied) continue;
+
+      // Dispatch via webapp API
+      log(`  @mention scan: dispatching ${p.name} (${p.role}) to ticket ${comment.ticket_id} — mentioned in comment ${comment.id}`);
+      try {
+        const res = await fetch(`${API_BASE}/api/tickets/${comment.ticket_id}/dispatch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            commentContent: comment.content,
+            targetPersonaId: p.id,
+            conversational: true,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.text();
+          log(`  @mention scan: dispatch failed ${res.status}: ${body.slice(0, 100)}`);
+        }
+      } catch (e) {
+        log(`  @mention scan: dispatch error: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
 }
 
 // ── Main ────────────────────────────────────────
+// REDUCED TO 1 TO LIMIT API USAGE - agents work on ONE ticket at a time
 const maxPerPhase = process.argv.includes("--limit")
   ? Number(process.argv[process.argv.indexOf("--limit") + 1]) || 1
-  : 2;
+  : 1;
 
 dispatch(maxPerPhase)
   .catch((err) => {

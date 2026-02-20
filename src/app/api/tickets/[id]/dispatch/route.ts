@@ -326,16 +326,17 @@ function resolvePhaseForRun(ticket: typeof tickets.$inferSelect): string {
 
 // Determine which role should handle based on ticket state
 function resolveTargetRole(ticket: typeof tickets.$inferSelect): string {
-  // Research phase → always researcher
-  if (!ticket.researchApprovedAt) return "researcher";
-  // Planning phase → lead orchestrates (researcher still active, but lead handles routing)
-  if (!ticket.planApprovedAt) {
-    return "lead";
+  // Planning column has two phases:
+  if (ticket.state === "planning") {
+    // 1. Research (researcher does initial investigation)
+    if (!ticket.researchCompletedAt) return "researcher";
+    // 2. Implementation plan (developer creates the plan after research)
+    return "developer";
   }
-  // Test phase → developer (to run tests and fix bugs)
-  if (ticket.state === "test") return "developer";
-  // Build/Implementation → developer
-  return "developer";
+  // Building phase → developer implements the code
+  if (ticket.state === "building") return "developer";
+  // All other states (preview, test, shipped) → lead coordinates
+  return "lead";
 }
 
 // ── Fetch ticket context ─────────────────────────────

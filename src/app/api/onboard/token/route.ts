@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getVault } from "@/lib/vault";
-import { getUser, updateUser } from "@/db/data/users";
+import { getSetting, setSetting } from "@/db/data/settings";
 
 export async function POST(req: Request) {
   const { token } = await req.json();
@@ -11,20 +11,20 @@ export async function POST(req: Request) {
   const vault = await getVault();
   await vault.set("github", token.trim(), "token");
 
-  // Auto-fetch GitHub avatar and save to user record
+  // Auto-fetch GitHub name and save to settings if not already set
   try {
     const ghRes = await fetch("https://api.github.com/user", {
       headers: { Authorization: `Bearer ${token.trim()}` },
     });
     if (ghRes.ok) {
       const ghData = await ghRes.json();
-      const user = await getUser();
-      if (user && ghData.avatar_url) {
-        await updateUser(user.id, { avatarUrl: ghData.avatar_url });
+      const currentName = await getSetting("user_name");
+      if (!currentName && ghData.name) {
+        await setSetting("user_name", ghData.name);
       }
     }
   } catch {
-    // Non-critical — avatar will be fetched later
+    // Non-critical — name will be set later if needed
   }
 
   return NextResponse.json({ success: true });

@@ -1,0 +1,306 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import type { TicketType } from "@/types";
+
+interface Suggestion {
+  title: string;
+  description: string;
+  type: string;
+  acceptanceCriteria: string;
+}
+
+interface EpicBreakdownWizardProps {
+  epicId: number;
+  epicTitle: string;
+  projectSlug: string;
+  projectId: string;
+  onClose: () => void;
+}
+
+type Phase = "loading" | "reviewing" | "done";
+
+export function EpicBreakdownWizard({
+  epicId,
+  epicTitle,
+  projectSlug,
+  projectId,
+  onClose,
+}: EpicBreakdownWizardProps) {
+  const [phase, setPhase] = useState<Phase>("loading");
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [createdCount, setCreatedCount] = useState(0);
+  const [skippedCount, setSkippedCount] = useState(0);
+  const [creating, setCreating] = useState(false);
+
+  // Editable form state for current suggestion
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editType, setEditType] = useState<TicketType>("feature");
+  const [editCriteria, setEditCriteria] = useState("");
+
+  useEffect(() => {
+    fetchSuggestions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function fetchSuggestions() {
+    try {
+      const res = await fetch(`/api/tickets/${epicId}/suggest-breakdown`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      const items: Suggestion[] = data.suggestions || [];
+      if (items.length === 0) {
+        setPhase("done");
+        return;
+      }
+      setSuggestions(items);
+      loadSuggestion(items[0]);
+      setPhase("reviewing");
+    } catch {
+      setPhase("done");
+    }
+  }
+
+  function loadSuggestion(s: Suggestion) {
+    setEditTitle(s.title);
+    setEditDescription(s.description);
+    const t = s.type as TicketType;
+    setEditType(["feature", "bug", "chore"].includes(t) ? t : "feature");
+    setEditCriteria(s.acceptanceCriteria || "");
+  }
+
+  function advance() {
+    const next = currentIndex + 1;
+    if (next >= suggestions.length) {
+      onClose();
+      return;
+    } else {
+      setCurrentIndex(next);
+      loadSuggestion(suggestions[next]);
+    }
+  }
+
+  async function handleCreate() {
+    setCreating(true);
+    try {
+      await fetch("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: editTitle.trim(),
+          type: editType,
+          description: editDescription.trim() || undefined,
+          acceptanceCriteria: editCriteria.trim() || undefined,
+          projectId,
+          epicId,
+        }),
+      });
+      setCreatedCount((c) => c + 1);
+    } catch {
+      // Failed to create — still advance
+    }
+    setCreating(false);
+    advance();
+  }
+
+  function handleSkip() {
+    setSkippedCount((c) => c + 1);
+    advance();
+  }
+
+  const typeOptions: { value: TicketType; label: string }[] = [
+    { value: "feature", label: "Feature" },
+    { value: "bug", label: "Bugfix" },
+    { value: "chore", label: "Chore" },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+      style={{ backgroundColor: "rgba(0, 0, 0, 0.8)" }}
+    >
+      <div
+        className="w-full h-full rounded-2xl overflow-hidden flex flex-col"
+        style={{
+          backgroundColor: "var(--bg-primary)",
+          border: "1px solid var(--border-medium)",
+        }}
+      >
+        {/* Header */}
+        <div
+          className="px-8 py-5 border-b flex items-center justify-between"
+          style={{ borderBottomColor: "var(--border-subtle)" }}
+        >
+          <div>
+            <h2 className="text-lg font-semibold" style={{ color: "#f97316" }}>
+              Break down epic
+            </h2>
+            <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>
+              {epicTitle}
+            </p>
+          </div>
+          {phase === "reviewing" && (
+            <span className="text-sm font-medium" style={{ color: "var(--text-muted)" }}>
+              {currentIndex + 1} / {suggestions.length}
+            </span>
+          )}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-8 py-6 min-h-0">
+          {phase === "loading" && (
+            <div className="flex flex-col items-center justify-center h-full gap-4">
+              <svg className="animate-spin h-8 w-8" style={{ color: "#f97316" }} fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                Analyzing epic and generating sub-tickets...
+              </p>
+            </div>
+          )}
+
+          {phase === "reviewing" && (
+            <div className="flex flex-col gap-5 h-full">
+              {/* Progress bar */}
+              <div className="w-full h-1.5 rounded-full overflow-hidden shrink-0" style={{ backgroundColor: "rgba(249, 115, 22, 0.15)" }}>
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${((currentIndex) / suggestions.length) * 100}%`,
+                    backgroundColor: "#f97316",
+                  }}
+                />
+              </div>
+
+              {/* Title + Type row */}
+              <div className="flex gap-6 items-end shrink-0">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-secondary)" }}>
+                    Title
+                  </label>
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="w-full px-4 py-3 rounded-lg text-base outline-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] font-semibold focus:border-[#f97316]"
+                  />
+                </div>
+                <div className="shrink-0">
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--text-secondary)" }}>
+                    Type
+                  </label>
+                  <div className="flex gap-2">
+                    {typeOptions.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setEditType(opt.value)}
+                        className="px-4 py-3 rounded-lg text-sm font-medium transition-colors border"
+                        style={{
+                          backgroundColor: editType === opt.value ? "color-mix(in srgb, #f97316 15%, transparent)" : "transparent",
+                          borderColor: editType === opt.value ? "#f97316" : "var(--border-medium)",
+                          color: editType === opt.value ? "#f97316" : "var(--text-secondary)",
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Description + Acceptance criteria side by side, flex-grow */}
+              <div className="flex gap-6 flex-1 min-h-0">
+                <div className="flex-[2] flex flex-col min-h-0">
+                  <label className="block text-sm font-medium mb-1.5 shrink-0" style={{ color: "var(--text-secondary)" }}>
+                    Description
+                  </label>
+                  <textarea
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    className="w-full flex-1 px-4 py-3 rounded-lg text-sm leading-relaxed outline-none resize-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] focus:border-[#f97316]"
+                  />
+                </div>
+                <div className="flex-1 flex flex-col min-h-0">
+                  <label className="block text-sm font-medium mb-1.5 shrink-0" style={{ color: "var(--text-secondary)" }}>
+                    Acceptance criteria
+                  </label>
+                  <textarea
+                    value={editCriteria}
+                    onChange={(e) => setEditCriteria(e.target.value)}
+                    className="w-full flex-1 px-4 py-3 rounded-lg text-sm leading-relaxed outline-none resize-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] focus:border-[#f97316]"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {phase === "done" && (
+            <div className="flex flex-col items-center justify-center h-full gap-4">
+              <div
+                className="w-14 h-14 rounded-full flex items-center justify-center"
+                style={{ backgroundColor: "rgba(249, 115, 22, 0.15)" }}
+              >
+                <svg className="w-7 h-7" style={{ color: "#f97316" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
+                  Breakdown complete
+                </p>
+                <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+                  Created {createdCount} ticket{createdCount !== 1 ? "s" : ""}
+                  {skippedCount > 0 && `, skipped ${skippedCount}`}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          className="px-8 py-4 border-t flex items-center justify-between"
+          style={{ borderTopColor: "var(--border-subtle)" }}
+        >
+          {phase === "reviewing" ? (
+            <>
+              <button
+                onClick={handleSkip}
+                disabled={creating}
+                className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors hover:bg-white/5"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Skip
+              </button>
+              <button
+                onClick={handleCreate}
+                disabled={!editTitle.trim() || creating}
+                className="px-6 py-2.5 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-40 hover:opacity-90"
+                style={{ backgroundColor: "#f97316" }}
+              >
+                {creating ? "Creating..." : currentIndex < suggestions.length - 1 ? "Create & Next" : "Create & Finish"}
+              </button>
+            </>
+          ) : phase === "done" ? (
+            <>
+              <div />
+              <button
+                onClick={onClose}
+                className="px-6 py-2.5 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
+                style={{ backgroundColor: "#f97316" }}
+              >
+                View Board
+              </button>
+            </>
+          ) : (
+            <div />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

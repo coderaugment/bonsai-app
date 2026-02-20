@@ -36,24 +36,22 @@ db.delete(schema.roles).run();
 db.delete(schema.skills).run();
 db.delete(schema.projects).run();
 db.delete(schema.settings).run();
-db.delete(schema.users).run();
 
-// Seed user (so onboarding skips welcome → lands on github connect)
-const user = db
-  .insert(schema.users)
-  .values({ name: "Ryan" })
-  .returning()
-  .get();
-console.log(`Created user: ${user.name}`);
+// Set user name in settings
+db.insert(schema.settings)
+  .values({ key: "user_name", value: "Ryan" })
+  .onConflictDoUpdate({ target: schema.settings.key, set: { value: "Ryan" } })
+  .run();
+console.log("Set user name to Ryan");
 
 // No project — onboarding flow: github → project create → team → ticket
 
 // Seed roles (available for team building)
 const roleData = [
   { slug: "lead", title: "Lead", description: "Coordinates work and removes blockers. Keeps the team aligned and stakeholders informed.", color: "#22c55e" },
-  { slug: "researcher", title: "Research Analyst", description: "Investigates tickets before implementation. Explores the codebase, identifies constraints, and documents findings.", color: "#8b5cf6" },
-  { slug: "developer", title: "Software Developer", description: "Implements features and fixes bugs. Writes clean, tested code following project patterns.", color: "#3b82f6" },
-  { slug: "designer", title: "Product Designer", description: "Creates user interfaces and experiences. Focuses on usability, accessibility, and visual design.", color: "#f59e0b" },
+  { slug: "researcher", title: "Researcher", description: "Investigates tickets before implementation. Explores the codebase, identifies constraints, and documents findings.", color: "#8b5cf6" },
+  { slug: "developer", title: "Developer", description: "Implements features and fixes bugs. Writes clean, tested code following project patterns.", color: "#3b82f6" },
+  { slug: "designer", title: "Designer", description: "Creates user interfaces and experiences. Focuses on usability, accessibility, and visual design.", color: "#f59e0b" },
   { slug: "critic", title: "Critic", description: "Challenges assumptions and stress-tests ideas. The constructive contrarian who asks the hard questions.", color: "#ef4444" },
   { slug: "hacker", title: "Hacker", description: "Security-focused engineer who finds vulnerabilities and hardens the codebase.", color: "#06b6d4" },
 ];

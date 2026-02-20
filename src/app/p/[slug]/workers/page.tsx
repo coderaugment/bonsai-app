@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { getUser } from "@/db/data/users";
 import { getProjectBySlug } from "@/db/data/projects";
 import { WorkersView } from "@/components/board/workers-view";
 
@@ -11,9 +10,6 @@ export default async function ProjectWorkersPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-
-  const user = await getUser();
-  if (!user) redirect("/onboard/welcome");
 
   const project = await getProjectBySlug(slug);
   if (!project) redirect("/board");

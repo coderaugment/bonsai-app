@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { WorkerRole } from "@/types";
 import { workerRoles } from "@/lib/worker-types";
+import { GeminiSetupModal } from "@/components/gemini-setup-modal";
 
 interface AddWorkerModalProps {
   open: boolean;
@@ -121,6 +122,7 @@ export function AddWorkerModal({ open, onClose, projectSlug: _projectSlug }: Add
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showGeminiSetup, setShowGeminiSetup] = useState(false);
 
   const accent = selectedRole ? workerRoles[selectedRole].color : "#6366f1";
 
@@ -173,6 +175,11 @@ export function AddWorkerModal({ open, onClose, projectSlug: _projectSlug }: Add
         body: JSON.stringify({ role: selectedRole }),
       });
       const genData = await genRes.json();
+      if (genData.code === "gemini_key_missing") {
+        setGenerating(false);
+        setShowGeminiSetup(true);
+        return;
+      }
       if (genData.name) setName(genData.name);
       if (genData.personality) setPersonality(genData.personality);
 
@@ -187,6 +194,11 @@ export function AddWorkerModal({ open, onClose, projectSlug: _projectSlug }: Add
         }),
       });
       const avatarData = await avatarRes.json();
+      if (avatarData.code === "gemini_key_missing") {
+        setGenerating(false);
+        setShowGeminiSetup(true);
+        return;
+      }
       if (avatarData.avatar) setAvatarUrl(avatarData.avatar);
     } catch {
       // Ignore errors
@@ -457,6 +469,14 @@ export function AddWorkerModal({ open, onClose, projectSlug: _projectSlug }: Add
           </button>
         </div>
       </div>
+      <GeminiSetupModal
+        open={showGeminiSetup}
+        onClose={() => setShowGeminiSetup(false)}
+        onSuccess={() => {
+          setShowGeminiSetup(false);
+          handleGenerate();
+        }}
+      />
     </div>
   );
 }

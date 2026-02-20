@@ -68,14 +68,16 @@ export async function POST(req: Request) {
         githubRepo = slug;
       }
 
-      // Clone repo into local projects directory
-      const localClonePath = path.join(PROJECTS_DIR, finalSlug);
-      if (githubRepo && !fs.existsSync(localClonePath)) {
-        fs.mkdirSync(PROJECTS_DIR, { recursive: true });
+      // Clone repo into {projectDir}/repo/ subdirectory
+      const projectDir = path.join(PROJECTS_DIR, finalSlug);
+      const repoPath = path.join(projectDir, "repo");
+
+      if (githubRepo && !fs.existsSync(repoPath)) {
+        fs.mkdirSync(projectDir, { recursive: true });
         try {
           const cloneUrl = `https://${token}@github.com/${githubOwner}/${githubRepo}.git`;
-          execFileSync("git", ["clone", cloneUrl, finalSlug], {
-            cwd: PROJECTS_DIR,
+          execFileSync("git", ["clone", cloneUrl, "repo"], {
+            cwd: projectDir,
             timeout: 30000,
           });
         } catch (err: unknown) {
@@ -86,10 +88,30 @@ export async function POST(req: Request) {
   }
 
   const localPath = path.join(PROJECTS_DIR, finalSlug);
+  const repoDir = path.join(localPath, "repo");
+  const worktreesDir = path.join(localPath, "worktrees");
 
-  // Ensure directory exists even if clone failed
+  // Ensure project directory and worktrees directory exist
   if (!fs.existsSync(localPath)) {
     fs.mkdirSync(localPath, { recursive: true });
+  }
+  if (!fs.existsSync(worktreesDir)) {
+    fs.mkdirSync(worktreesDir, { recursive: true });
+  }
+
+  // CRITICAL VERIFICATION: Ensure repo/ directory exists with .git
+  if (!fs.existsSync(repoDir)) {
+    throw new Error(
+      `FATAL: Project structure violation - repo/ directory missing at ${repoDir}. ` +
+      `Projects MUST have structure: {projectDir}/repo/ (git repo) and {projectDir}/worktrees/ (ticket worktrees).`
+    );
+  }
+  const gitDir = path.join(repoDir, ".git");
+  if (!fs.existsSync(gitDir)) {
+    throw new Error(
+      `FATAL: Project structure violation - repo/ is not a git repository at ${repoDir}. ` +
+      `The repo/ directory MUST contain a valid git repository.`
+    );
   }
 
   try {
@@ -143,6 +165,49 @@ export async function DELETE(req: Request) {
   if (!id) {
     return NextResponse.json({ error: "Project id is required" }, { status: 400 });
   }
+
+  // Fetch project to get GitHub details before deleting
+  const { getProjectById } = await import("@/db/data/projects");
+  const project = await getProjectById(Number(id));
+
+  // Delete GitHub repo if it exists
+  if (project?.githubOwner && project?.githubRepo) {
+    const token = await getGithubToken();
+    if (token) {
+      try {
+        const res = await githubFetch(
+          `/repos/${project.githubOwner}/${project.githubRepo}`,
+          token,
+          { method: "DELETE" }
+        );
+        if (!res.ok && res.status !== 404) {
+          console.error("[DELETE /api/projects] GitHub repo deletion failed:", res.status);
+        }
+      } catch (err) {
+        console.error("[DELETE /api/projects] GitHub repo deletion error:", err);
+      }
+    }
+  }
+
+  // Remove local clone directory
+  if (project?.localPath) {
+    try {
+      fs.rmSync(project.localPath, { recursive: true, force: true });
+    } catch {
+      // Directory may not exist — that's fine
+    }
+  }
+
+  // Delete associated resources to prevent orphans
+  const { db } = await import("@/db/index");
+  const { personas, tickets } = await import("@/db/schema");
+  const { eq } = await import("drizzle-orm");
+
+  // Delete tickets first (they may reference personas)
+  db.delete(tickets).where(eq(tickets.project_id, Number(id))).run();
+  // Delete personas
+  db.delete(personas).where(eq(personas.project_id, Number(id))).run();
+
   await softDeleteProject(Number(id));
   return NextResponse.json({ success: true });
 }

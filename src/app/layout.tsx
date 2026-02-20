@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/sidebar";
-import { getUser } from "@/db/data/users";
+import { getSetting } from "@/db/data/settings";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,7 +31,7 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const user = await getUser();
+  const userName = await getSetting("user_name");
 
   return (
     <html lang="en" className="dark">
@@ -39,7 +39,7 @@ export default async function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <div className="flex h-screen overflow-hidden">
-          <Sidebar userName={user?.name ?? undefined} />
+          <Sidebar userName={userName ?? undefined} />
           <main className="flex-1 overflow-hidden">{children}</main>
         </div>
       </body>

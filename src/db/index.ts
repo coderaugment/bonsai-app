@@ -5,7 +5,9 @@ import path from "node:path";
 
 const env = process.env.BONSAI_ENV || "prod";
 const dbFile = env === "dev" ? "bonsai-dev.db" : "bonsai.db";
-const dbPath = path.join(process.cwd(), dbFile);
+// Use BONSAI_DB_DIR if set (for CLI from worktrees), otherwise use cwd (for webapp)
+const dbDir = process.env.BONSAI_DB_DIR || process.cwd();
+const dbPath = path.join(dbDir, dbFile);
 
 const sqlite = new Database(dbPath);
 sqlite.pragma("journal_mode = WAL");
@@ -184,6 +186,19 @@ if (!existingTables.has("users")) {
   console.log("[db] Auto-created tables (fresh database)");
 }
 
+// ── Seed default roles if empty ──────────────────
+const roleCount = (sqlite.prepare("SELECT count(*) as n FROM roles").get() as { n: number }).n;
+if (roleCount === 0) {
+  const insertRole = sqlite.prepare("INSERT INTO roles (slug, title, description, color) VALUES (?, ?, ?, ?)");
+  insertRole.run("lead", "Lead", "Coordinates work, removes blockers, and keeps the team aligned.", "#22c55e");
+  insertRole.run("researcher", "Researcher", "Investigates problems, analyzes codebases, and produces research documents.", "#8b5cf6");
+  insertRole.run("developer", "Developer", "Builds features, fixes bugs, writes tests, and ships code.", "#3b82f6");
+  insertRole.run("designer", "Designer", "Creates UI/UX designs, design systems, and visual assets.", "#f59e0b");
+  insertRole.run("critic", "Critic", "Challenges assumptions and stress-tests ideas. The constructive contrarian.", "#ef4444");
+  insertRole.run("hacker", "Hacker", "Security-focused engineer who finds vulnerabilities and hardens the codebase.", "#06b6d4");
+  console.log("[db] Seeded 6 default roles");
+}
+
 // ── agent_runs table (self-healing migration) ──────────────────
 if (!existingTables.has("agent_runs")) {
   sqlite.exec(`
@@ -207,6 +222,24 @@ if (!existingTables.has("agent_runs")) {
     CREATE INDEX IF NOT EXISTS idx_agent_runs_persona_status ON agent_runs (persona_id, status);
   `);
   console.log("[db] Auto-created agent_runs table");
+}
+
+// ── project_messages table (self-healing migration) ──────────────────
+if (!existingTables.has("project_messages")) {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS "project_messages" (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL REFERENCES projects(id),
+      author_type TEXT NOT NULL,
+      author_id INTEGER,
+      persona_id TEXT REFERENCES personas(id),
+      content TEXT NOT NULL,
+      attachments TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_messages_project ON project_messages (project_id, created_at);
+  `);
+  console.log("[db] Auto-created project_messages table");
 }
 
 export const db = drizzle(sqlite, { schema });

@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { BoardView } from "@/components/board/board-view";
-import { ProjectInfoPanel } from "@/components/board/project-info-panel";
 import { BoardActions } from "@/components/board/board-actions";
 import { getProjectBySlug } from "@/db/data/projects";
 import { getTickets } from "@/db/data/tickets";
@@ -35,27 +34,27 @@ export default async function BoardPage({
   }
 
   const tickets = await getTickets(Number(project.id));
-  if (tickets.length === 0) {
+  const visibleTickets = tickets.filter((t) => !t.isEpic);
+  if (visibleTickets.length === 0) {
     redirect(`/p/${slug}/new-ticket`);
   }
 
   const personas = await getPersonas(Number(project.id));
 
   const ticketStats = {
-    review: tickets.filter((t) => t.state === "review").length,
-    planning: tickets.filter((t) => t.state === "planning").length,
-    building: tickets.filter((t) => t.state === "building").length,
-    test: tickets.filter((t) => t.state === "test").length,
-    shipped: tickets.filter((t) => t.state === "shipped").length,
+    planning: visibleTickets.filter((t) => t.state === "planning").length,
+    building: visibleTickets.filter((t) => t.state === "building").length,
+    test: visibleTickets.filter((t) => t.state === "test").length,
+    shipped: visibleTickets.filter((t) => t.state === "shipped").length,
   };
 
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
-  const awakePersonaIds = new Set(
+  const awakePersonaIds = [...new Set(
     tickets
       .filter((t) => t.assignee && t.lastAgentActivity && (now - new Date(t.lastAgentActivity).getTime()) < 30 * 60 * 1000)
       .map((t) => t.assignee!.id)
-  );
+  )];
 
   return (
     <div className="flex flex-col h-full">
@@ -64,17 +63,15 @@ export default async function BoardPage({
         shippedCount={ticketStats.shipped}
         hasCommands={!!(project.buildCommand && project.runCommand)}
       />
-      <ProjectInfoPanel
-        project={project}
-        personas={personas}
-        ticketStats={ticketStats}
-        awakePersonaIds={awakePersonaIds}
-      />
       <BoardView
         tickets={tickets}
         projectId={project.id}
         leadAvatar={personas.find((p) => p.role === "lead")?.avatar}
         leadName={personas.find((p) => p.role === "lead")?.name}
+        personas={personas}
+        project={project}
+        ticketStats={ticketStats}
+        awakePersonaIds={awakePersonaIds}
       />
     </div>
   );

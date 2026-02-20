@@ -55,7 +55,7 @@ export default function OnboardTicketPage() {
   const titleSlug = slugify(title);
   const ticketBranch = titleSlug ? `${type}/${titleSlug}` : "";
   const worktreePath = titleSlug
-    ? `~/.bonsai/worktrees/${projectSlug}/${titleSlug}`
+    ? `~/development/bonsai/projects/${projectSlug}/worktrees/tkt_##`
     : "";
 
   async function onDescriptionBlur(opts?: { skipEnhance?: boolean }) {

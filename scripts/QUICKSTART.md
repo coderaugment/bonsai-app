@@ -296,7 +296,8 @@ crontab -e
 ```bash
 rm -rf ~/.bonsai/logs
 rm -rf ~/.bonsai/sessions
-rm -rf ~/.bonsai/worktrees
+# Worktrees are stored at {projectRoot}/worktrees/
+# To clean: cd ~/development/bonsai/projects/{project} && rm -rf worktrees
 ```
 
 ## 📚 Learn More

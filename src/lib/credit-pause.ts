@@ -9,6 +9,7 @@
 // Settings keys
 export const CREDITS_PAUSED_UNTIL = "credits_paused_until";
 export const CREDITS_PAUSE_REASON = "credits_pause_reason";
+export const AUTH_EXPIRED = "auth_expired";
 
 // Patterns that indicate a credit/rate limit error
 const CREDIT_PATTERNS = [
@@ -24,6 +25,20 @@ const CREDIT_PATTERNS = [
 /** Returns true if stderr looks like a credit/rate limit error */
 export function isCreditError(stderr: string): boolean {
   return CREDIT_PATTERNS.some((pattern) => pattern.test(stderr));
+}
+
+// Patterns that indicate an OAuth authentication error
+const AUTH_PATTERNS = [
+  /OAuth token has expired/i,
+  /authentication_error/i,
+  /Failed to authenticate/i,
+  /Please obtain a new token/i,
+  /\b401\b.*auth/i,
+];
+
+/** Returns true if stderr looks like an OAuth token expiry error */
+export function isAuthError(stderr: string): boolean {
+  return AUTH_PATTERNS.some((pattern) => pattern.test(stderr));
 }
 
 /**

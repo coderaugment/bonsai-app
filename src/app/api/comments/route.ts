@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCommentsByTicketOrDocument, enrichComments, createCommentAndBumpCount } from "@/db/data/comments";
-import { getUser } from "@/db/data/users";
+import { getSetting } from "@/db/data/settings";
 import { logAuditEvent } from "@/db/data/audit";
 
 export async function GET(req: Request) {
@@ -29,13 +29,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "ticketId and content or attachments required" }, { status: 400 });
   }
 
-  // Get current user
-  const user = await getUser();
+  // Get user name from settings
+  const userName = await getSetting("user_name");
 
   const comment = await createCommentAndBumpCount({
     ticketId,
     authorType: "human",
-    authorId: user?.id ?? null,
+    authorId: null,
     content: content?.trim() || "",
     attachments: attachments ? JSON.stringify(attachments) : null,
     documentId: documentId || null,
@@ -46,8 +46,8 @@ export async function POST(req: Request) {
     ticketId,
     event: "comment_added",
     actorType: "human",
-    actorId: user?.id,
-    actorName: user?.name ?? "Unknown",
+    actorId: null,
+    actorName: userName ?? "User",
     detail: `Added a comment`,
   });
 
@@ -57,7 +57,7 @@ export async function POST(req: Request) {
       id: comment.id,
       ticketId: comment.ticketId,
       authorType: comment.authorType,
-      author: user ? { name: user.name, avatarUrl: user.avatarUrl || undefined } : undefined,
+      author: userName ? { name: userName } : undefined,
       content: comment.content,
       attachments,
       documentId: comment.documentId ?? undefined,

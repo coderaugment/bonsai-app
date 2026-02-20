@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getUser } from "@/db/data/users";
+import { getSetting } from "@/db/data/settings";
 import { getTicketById, updateTicket } from "@/db/data/tickets";
 import { createSystemCommentAndBumpCount } from "@/db/data/comments";
 import { logAuditEvent } from "@/db/data/audit";
@@ -13,12 +13,6 @@ interface RouteContext {
 export async function POST(req: Request, context: RouteContext) {
   const { id } = await context.params;
   const ticketId = Number(id);
-
-  // Get current user (first user for now - in production would use auth)
-  const user = await getUser();
-  if (!user) {
-    return NextResponse.json({ error: "No user found" }, { status: 401 });
-  }
 
   // Check that ticket has plan completed
   const ticket = await getTicketById(ticketId);
@@ -35,17 +29,17 @@ export async function POST(req: Request, context: RouteContext) {
   }
 
   const now = new Date().toISOString();
+  const userName = await getSetting("user_name");
 
   await updateTicket(ticketId, {
     planApprovedAt: now,
-    planApprovedBy: user.id,
-    state: "build",
+    state: "building",
   });
 
   // Post system comment for the transition
   await createSystemCommentAndBumpCount(
     ticketId,
-    `Moved from **plan** to **build** — plan approved`
+    `Moved from **planning** to **building** — plan approved`
   );
 
   // Auto-dispatch developer to start implementation
@@ -59,8 +53,8 @@ export async function POST(req: Request, context: RouteContext) {
     ticketId,
     event: "plan_approved",
     actorType: "human",
-    actorId: user.id,
-    actorName: user.name,
+    actorId: null,
+    actorName: userName ?? "User",
     detail: "Approved implementation plan",
     metadata: { newState: "build" },
   });
@@ -68,8 +62,7 @@ export async function POST(req: Request, context: RouteContext) {
   return NextResponse.json({
     ok: true,
     approvedAt: now,
-    approvedBy: user.id,
-    state: "build",
+    state: "building",
   });
 }
 
@@ -80,16 +73,15 @@ export async function DELETE(req: Request, context: RouteContext) {
 
   await updateTicket(ticketId, {
     planApprovedAt: null,
-    planApprovedBy: null,
   });
 
-  const user = await getUser();
+  const userName = await getSetting("user_name");
   await logAuditEvent({
     ticketId,
     event: "plan_approval_revoked",
     actorType: "human",
-    actorId: user?.id,
-    actorName: user?.name ?? "Unknown",
+    actorId: null,
+    actorName: userName ?? "User",
     detail: "Revoked plan approval",
   });
 

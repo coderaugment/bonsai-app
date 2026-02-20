@@ -11,7 +11,7 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-const DOC_TYPES = ["research", "implementation_plan", "design"] as const;
+const DOC_TYPES = ["research", "implementation_plan"] as const;
 type DocType = (typeof DOC_TYPES)[number];
 
 function isRegression(newContent: string, existingContent: string | null | undefined): boolean {
@@ -22,7 +22,6 @@ function isRegression(newContent: string, existingContent: string | null | undef
 const DOC_LABELS: Record<DocType, string> = {
   research: "Research document",
   implementation_plan: "Implementation plan",
-  design: "Design document",
 };
 
 // GET /api/tickets/[id]/documents

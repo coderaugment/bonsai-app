@@ -35,3 +35,9 @@ export function getAuditLog(ticketId: number) {
     .all();
   return asAsync(rows);
 }
+
+export function clearAuditLog(ticketId: number): Promise<void> {
+  return runAsync(() => {
+    db.delete(ticketAuditLog).where(eq(ticketAuditLog.ticketId, ticketId)).run();
+  });
+}

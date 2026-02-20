@@ -1,17 +1,11 @@
 export type TicketType = "feature" | "bug" | "chore";
 
 export type TicketState =
-  | "review"
   | "planning"
   | "building"
   | "preview"
   | "test"
   | "shipped";
-
-export interface TicketCreator {
-  name: string;
-  avatarUrl?: string;
-}
 
 /** Format integer ticket ID as display slug: 1 → "tkt_01" */
 export function formatTicketSlug(id: number): string {
@@ -26,7 +20,6 @@ export interface Ticket {
   state: TicketState;
   priority: number;
   assignee?: Persona;
-  creator?: TicketCreator;
   acceptanceCriteria?: string;
   commentCount: number;
   hasAttachments: boolean;
@@ -38,11 +31,9 @@ export interface Ticket {
   researchCompletedAt?: string;
   researchCompletedBy?: string;
   researchApprovedAt?: string;
-  researchApprovedBy?: number;
   planCompletedAt?: string;
   planCompletedBy?: string;
   planApprovedAt?: string;
-  planApprovedBy?: number;
   // Merge tracking
   mergedAt?: string;
   mergeCommit?: string;
@@ -54,9 +45,11 @@ export interface Ticket {
   childrenShipped?: number; // how many children shipped (for progress)
   // All personas who have interacted with this ticket
   participants?: Persona[];
+  // IDs of personas with currently-running agent_runs (for real-time working indicator)
+  activeRunPersonaIds?: string[];
 }
 
-export type TicketDocumentType = "research" | "implementation_plan" | "research_critique" | "plan_critique";
+export type TicketDocumentType = "research" | "implementation_plan" | "design" | "security_review" | "research_critique" | "plan_critique";
 
 export interface TicketDocument {
   id: number;
@@ -214,6 +207,24 @@ export interface ExtractedItem {
 // ============================================================================
 // AGENT RUNS - Tracks every agent spawn
 // ============================================================================
+// ============================================================================
+// PROJECT MESSAGES - Project-level chat
+// ============================================================================
+export interface ProjectMessage {
+  id: number;
+  projectId: number;
+  authorType: "human" | "agent" | "system";
+  author?: {
+    name: string;
+    avatarUrl?: string;
+    color?: string;
+    role?: string;
+  };
+  content: string;
+  attachments?: CommentAttachment[];
+  createdAt: string;
+}
+
 export type AgentRunStatus = "running" | "completed" | "failed" | "timeout" | "abandoned";
 
 export interface AgentRun {

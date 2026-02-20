@@ -49,15 +49,8 @@ export const roleSkills = sqliteTable(
 );
 
 // ============================================================================
-// USERS
+// SETTINGS - Global configuration (including user name)
 // ============================================================================
-export const users = sqliteTable("users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
-  avatarUrl: text("avatar_url"),
-  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
-});
-
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -108,13 +101,12 @@ export const tickets = sqliteTable("tickets", {
   description: text("description"),
   type: text("type", { enum: ["feature", "bug", "chore"] }).notNull(),
   state: text("state", {
-    enum: ["review", "planning", "building", "preview", "test", "shipped"],
+    enum: ["planning", "building", "preview", "test", "shipped"],
   })
     .notNull()
     .default("planning"),
   priority: integer("priority").notNull().default(0),
   assigneeId: text("assignee_id").references(() => personas.id),
-  createdBy: integer("created_by").references(() => users.id),
   commentCount: integer("comment_count").default(0),
   acceptanceCriteria: text("acceptance_criteria"),
   hasAttachments: integer("has_attachments", { mode: "boolean" }).default(
@@ -131,11 +123,9 @@ export const tickets = sqliteTable("tickets", {
   researchCompletedAt: text("research_completed_at"),
   researchCompletedBy: text("research_completed_by").references(() => personas.id),
   researchApprovedAt: text("research_approved_at"),
-  researchApprovedBy: integer("research_approved_by").references(() => users.id),
   planCompletedAt: text("plan_completed_at"),
   planCompletedBy: text("plan_completed_by").references(() => personas.id),
   planApprovedAt: text("plan_approved_at"),
-  planApprovedBy: integer("plan_approved_by").references(() => users.id),
   // Merge tracking
   mergedAt: text("merged_at"),
   mergeCommit: text("merge_commit"),
@@ -161,7 +151,7 @@ export const comments = sqliteTable("comments", {
 export const ticketDocuments = sqliteTable("ticket_documents", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ticketId: integer("ticket_id").notNull().references(() => tickets.id),
-  type: text("type", { enum: ["research", "implementation_plan", "research_critique", "plan_critique", "design"] }).notNull(),
+  type: text("type", { enum: ["research", "implementation_plan", "research_critique", "plan_critique"] }).notNull(),
   content: text("content").notNull(),
   version: integer("version").default(1),
   authorPersonaId: text("author_persona_id").references(() => personas.id),
@@ -251,6 +241,24 @@ export const agentRuns = sqliteTable("agent_runs", {
 });
 
 export type AgentRunRow = typeof agentRuns.$inferSelect;
+
+// ============================================================================
+// PROJECT MESSAGES - Project-level chat (not tied to tickets)
+// ============================================================================
+export const projectMessages = sqliteTable("project_messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id),
+  authorType: text("author_type", { enum: ["human", "agent", "system"] }).notNull(),
+  authorId: integer("author_id"), // user id if human
+  personaId: text("persona_id").references(() => personas.id), // persona id if agent
+  content: text("content").notNull(),
+  attachments: text("attachments"), // JSON array of {name, type, data}
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+export type ProjectMessageRow = typeof projectMessages.$inferSelect;
 
 // ── Type exports for prompt builder ──────────────
 

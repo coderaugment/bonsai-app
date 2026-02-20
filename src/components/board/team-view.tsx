@@ -27,12 +27,27 @@ const PROMPT_LABELS: Record<string, string> = {
 };
 
 const ROLE_PROMPT_MAP: Record<string, string[]> = {
-  lead: ["prompt_role_lead", "prompt_phase_planning", "prompt_phase_conversational"],
+  lead: ["prompt_role_lead", "prompt_phase_conversational"],
   researcher: ["prompt_role_researcher", "prompt_phase_research", "prompt_dispatch_researcher_v3"],
   developer: ["prompt_role_developer", "prompt_phase_planning", "prompt_phase_implementation", "prompt_phase_test"],
   designer: ["prompt_role_designer", "prompt_phase_designer"],
   critic: ["prompt_role_critic", "prompt_phase_research_critic", "prompt_dispatch_critic_v2", "prompt_dispatch_plan_critic"],
   hacker: ["prompt_role_hacker", "prompt_dispatch_plan_hacker"],
+};
+
+const EVENT_PROMPT_LABELS: Record<string, string> = {
+  prompt_lead_new_ticket: "new-ticket",
+  prompt_researcher_new_ticket: "new-ticket",
+  prompt_developer_new_ticket: "new-ticket",
+  prompt_lead_new_epic: "new-epic",
+  prompt_researcher_epic_subtask: "epic-subtask",
+  prompt_developer_epic_subtask: "epic-subtask",
+};
+
+const ROLE_EVENT_PROMPT_MAP: Record<string, string[]> = {
+  lead: ["prompt_lead_new_ticket", "prompt_lead_new_epic"],
+  researcher: ["prompt_researcher_new_ticket", "prompt_researcher_epic_subtask"],
+  developer: ["prompt_developer_new_ticket", "prompt_developer_epic_subtask"],
 };
 
 function getSharedRoles(promptKey: string, currentSlug: string): string[] {
@@ -89,6 +104,17 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
   const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null);
   const [savingPrompt, setSavingPrompt] = useState<string | null>(null);
 
+  const [roleContexts, setRoleContexts] = useState<Record<string, PromptData>>({});
+  const [roleContextEdit, setRoleContextEdit] = useState<string | undefined>(undefined);
+  const [savingContext, setSavingContext] = useState(false);
+
+  const [eventPrompts, setEventPrompts] = useState<Record<string, PromptData>>({});
+  const [eventPromptEdits, setEventPromptEdits] = useState<Record<string, string>>({});
+  const [expandedEventPrompt, setExpandedEventPrompt] = useState<string | null>(null);
+  const [savingEventPrompt, setSavingEventPrompt] = useState<string | null>(null);
+
+  const [allEventDefaults, setAllEventDefaults] = useState<Record<string, string>>({});
+
   async function fetchData() {
     setLoading(true);
     try {
@@ -107,10 +133,17 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
 
   async function fetchPrompts() {
     try {
-      const res = await fetch("/api/settings/prompts");
-      const data = await res.json();
-      setPrompts(data.prompts || {});
-      setPromptDefaults(data.defaults || {});
+      const [promptsRes, eventRes] = await Promise.all([
+        fetch("/api/settings/prompts"),
+        fetch("/api/settings/event-prompts"),
+      ]);
+      const promptsData = await promptsRes.json();
+      setPrompts(promptsData.prompts || {});
+      setPromptDefaults(promptsData.defaults || {});
+      const eventData = await eventRes.json();
+      setRoleContexts(eventData.contexts || {});
+      setEventPrompts(eventData.prompts || {});
+      setAllEventDefaults(eventData.defaults || {});
     } catch (err) {
       console.error("Failed to fetch prompts:", err);
     }
@@ -155,7 +188,7 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
       const res = await fetch("/api/generate-worker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: getRoleSlug(), field: "appearance", name: name.trim() || undefined, gender }),
+        body: JSON.stringify({ role: getRoleSlug(), field: "appearance", name: name.trim() || undefined, gender, existingNames: personas.map((p) => p.name) }),
       });
       const data = await res.json();
       if (data.name) setName(data.name);
@@ -170,7 +203,7 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
       const res = await fetch("/api/generate-worker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: getRoleSlug(), field: "style", name: name.trim() || undefined, gender }),
+        body: JSON.stringify({ role: getRoleSlug(), field: "style", name: name.trim() || undefined, gender, existingNames: personas.map((p) => p.name) }),
       });
       const data = await res.json();
       if (data.style) setCommStyle(data.style);
@@ -221,7 +254,7 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
       const genRes = await fetch("/api/generate-worker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: roleSlug, name: name.trim() || undefined, gender }),
+        body: JSON.stringify({ role: roleSlug, name: name.trim() || undefined, gender, existingNames: personas.map((p) => p.name) }),
       });
       const genData = await genRes.json();
       if (genData.name) setName(genData.name);
@@ -296,6 +329,9 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
     setEditingSkillIndex(null);
     setExpandedPrompt(null);
     setPromptEdits({});
+    setRoleContextEdit(undefined);
+    setExpandedEventPrompt(null);
+    setEventPromptEdits({});
     if (role) {
       setEditingRole(role);
       setRoleForm({
@@ -385,6 +421,74 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
       console.error("Failed to reset prompt:", err);
     }
     setSavingPrompt(null);
+  }
+
+  async function handleSaveEventPrompt(key: string) {
+    const value = eventPromptEdits[key];
+    if (value === undefined) return;
+    setSavingEventPrompt(key);
+    try {
+      await fetch("/api/settings/event-prompts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, value }),
+      });
+      setEventPrompts({ ...eventPrompts, [key]: { value, isDefault: false } });
+      setEventPromptEdits((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    } catch (err) {
+      console.error("Failed to save event prompt:", err);
+    }
+    setSavingEventPrompt(null);
+  }
+
+  async function handleResetEventPrompt(key: string) {
+    setSavingEventPrompt(key);
+    try {
+      const res = await fetch("/api/settings/event-prompts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      const data = await res.json();
+      setEventPrompts({ ...eventPrompts, [key]: { value: data.value || allEventDefaults[key] || "", isDefault: true } });
+      setEventPromptEdits((prev) => { const next = { ...prev }; delete next[key]; return next; });
+    } catch (err) {
+      console.error("Failed to reset event prompt:", err);
+    }
+    setSavingEventPrompt(null);
+  }
+
+  async function handleSaveContext(key: string, value: string) {
+    setSavingContext(true);
+    try {
+      await fetch("/api/settings/event-prompts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, value }),
+      });
+      setRoleContexts({ ...roleContexts, [key]: { value, isDefault: false } });
+      setRoleContextEdit(undefined);
+    } catch (err) {
+      console.error("Failed to save context:", err);
+    }
+    setSavingContext(false);
+  }
+
+  async function handleResetContext(key: string) {
+    setSavingContext(true);
+    try {
+      const res = await fetch("/api/settings/event-prompts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      const data = await res.json();
+      setRoleContexts({ ...roleContexts, [key]: { value: data.value || allEventDefaults[key] || "", isDefault: true } });
+      setRoleContextEdit(undefined);
+    } catch (err) {
+      console.error("Failed to reset context:", err);
+    }
+    setSavingContext(false);
   }
 
   async function handleDeleteWorker(personaId: string) {
@@ -828,6 +932,101 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
                                     <button type="button" onClick={() => handleResetPrompt(key)} disabled={isDefault || savingPrompt === key} className="px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--text-muted)] hover:bg-white/10 disabled:opacity-30">Reset to Default</button>
                                     <button type="button" onClick={() => handleSavePrompt(key)} disabled={!hasEdits || savingPrompt === key} className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-[var(--accent-blue)] disabled:opacity-40 hover:opacity-90">
                                       {savingPrompt === key ? "Saving..." : "Save Prompt"}
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Role Context */}
+                {(() => {
+                  const slug = editingRole?.slug || roleForm.slug;
+                  if (!slug) return null;
+                  const contextKey = `context_role_${slug}`;
+                  const ctx = roleContexts[contextKey];
+                  const currentValue = ctx?.value || allEventDefaults[contextKey] || "";
+                  const isDefault = ctx?.isDefault !== false;
+                  const editValue = roleContextEdit;
+                  const hasEdits = editValue !== undefined && editValue !== currentValue;
+
+                  return (
+                    <div>
+                      <div className="mb-3">
+                        <label className="block text-xs font-medium text-[var(--text-muted)]">Role Context</label>
+                        <p className="text-[10px] text-[var(--text-muted)] mt-0.5">Background context injected into every dispatch for this role</p>
+                      </div>
+                      <div className="rounded-lg border border-[var(--border-medium)] bg-[var(--bg-input)] overflow-hidden">
+                        <div className="flex items-center justify-between px-3 py-2">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDefault ? "bg-white/10 text-[var(--text-muted)]" : "bg-emerald-500/20 text-emerald-400"}`}>
+                            {isDefault ? "default" : "customized"}
+                          </span>
+                        </div>
+                        <div className="px-3 pb-3 border-t border-[var(--border-subtle)]">
+                          <textarea
+                            value={editValue !== undefined ? editValue : currentValue}
+                            onChange={(e) => setRoleContextEdit(e.target.value)}
+                            rows={8}
+                            className="w-full mt-2 px-3 py-2 rounded-lg text-xs font-mono bg-[var(--bg-primary)] border border-[var(--border-medium)] text-[var(--text-primary)] outline-none focus:border-[var(--accent-blue)] resize-y"
+                            style={{ minHeight: "120px" }}
+                          />
+                          <div className="flex items-center justify-between mt-2">
+                            <button type="button" onClick={() => handleResetContext(contextKey)} disabled={isDefault || savingContext} className="px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--text-muted)] hover:bg-white/10 disabled:opacity-30">Reset to Default</button>
+                            <button type="button" onClick={() => handleSaveContext(contextKey, editValue || currentValue)} disabled={!hasEdits || savingContext} className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-[var(--accent-blue)] disabled:opacity-40 hover:opacity-90">
+                              {savingContext ? "Saving..." : "Save Context"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Event Prompts */}
+                {(() => {
+                  const slug = editingRole?.slug || roleForm.slug;
+                  const eventKeys = ROLE_EVENT_PROMPT_MAP[slug];
+                  if (!eventKeys || eventKeys.length === 0) return null;
+                  return (
+                    <div>
+                      <div className="mb-3">
+                        <label className="block text-xs font-medium text-[var(--text-muted)]">Event Prompts</label>
+                        <p className="text-[10px] text-[var(--text-muted)] mt-0.5">Triggered on ticket lifecycle events</p>
+                      </div>
+                      <div className="space-y-2">
+                        {eventKeys.map((key) => {
+                          const prompt = eventPrompts[key];
+                          const defaultValue = allEventDefaults[key] || "";
+                          const currentValue = prompt?.value || defaultValue;
+                          const isDefault = prompt?.isDefault !== false;
+                          const isExpanded = expandedEventPrompt === key;
+                          const editValue = eventPromptEdits[key];
+                          const hasEdits = editValue !== undefined && editValue !== currentValue;
+                          const label = EVENT_PROMPT_LABELS[key] || key;
+
+                          return (
+                            <div key={key} className="rounded-lg border border-[var(--border-medium)] bg-[var(--bg-input)] overflow-hidden">
+                              <div className="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-white/5" onClick={() => setExpandedEventPrompt(isExpanded ? null : key)}>
+                                <div className="flex items-center gap-2">
+                                  <svg className={`w-4 h-4 text-[var(--text-muted)] transition-transform ${isExpanded ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+                                  <span className="text-sm font-medium text-[var(--text-primary)]">{label}</span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDefault ? "bg-white/10 text-[var(--text-muted)]" : "bg-emerald-500/20 text-emerald-400"}`}>
+                                    {isDefault ? "default" : "customized"}
+                                  </span>
+                                </div>
+                              </div>
+                              {isExpanded && (
+                                <div className="px-3 pb-3 border-t border-[var(--border-subtle)]">
+                                  <textarea value={editValue !== undefined ? editValue : currentValue} onChange={(e) => setEventPromptEdits({ ...eventPromptEdits, [key]: e.target.value })} rows={8} className="w-full mt-2 px-3 py-2 rounded-lg text-xs font-mono bg-[var(--bg-primary)] border border-[var(--border-medium)] text-[var(--text-primary)] outline-none focus:border-[var(--accent-blue)] resize-y" style={{ minHeight: "120px" }} />
+                                  <div className="flex items-center justify-between mt-2">
+                                    <button type="button" onClick={() => handleResetEventPrompt(key)} disabled={isDefault || savingEventPrompt === key} className="px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--text-muted)] hover:bg-white/10 disabled:opacity-30">Reset to Default</button>
+                                    <button type="button" onClick={() => handleSaveEventPrompt(key)} disabled={!hasEdits || savingEventPrompt === key} className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-[var(--accent-blue)] disabled:opacity-40 hover:opacity-90">
+                                      {savingEventPrompt === key ? "Saving..." : "Save Prompt"}
                                     </button>
                                   </div>
                                 </div>

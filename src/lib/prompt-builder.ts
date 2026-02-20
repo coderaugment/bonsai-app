@@ -186,7 +186,20 @@ export async function buildSystemPrompt(
     }
   }
 
-  // 3. Project context
+  // 3. Workspace boundary rules (hard constraint — must come before project context)
+  if (workspacePath) {
+    sections.push([
+      "",
+      "## WORKSPACE BOUNDARY — HARD RULE",
+      `Your workspace is: ${workspacePath}`,
+      `You are ONLY allowed to read, write, or search files inside: ${workspacePath}`,
+      "DO NOT read files outside this directory. No absolute paths to other directories. No ../",
+      "There is other software on this machine. You are NOT allowed to access it.",
+      `If any Read/Glob/Grep call would target a path outside ${workspacePath}, SKIP IT.`,
+    ].join("\n"));
+  }
+
+  // 4. Project context
   if (workspacePath) {
     const techStack = detectTechStack(workspacePath);
     const claudeMd = loadClaudeMd(workspacePath);

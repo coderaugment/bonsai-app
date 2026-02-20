@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAuditLog } from "@/db/data/audit";
+import { getAuditLog, clearAuditLog } from "@/db/data/audit";
 
 export async function GET(
   req: Request,
@@ -15,4 +15,13 @@ export async function GET(
   }));
 
   return NextResponse.json({ audit: parsed });
+}
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  await clearAuditLog(Number(id));
+  return NextResponse.json({ ok: true });
 }

@@ -22,7 +22,7 @@ interface TicketDetailModalProps {
 }
 
 const typeOptions: TicketType[] = ["feature", "bug", "chore"];
-const stateOptions: TicketState[] = ["review", "planning", "building", "preview", "test", "shipped"];
+const stateOptions: TicketState[] = ["planning", "building", "preview", "test", "shipped"];
 
 // Board state mentions — referenceable via #review, #planning, etc.
 const BOARD_STATES = [
@@ -59,7 +59,7 @@ function renderMentionSpan(part: string, key: number | string, personas: Persona
       </span>
     );
   }
-  const persona = personas.find((p) => p.name.toLowerCase() === name);
+  const persona = personas.find((p) => p.name.toLowerCase() === name || p.role?.toLowerCase() === name);
   if (persona) {
     return (
       <span key={key} style={{
@@ -631,7 +631,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
       });
       if (response.ok) {
         router.refresh();
-        onClose();
       }
     } finally {
       setApprovingResearch(false);
@@ -640,24 +639,34 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
 
   async function handleApprovePlan() {
     if (!ticket) return;
+
+    // Check if research artifact exists
+    const hasResearch = documents.some(d => d.type === "research");
+    if (!hasResearch) {
+      alert("Cannot move to building: research artifact is required");
+      return;
+    }
+
     setApprovingPlan(true);
     try {
-      // Move ticket to building state
-      const response = await fetch(`/api/tickets`, {
-        method: "PATCH",
+      // Call approve-plan endpoint which verifies artifacts and dispatches developer
+      const response = await fetch(`/api/tickets/${ticket.id}/approve-plan`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId: ticket.id, state: "building" }),
       });
+
       if (response.ok) {
         router.refresh();
-        onClose();
+      } else {
+        const data = await response.json();
+        alert(data.error || "Failed to approve plan");
       }
     } finally {
       setApprovingPlan(false);
     }
   }
 
-  async function handleDeleteDocument(docType: "research" | "implementation_plan" | "design") {
+  async function handleDeleteDocument(docType: "research" | "implementation_plan" | "design" | "security_review") {
     if (!ticket) return;
     setDeletingDoc(docType);
     try {
@@ -687,7 +696,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
         return;
       }
       router.refresh();
-      onClose();
     } finally {
       setAccepting(false);
     }
@@ -955,7 +963,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
         }),
       });
       router.refresh();
-      onClose();
     } finally {
       setSaving(false);
     }
@@ -1246,6 +1253,68 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
                 style={{ color: "var(--text-primary)" }}
                 placeholder="Ticket title..."
               />
+              {/* Participant avatar bubbles */}
+              {(() => {
+                const seen = new Set<string>();
+                const participants: { id: string; name: string; color?: string; avatarUrl?: string; role?: string; isActive?: boolean }[] = [];
+                const activeRunIds = new Set(ticket.activeRunPersonaIds ?? []);
+                const activeMs = ticket.lastAgentActivity ? Date.now() - new Date(ticket.lastAgentActivity).getTime() : Infinity;
+                const legacyActive = activeMs < 30 * 60 * 1000;
+                // Assignee first
+                if (ticket.assignee) {
+                  seen.add(ticket.assignee.id);
+                  participants.push({
+                    id: ticket.assignee.id,
+                    name: ticket.assignee.name,
+                    color: ticket.assignee.color,
+                    avatarUrl: ticket.assignee.avatar,
+                    role: ticket.assignee.role,
+                    isActive: activeRunIds.size > 0 ? activeRunIds.has(ticket.assignee.id) : legacyActive
+                  });
+                }
+                // All agent comment authors
+                for (const c of comments) {
+                  if (c.authorType === "agent" && c.author?.name) {
+                    const p = personasList.find(p => p.name === c.author!.name);
+                    const key = p?.id ?? c.author.name;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    participants.push({ id: key, name: c.author.name, color: p?.color ?? c.author.color, avatarUrl: p?.avatar ?? c.author.avatarUrl, role: p?.role ?? c.author.role, isActive: p ? activeRunIds.has(p.id) : false });
+                  }
+                }
+                // Also add any running agents not yet in participants (e.g. dispatched but no comment yet)
+                for (const runId of activeRunIds) {
+                  if (!seen.has(runId)) {
+                    const p = personasList.find(p => p.id === runId);
+                    if (p) {
+                      seen.add(runId);
+                      participants.push({ id: runId, name: p.name, color: p.color, avatarUrl: p.avatar, role: p.role, isActive: true });
+                    }
+                  }
+                }
+                if (participants.length === 0) return null;
+                return (
+                  <div className="flex items-center gap-2 mt-3">
+                    {participants.map((p) => (
+                      <div key={p.id} className="flex items-center gap-1.5" title={`${p.name}${p.role ? ` — ${p.role}` : ""}`}>
+                        <div className="relative w-7 h-7 rounded-full overflow-hidden flex-shrink-0" style={{ border: `2px solid ${p.color || "rgba(255,255,255,0.2)"}` }}>
+                          {p.avatarUrl ? (
+                            <img src={p.avatarUrl} alt={p.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-[10px] font-bold" style={{ backgroundColor: p.color || "rgba(255,255,255,0.1)", color: "#fff" }}>
+                              {p.name[0]}
+                            </div>
+                          )}
+                          {p.isActive && (
+                            <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-green-400 border border-black" />
+                          )}
+                        </div>
+                        <span className="text-xs" style={{ color: "var(--text-muted)" }}>{p.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
             <div className="flex items-center gap-1">
               {/* Make Epic toggle */}
@@ -1551,18 +1620,21 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
                 </div>
               ) : (documents.length > 0 || ticket?.researchCompletedAt || ticket?.planCompletedAt) ? (
                 <div className="grid grid-cols-3 gap-4">
-                  {(["research", "design", "implementation_plan"] as const).map((docType) => {
+                  {(["research", "design", "implementation_plan", "security_review"] as const).map((docType) => {
                     const doc = documents.find(d => d.type === docType);
                     if (!doc && !(docType === "research" && ticket?.researchCompletedAt)) return null;
 
                     const isResearch = docType === "research";
                     const isDesign = docType === "design";
-                    const title = isResearch ? "Research Document" : isDesign ? "Design Document" : "Implementation Plan";
-                    const color = isResearch ? "#f59e0b" : isDesign ? "#8b5cf6" : "#8b5cf6";
+                    const isSecurity = docType === "security_review";
+                    const title = isResearch ? "Research Document" : isDesign ? "Design Document" : isSecurity ? "Security Review" : "Implementation Plan";
+                    const color = isResearch ? "#f59e0b" : isDesign ? "#8b5cf6" : isSecurity ? "#ef4444" : "#8b5cf6";
                     const icon = isResearch ? (
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                     ) : isDesign ? (
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
+                    ) : isSecurity ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                     ) : (
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
                     );
@@ -1777,26 +1849,41 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
 
             {/* Activity Timeline */}
             <div>
-              <button
-                type="button"
-                onClick={() => setShowActivity(!showActivity)}
-                className="flex items-center gap-2 text-sm font-semibold mb-3 transition-colors hover:opacity-80"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                <svg
-                  className="w-4 h-4 transition-transform"
-                  style={{ transform: showActivity ? "rotate(90deg)" : "rotate(0deg)" }}
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              <div className="flex items-center justify-between mb-3">
+                <button
+                  type="button"
+                  onClick={() => setShowActivity(!showActivity)}
+                  className="flex items-center gap-2 text-sm font-semibold transition-colors hover:opacity-80"
+                  style={{ color: "var(--text-secondary)" }}
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-                Activity
+                  <svg
+                    className="w-4 h-4 transition-transform"
+                    style={{ transform: showActivity ? "rotate(90deg)" : "rotate(0deg)" }}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                  Activity
+                  {auditLog.length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono" style={{ backgroundColor: "rgba(255,255,255,0.08)", color: "var(--text-muted)" }}>
+                      {auditLog.length}
+                    </span>
+                  )}
+                </button>
                 {auditLog.length > 0 && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono" style={{ backgroundColor: "rgba(255,255,255,0.08)", color: "var(--text-muted)" }}>
-                    {auditLog.length}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await fetch(`/api/tickets/${ticketId}/audit`, { method: "DELETE" });
+                      setAuditLog([]);
+                    }}
+                    className="text-[11px] transition-colors hover:opacity-80"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Clear
+                  </button>
                 )}
-              </button>
+              </div>
 
               {showActivity && (
                 <div
@@ -2004,22 +2091,13 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
             >
               {saving ? "Saving..." : "Save Changes"}
             </button>
-            {ticket?.state === "review" && (
-              <button
-                onClick={handleApproveResearch}
-                disabled={approvingResearch}
-                className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors hover:opacity-90"
-                style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingResearch ? 0.5 : 1 }}
-              >
-                {approvingResearch ? "Moving..." : "Move to Planning"}
-              </button>
-            )}
             {ticket?.state === "planning" && (
               <button
                 onClick={handleApprovePlan}
-                disabled={approvingPlan}
+                disabled={approvingPlan || !documents.some(d => d.type === "research")}
                 className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors hover:opacity-90"
-                style={{ backgroundColor: "#22c55e", color: "#fff", opacity: approvingPlan ? 0.5 : 1 }}
+                style={{ backgroundColor: "#22c55e", color: "#fff", opacity: (approvingPlan || !documents.some(d => d.type === "research")) ? 0.5 : 1 }}
+                title={!documents.some(d => d.type === "research") ? "Research artifact required" : ""}
               >
                 {approvingPlan ? "Moving..." : "Move to Building"}
               </button>
@@ -2288,7 +2366,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
           </svg>
           <span className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
-            {expandedDoc.type === "research" ? "Research Document" : (expandedDoc.type as string) === "design" ? "Design Document" : "Implementation Plan"}
+            {expandedDoc.type === "research" ? "Research Document" : expandedDoc.type === "design" ? "Design Document" : expandedDoc.type === "security_review" ? "Security Review" : "Implementation Plan"}
           </span>
           <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
             {ticket?.id}
@@ -2377,7 +2455,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
             {/* Document title */}
             <div className="mb-10">
               <h1 className="text-[28px] font-bold tracking-tight leading-tight" style={{ color: "#fff" }}>
-                {expandedDoc.type === "research" ? "Research Document" : (expandedDoc.type as string) === "design" ? "Design Document" : "Implementation Plan"}
+                {expandedDoc.type === "research" ? "Research Document" : expandedDoc.type === "design" ? "Design Document" : expandedDoc.type === "security_review" ? "Security Review" : "Implementation Plan"}
               </h1>
               <div className="flex items-center gap-3 mt-3">
                 <span className="text-xs font-mono px-2 py-0.5 rounded" style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}>

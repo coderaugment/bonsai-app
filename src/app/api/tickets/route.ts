@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getTickets, getTicketById, createTicket, updateTicket, softDeleteTicket, getSetting, getUser, createSystemCommentAndBumpCount, logAuditEvent } from "@/db/data";
+import { getTickets, getTicketById, createTicket, updateTicket, softDeleteTicket, getSetting, createSystemCommentAndBumpCount, logAuditEvent } from "@/db/data";
 import { fireDispatch } from "@/lib/dispatch-agent";
 import { formatTicketSlug } from "@/types";
 
@@ -17,7 +17,7 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "ticketId and state required" }, { status: 400 });
   }
   // Ship state requires merge — redirect to ship endpoint
-  if (state === "ship") {
+  if (state === "shipped") {
     const origin = new URL(req.url).origin;
     const shipRes = await fetch(`${origin}/api/tickets/${numTicketId}/ship`, { method: "POST" });
     const shipData = await shipRes.json();
@@ -30,9 +30,14 @@ export async function PATCH(req: Request) {
   const now = new Date().toISOString();
   const updates: Record<string, unknown> = { state };
 
-  // When dragged to "plan", mark research as approved so heartbeat + dispatch pick it up
-  if (state === "plan" && !prevTicket?.researchApprovedAt) {
+  // When dragged to "planning", mark research as approved so heartbeat + dispatch pick it up
+  if (state === "planning" && !prevTicket?.researchApprovedAt) {
     updates.researchApprovedAt = now;
+  }
+
+  // When dragged to "building", mark plan as approved (manual move = human approval)
+  if (state === "building" && !prevTicket?.planApprovedAt) {
+    updates.planApprovedAt = now;
   }
 
   await updateTicket(numTicketId, updates);
@@ -40,9 +45,9 @@ export async function PATCH(req: Request) {
   // Post system comment for the state transition
   if (prevState && prevState !== state) {
     const reasonMap: Record<string, string> = {
-      plan: "research approved",
-      build: "plan approved",
-      ship: "implementation complete",
+      planning: "research approved",
+      building: "plan approved",
+      shipped: "implementation complete",
     };
     const reason = reasonMap[state] || "manual move";
     await createSystemCommentAndBumpCount(
@@ -62,23 +67,20 @@ export async function PATCH(req: Request) {
 
   const origin = new URL(req.url).origin;
 
-  // When moved to "plan", dispatch developer to create implementation plan
-  if (state === "plan") {
+  // When moved to "planning", dispatch lead to orchestrate planning phase
+  if (state === "planning") {
     fireDispatch(origin, numTicketId, {
-      commentContent: "Research has been approved. Create the implementation plan now.",
-      targetRole: "developer",
-    }, "state-change/plan");
+      commentContent: "Research has been approved. Orchestrate the planning phase now.",
+      targetRole: "lead",
+    }, "state-change/planning");
   }
 
-  // When moved to "build", auto-dispatch developer to start implementation
-  if (state === "build") {
-    const ticket = await getTicketById(numTicketId);
-    if (ticket?.planApprovedAt) {
-      fireDispatch(origin, numTicketId, {
-        commentContent: "The implementation plan has been approved and the ticket is in build. Begin coding the implementation now. Follow the plan step by step.",
-        targetRole: "developer",
-      }, "state-change/build");
-    }
+  // When moved to "building", auto-dispatch developer to start implementation
+  if (state === "building") {
+    fireDispatch(origin, numTicketId, {
+      commentContent: "The implementation plan has been approved and the ticket is in build. Begin coding the implementation now. Follow the plan step by step.",
+      targetRole: "developer",
+    }, "state-change/building");
   }
 
   return NextResponse.json({ ok: true });
@@ -100,13 +102,13 @@ export async function PUT(req: Request) {
   if (epicId !== undefined) updates.epicId = epicId ? Number(epicId) : null;
   await updateTicket(numTicketId, updates);
 
-  const editUser = await getUser();
+  const userName = await getSetting("user_name");
   await logAuditEvent({
     ticketId: numTicketId,
     event: "ticket_edited",
     actorType: "human",
-    actorId: editUser?.id,
-    actorName: editUser?.name ?? "Unknown",
+    actorId: null,
+    actorName: userName ?? "User",
     detail: "Edited ticket details",
   });
 
@@ -119,13 +121,13 @@ export async function DELETE(req: Request) {
   if (!numTicketId) {
     return NextResponse.json({ error: "ticketId required" }, { status: 400 });
   }
-  const delUser = await getUser();
+  const userName = await getSetting("user_name");
   await logAuditEvent({
     ticketId: numTicketId,
     event: "ticket_deleted",
     actorType: "human",
-    actorId: delUser?.id,
-    actorName: delUser?.name ?? "Unknown",
+    actorId: null,
+    actorName: userName ?? "User",
     detail: "Deleted ticket",
   });
 
@@ -138,23 +140,20 @@ export async function POST(req: Request) {
   const { title, type, description, acceptanceCriteria, projectId, epicId, isEpic } =
     await req.json();
 
-  // Get current user as creator
-  const user = await getUser();
-
   if (!title?.trim()) {
     return NextResponse.json({ error: "Title is required" }, { status: 400 });
   }
 
   const activeProjectId = await getSetting("active_project_id");
+  const userName = await getSetting("user_name");
   const ticket = await createTicket({
     title: title.trim(),
     type: type || "feature",
-    state: "review",
+    state: "planning",
     description: description?.trim() || null,
     acceptanceCriteria: acceptanceCriteria?.trim() || null,
     priority: 500,
     projectId: projectId || Number(activeProjectId) || 1,
-    createdBy: user?.id ?? null,
     commentCount: 0,
     hasAttachments: false,
     isEpic: isEpic ?? false,
@@ -167,36 +166,33 @@ export async function POST(req: Request) {
     ticketId: id,
     event: "ticket_created",
     actorType: "human",
-    actorId: user?.id,
-    actorName: user?.name ?? "Unknown",
+    actorId: null,
+    actorName: userName ?? "User",
     detail: `Created ticket "${title.trim()}"`,
-    metadata: { type: type || "feature", state: "review", epicId: epicId || null },
+    metadata: { type: type || "feature", state: "planning", epicId: epicId || null },
   });
 
   const origin = new URL(req.url).origin;
   const ticketSummary = `${title.trim()}${description ? `\n\n${description.trim()}` : ""}${acceptanceCriteria ? `\n\nAcceptance Criteria:\n${acceptanceCriteria.trim()}` : ""}`;
 
   if (isEpic) {
-    // Explicitly created as epic: dispatch lead only to break it down
-    fireDispatch(origin, id, {
-      commentContent: `This is an epic ticket. Break it down into smaller, focused sub-tickets using the create-sub-ticket tool. Each sub-ticket should be a single, independently workable item.\n\nEpic:\n${ticketSummary}`,
-      targetRole: "lead",
-    }, "epic-create/breakdown");
+    // Epic breakdown is handled interactively by the wizard UI — no auto-dispatch
   } else if (epicId) {
-    // Sub-ticket of an epic: dispatch research + designer normally
+    // Sub-ticket of an epic: dispatch lead to triage, then lead dispatches researcher.
+    // Do NOT dispatch designer or developer at creation — they run in building phase only.
+    const leadContext = await getSetting("context_role_lead") || "";
+    const leadPrompt = await getSetting("prompt_lead_new_ticket") || "New ticket created. Evaluate it and dispatch the researcher to begin research. Do NOT dispatch developer or designer — they work in the building phase only.";
     fireDispatch(origin, id, {
-      commentContent: `New sub-ticket created (part of epic). Research this ticket.\n\n${ticketSummary}`,
-    }, "ticket-create/research");
-
-    fireDispatch(origin, id, {
-      commentContent: `New sub-ticket created. Review the UI/UX implications and propose design direction.\n\n${ticketSummary}`,
-      targetRole: "designer",
-      silent: true,
-    }, "ticket-create/designer");
+      commentContent: [leadContext, leadPrompt, ticketSummary].filter(Boolean).join("\n\n"),
+      targetRole: "lead",
+    }, "ticket-create/lead-evaluate");
   } else {
-    // Standalone ticket: lead evaluates first, then delegates to other roles
+    // Standalone ticket: lead evaluates first, then dispatches researcher for planning.
+    const leadContext = await getSetting("context_role_lead") || "";
+    const leadPrompt = await getSetting("prompt_lead_new_ticket") || "New ticket created. Evaluate it and dispatch the researcher to begin research. Do NOT dispatch developer or designer — they run in the building phase only.";
+    const leadContent = [leadContext, leadPrompt, ticketSummary].filter(Boolean).join("\n\n");
     fireDispatch(origin, id, {
-      commentContent: `New ticket created. You are the first to look at this ticket — no other agents have been dispatched yet.\n\nEvaluate this ticket. Almost all tickets should be treated as normal single work items. Only mark something as an epic if it explicitly describes MULTIPLE INDEPENDENT features or projects that have no logical connection to each other (e.g. "build a blog AND redesign the dashboard AND add user auth"). A ticket with multiple requirements or bullet points about ONE feature is NOT an epic — it's just a well-described ticket.\n\nIf it is a normal ticket (the vast majority of cases), say so briefly. The researcher and designer will be dispatched automatically after you finish.\n\nOnly if it is truly multiple independent projects: use set-epic.sh to mark it as an epic, then use create-sub-ticket.sh to break it down.\n\n${ticketSummary}`,
+      commentContent: leadContent,
       targetRole: "lead",
     }, "ticket-create/lead-evaluate");
   }

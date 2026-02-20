@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { getTicketById } from "@/db/data/tickets";
 import { createCommentAndBumpCount } from "@/db/data/comments";
+import { createAgentProjectMessage } from "@/db/data/project-messages";
 import { getPersonaRaw, getProjectPersonasRaw } from "@/db/data/personas";
 import { logAuditEvent } from "@/db/data/audit";
 import { completeAgentRun } from "@/db/data/agent-runs";
+import { getSetting } from "@/db/data/settings";
 import { fireDispatch } from "@/lib/dispatch-agent";
 
 // Called by the agent wrapper script when claude -p finishes.
@@ -33,7 +35,49 @@ export async function POST(
     : null;
   const agentName = completingPersona?.name ?? "Agent";
 
-  // ── Post chat comment ──────────────────────────────────
+  // ── Inbox ticket → write to project_messages instead ───
+  const isInbox = ticket.title === "[Inbox]";
+  if (isInbox && ticket.projectId) {
+    await createAgentProjectMessage(ticket.projectId, personaId, trimmed);
+
+    // DISABLED: @mention chaining causes infinite loops and wastes API credits
+    // Support @mention chaining in agent response
+    // const projectPersonas = await getProjectPersonasRaw(ticket.projectId);
+    // const sorted = [...projectPersonas].sort((a, b) => b.name.length - a.name.length);
+    // for (const p of sorted) {
+    //   if (p.id === personaId) continue;
+    //   const escapedName = p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    //   const escapedRole = p.role ? p.role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : null;
+    //   const namePattern = new RegExp(`@${escapedName}\\b`, 'i');
+    //   const rolePattern = escapedRole ? new RegExp(`@${escapedRole}\\b`, 'i') : null;
+    //   if (namePattern.test(trimmed) || (rolePattern && rolePattern.test(trimmed))) {
+    //     console.log(`[agent-complete/inbox] Agent ${personaId} mentioned @${p.name} — dispatching`);
+    //     fireDispatch("http://localhost:3080", ticketId, {
+    //       commentContent: trimmed,
+    //       targetPersonaId: p.id,
+    //       conversational: true,
+    //     }, `agent-complete/inbox/@${p.name}`);
+    //   }
+    // }
+
+    if (personaId) {
+      await completeAgentRun(ticketId, personaId, "completed");
+    }
+
+    await logAuditEvent({
+      ticketId,
+      event: "agent_completed",
+      actorType: "agent",
+      actorId: personaId,
+      actorName: agentName,
+      detail: `${agentName} completed project chat response`,
+      metadata: { role: completingPersona?.role || "unknown", inbox: true },
+    });
+
+    return NextResponse.json({ ok: true });
+  }
+
+  // ── Post chat comment (normal ticket flow) ─────────────
   await createCommentAndBumpCount({
     ticketId,
     authorType: "agent",
@@ -42,52 +86,56 @@ export async function POST(
     documentId: documentId || null,
   });
 
+  // DISABLED: @mention chaining causes infinite loops and wastes API credits
   // ── Agent @mention dispatch ────────────────────────────
-  const projectPersonas = ticket.projectId
-    ? await getProjectPersonasRaw(ticket.projectId)
-    : [];
+  // Fetch fresh ticket state for phase-gating BEFORE processing mentions
+  const freshTicket = await getTicketById(ticketId);
 
-  const sorted = [...projectPersonas].sort((a, b) => b.name.length - a.name.length);
-  const mentioned = new Set<string>();
+  // const projectPersonas = ticket.projectId
+  //   ? await getProjectPersonasRaw(ticket.projectId)
+  //   : [];
 
-  for (const p of sorted) {
-    if (p.id === personaId) continue;
-    const pattern = new RegExp(`@${p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    if (pattern.test(trimmed) && !mentioned.has(p.id)) {
-      mentioned.add(p.id);
-      console.log(`[agent-complete] Agent ${personaId} mentioned @${p.name} — dispatching`);
-      fireDispatch("http://localhost:3000", ticketId, {
-        commentContent: trimmed,
-        targetPersonaId: p.id,
-        conversational: true,
-        silent: true,
-      }, `agent-complete/@${p.name}`);
-    }
-  }
+  // const sorted = [...projectPersonas].sort((a, b) => b.name.length - a.name.length);
+  const mentioned = new Set<string>(); // Keep this for lead triage fallback check
+
+  // for (const p of sorted) {
+  //   if (p.id === personaId) continue;
+  //   const escapedName = p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  //   const escapedRole = p.role ? p.role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : null;
+  //   const namePattern = new RegExp(`@${escapedName}\\b`, 'i');
+  //   const rolePattern = escapedRole ? new RegExp(`@${escapedRole}\\b`, 'i') : null;
+  //   if ((namePattern.test(trimmed) || (rolePattern && rolePattern.test(trimmed))) && !mentioned.has(p.id)) {
+  //     mentioned.add(p.id);
+  //     console.log(`[agent-complete] Agent ${personaId} mentioned @${p.name} — dispatching`);
+  //     fireDispatch("http://localhost:3080", ticketId, {
+  //       commentContent: trimmed,
+  //       targetPersonaId: p.id,
+  //       conversational: true,
+  //     }, `agent-complete/@${p.name}`);
+  //   }
+  // }
 
   // ── Lead triage handoff ─────────────────────────────────
-  // When @lead finishes evaluating a new ticket and didn't promote it to epic,
-  // auto-dispatch researcher and designer with proper phase prompts.
-  const freshTicket = await getTicketById(ticketId);
+  // Fallback: if the lead completed on a planning ticket but didn't @mention researcher,
+  // dispatch researcher directly. The cooldown will block double-dispatch if lead already mentioned them.
+  const mentionedAnyone = mentioned.size > 0; // @mention chaining already dispatched someone
   if (
     completingPersona?.role === "lead" &&
     freshTicket &&
-    freshTicket.state === "review" &&
-    !freshTicket.isEpic
+    freshTicket.state === "planning" &&
+    !freshTicket.isEpic &&
+    !mentionedAnyone
   ) {
     const ticketSummary = `${freshTicket.title}${freshTicket.description ? `\n\n${freshTicket.description}` : ""}${freshTicket.acceptanceCriteria ? `\n\nAcceptance Criteria:\n${freshTicket.acceptanceCriteria}` : ""}`;
 
-    console.log(`[agent-complete] Lead finished triage for ${ticketId} (not epic) — dispatching researcher + designer`);
+    console.log(`[agent-complete] Lead finished triage for ${ticketId} — dispatching researcher`);
 
-    fireDispatch("http://localhost:3000", ticketId, {
-      commentContent: `Lead has reviewed this ticket. Research it now.\n\n${ticketSummary}`,
+    const researcherContext = await getSetting("context_role_researcher") || "";
+    const researcherPrompt = await getSetting("prompt_researcher_new_ticket") || "New ticket assigned. Begin researching.";
+    fireDispatch("http://localhost:3080", ticketId, {
+      commentContent: [researcherContext, researcherPrompt, ticketSummary].filter(Boolean).join("\n\n"),
+      targetRole: "researcher",
     }, "lead-triage/research");
-
-    fireDispatch("http://localhost:3000", ticketId, {
-      commentContent: `Lead has reviewed this ticket. Review the UI/UX implications and propose design direction.\n\n${ticketSummary}`,
-      targetRole: "designer",
-      silent: true,
-    }, "lead-triage/designer");
   }
 
   // ── Mark agent run completed ────────────────────────────

@@ -8,21 +8,32 @@ import * as net from "node:net";
 
 const BONSAI_DIR = path.join(process.env.HOME || "~", ".bonsai");
 const PROJECTS_DIR = path.join(process.env.HOME || "~", "development", "bonsai", "projects");
-const WORKTREES_DIR = path.join(BONSAI_DIR, "worktrees");
+
+function resolveProjectRoot(project: { githubRepo: string | null; slug: string; localPath: string | null }): string {
+  if (project.localPath) return project.localPath;
+  return path.join(PROJECTS_DIR, project.githubRepo || project.slug);
+}
+
+function resolveMainRepo(project: { githubRepo: string | null; slug: string; localPath: string | null }): string {
+  // If localPath is set, it already points to the repo directory
+  if (project.localPath) return project.localPath;
+  const projectRoot = path.join(PROJECTS_DIR, project.githubRepo || project.slug);
+  return path.join(projectRoot, "repo");
+}
 
 function resolveWorkspace(
   project: { githubRepo: string | null; slug: string; localPath: string | null },
   ticketId: number
 ): string {
-  // Check for existing worktree first
-  const slug = project.slug || project.githubRepo || "unknown";
+  const projectRoot = resolveProjectRoot(project);
   const ticketSlug = formatTicketSlug(ticketId);
-  const worktreePath = path.join(WORKTREES_DIR, slug, ticketSlug);
+
+  // Check for existing worktree at {projectRoot}/worktrees/{ticketSlug}
+  const worktreePath = path.join(projectRoot, "worktrees", ticketSlug);
   if (fs.existsSync(worktreePath)) return worktreePath;
 
-  // Fall back to main repo
-  if (project.localPath) return project.localPath;
-  return path.join(PROJECTS_DIR, project.githubRepo || project.slug);
+  // Fall back to main repo at {projectRoot}/repo
+  return resolveMainRepo(project);
 }
 
 function isPortInUse(port: number): Promise<boolean> {
@@ -82,7 +93,7 @@ export async function POST(
   if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
   // Copy env files from main repo into worktree so builds have DB credentials, etc.
-  const mainRepo = project.localPath || path.join(PROJECTS_DIR, project.githubRepo || project.slug);
+  const mainRepo = resolveMainRepo(project);
   if (workspace !== mainRepo && fs.existsSync(mainRepo)) {
     for (const envFile of [".env", ".env.local", ".env.development", ".env.development.local"]) {
       const src = path.join(mainRepo, envFile);

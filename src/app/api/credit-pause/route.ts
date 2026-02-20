@@ -46,6 +46,17 @@ export async function POST(req: Request) {
   });
 }
 
+/** PUT — manually pause indefinitely (until explicitly resumed) */
+export async function PUT() {
+  const resumesAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(); // 1 year
+  await setSetting(CREDITS_PAUSED_UNTIL, resumesAt);
+  await setSetting(CREDITS_PAUSE_REASON, "manual");
+
+  console.log("[credit-pause] Manually paused");
+
+  return NextResponse.json({ paused: true, resumesAt, remainingMs: pauseRemainingMs(resumesAt) });
+}
+
 /** DELETE — manually resume (clear pause) */
 export async function DELETE() {
   await deleteSetting(CREDITS_PAUSED_UNTIL);

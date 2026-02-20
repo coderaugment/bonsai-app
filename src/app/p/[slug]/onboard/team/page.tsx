@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { StepHeader } from "@/components/ui/step-header";
+import { GeminiSetupModal } from "@/components/gemini-setup-modal";
 import type { Role, Persona } from "@/types";
 
 const DEFAULT_STYLE = "A real photograph — NOT an illustration, NOT a cartoon, NOT anime, NOT digital art, NOT 3D render. Shot on a Canon EOS R5 camera, 85mm f/1.4 lens. Real skin texture, real lighting, real depth of field. Professional headshot quality. Subject centered in frame for circular crop. Soft bokeh background. Natural warm studio lighting. Friendly, confident expression. No text, no watermarks, no logos. Square format.";
@@ -32,6 +33,9 @@ export default function TeamPage() {
   // Created workers (saved after each hire)
   const [hiredWorkers, setHiredWorkers] = useState<Persona[]>([]);
 
+  // Track workers being generated in random team flow
+  const [generatingWorkers, setGeneratingWorkers] = useState<Persona[]>([]);
+
   // Worker form state
   const [name, setName] = useState("");
   const [gender, setGender] = useState<"male" | "female" | "non-binary">("male");
@@ -42,6 +46,12 @@ export default function TeamPage() {
   const [generatingPhase, setGeneratingPhase] = useState<"" | "text" | "avatar">("");
   const [rerolling, setRerolling] = useState<"" | "name" | "appearance" | "style" | "avatar">("");
   const [saving, setSaving] = useState(false);
+  const [showGeminiSetup, setShowGeminiSetup] = useState(false);
+  const [geminiRetryFn, setGeminiRetryFn] = useState<(() => void) | null>(null);
+  const [styleMode, setStyleMode] = useState<"text" | "photo">("text");
+  const [styleImage, setStyleImage] = useState<string | null>(null);
+  const [styleDragOver, setStyleDragOver] = useState(false);
+  const styleFileInputRef = useRef<HTMLInputElement>(null);
   const generateAbortRef = useRef<AbortController | null>(null);
   const autoGenerateOnLoad = useRef(false);
 
@@ -55,14 +65,20 @@ export default function TeamPage() {
       setProjectId(pid);
 
       const personasUrl = pid ? `/api/personas?projectId=${pid}` : "/api/personas";
-      const [rolesRes, personasRes, promptsRes] = await Promise.all([
+      const [rolesRes, personasRes, promptsRes, styleImageRes] = await Promise.all([
         fetch("/api/roles"),
         fetch(personasUrl),
         fetch("/api/settings/prompts"),
+        fetch("/api/settings/style-image"),
       ]);
       const allRoles: Role[] = await rolesRes.json();
       const allPersonas: Persona[] = await personasRes.json();
       const promptsData = await promptsRes.json();
+      const styleImageData = styleImageRes.ok ? await styleImageRes.json() : null;
+      if (styleImageData?.image) {
+        setStyleImage(styleImageData.image);
+        setStyleMode("photo");
+      }
 
       setRoles(allRoles);
       setExistingPersonas(allPersonas);
@@ -76,8 +92,12 @@ export default function TeamPage() {
       }
 
       // Compute unfilled roles: roles with no active persona matching that roleId
+      // ONLY ENABLE: lead, researcher, developer
+      const enabledRoleSlugs = ["lead", "researcher", "developer"];
       const filledRoleIds = new Set(allPersonas.map((p) => p.roleId).filter(Boolean));
-      const unfilled = allRoles.filter((r) => !filledRoleIds.has(r.id));
+      const unfilled = allRoles
+        .filter((r) => enabledRoleSlugs.includes(r.slug))
+        .filter((r) => !filledRoleIds.has(r.id));
       setUnfilledRoles(unfilled);
 
       // Only skip step 0 if style is set AND some personas already exist
@@ -97,6 +117,12 @@ export default function TeamPage() {
   // Resolve the active style prompt: saved DB value > default
   function getStylePrompt(): string {
     return savedStylePrompt || DEFAULT_STYLE;
+  }
+
+  function genderToText(g: "male" | "female" | "non-binary"): string {
+    if (g === "male") return "a man";
+    if (g === "female") return "a woman";
+    return "a non-binary person";
   }
 
   // Get the role for the current hire step (step 1 = unfilledRoles[0], etc.)
@@ -123,6 +149,12 @@ export default function TeamPage() {
         body: JSON.stringify({ role, gender: g }),
       });
       const genData = await genRes.json();
+      if (genData.code === "gemini_key_missing") {
+        setGeneratingPreview(false);
+        setGeminiRetryFn(() => () => generateStylePreview(styleOverride));
+        setShowGeminiSetup(true);
+        return;
+      }
 
       const avatarRes = await fetch("/api/avatar", {
         method: "POST",
@@ -130,11 +162,20 @@ export default function TeamPage() {
         body: JSON.stringify({
           name: genData.name || "Sample",
           role,
-          personality: genData.appearance || "",
-          style: styleOverride || stylePromptText,
+          personality: styleImage
+            ? `${genderToText(g)}${genData.appearance ? ". " + genData.appearance : ""}`
+            : (genData.appearance || ""),
+          style: styleImage ? null : (styleOverride || stylePromptText),
+          styleImage: styleImage || null,
         }),
       });
       const avatarData = await avatarRes.json();
+      if (avatarData.code === "gemini_key_missing") {
+        setGeneratingPreview(false);
+        setGeminiRetryFn(() => () => generateStylePreview(styleOverride));
+        setShowGeminiSetup(true);
+        return;
+      }
       if (avatarData.avatar) setPreviewAvatar(avatarData.avatar);
     } catch (err) {
       console.error("[generateStylePreview] failed:", err);
@@ -147,6 +188,12 @@ export default function TeamPage() {
     try {
       const res = await fetch("/api/generate-style", { method: "POST" });
       const data = await res.json();
+      if (data.code === "gemini_key_missing") {
+        setRandomizing(false);
+        setGeminiRetryFn(() => () => randomizeStyle());
+        setShowGeminiSetup(true);
+        return;
+      }
       if (data.style) {
         setStylePromptText(data.style);
         await generateStylePreview(data.style);
@@ -157,15 +204,170 @@ export default function TeamPage() {
     setRandomizing(false);
   }
 
+  function loadImageFile(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      setStyleImage(dataUrl);
+      setStyleMode("photo");
+      generateStylePreview();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleStyleFileDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setStyleDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) loadImageFile(file);
+  }
+
+  function handleStyleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) loadImageFile(file);
+    e.target.value = "";
+  }
+
   async function handleCreateTeam() {
-    await fetch("/api/settings/prompts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: "prompt_avatar_style", value: stylePromptText }),
-    });
-    setSavedStylePrompt(stylePromptText);
+    if (styleMode === "photo" && styleImage) {
+      await fetch("/api/settings/style-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: styleImage }),
+      });
+      // Clear text style so the image takes precedence
+      await fetch("/api/settings/prompts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "prompt_avatar_style", value: "" }),
+      });
+    } else {
+      await fetch("/api/settings/prompts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "prompt_avatar_style", value: stylePromptText }),
+      });
+      // Clear any saved style image
+      await fetch("/api/settings/style-image", { method: "DELETE" });
+    }
+    setSavedStylePrompt(styleMode === "text" ? stylePromptText : null);
     setStep(1);
     resetForm();
+  }
+
+  async function handleAcceptRandomTeam() {
+    setSaving(true);
+    setGeneratingWorkers([]);
+    try {
+      // Randomize art style first if using text mode
+      let finalStyle = stylePromptText;
+      if (!styleImage) {
+        const styleRes = await fetch("/api/generate-style", { method: "POST" });
+        const styleData = await styleRes.json();
+        if (styleData.code === "gemini_key_missing") {
+          setGeminiRetryFn(() => handleAcceptRandomTeam);
+          setShowGeminiSetup(true);
+          setSaving(false);
+          return;
+        }
+        if (styleData.style) {
+          finalStyle = styleData.style;
+          setStylePromptText(finalStyle);
+        }
+      }
+
+      // Save art style
+      if (styleImage) {
+        await fetch("/api/settings/style-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: styleImage }),
+        });
+        await fetch("/api/settings/prompts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: "prompt_avatar_style", value: "" }),
+        });
+      } else {
+        await fetch("/api/settings/prompts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: "prompt_avatar_style", value: finalStyle }),
+        });
+        await fetch("/api/settings/style-image", { method: "DELETE" });
+      }
+
+      // Generate all team members
+      const allNames: string[] = [...existingPersonas.map(p => p.name)];
+      for (const role of unfilledRoles) {
+        const g = randomGender();
+
+        // Generate worker data
+        const genRes = await fetch("/api/generate-worker", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: role.slug, gender: g, existingNames: allNames }),
+        });
+        const genData = await genRes.json();
+        if (genData.code === "gemini_key_missing") {
+          setGeminiRetryFn(() => handleAcceptRandomTeam);
+          setShowGeminiSetup(true);
+          setSaving(false);
+          return;
+        }
+
+        // Generate avatar
+        const avatarRes = await fetch("/api/avatar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: genData.name || "Worker",
+            role: role.slug,
+            personality: styleImage
+              ? `${genderToText(g)}${genData.appearance ? ". " + genData.appearance : ""}`
+              : (genData.appearance || ""),
+            style: styleImage ? null : finalStyle,
+            styleImage: styleImage || null,
+          }),
+        });
+        const avatarData = await avatarRes.json();
+
+        // Save persona
+        const personality = [genData.appearance?.trim(), genData.commStyle?.trim()].filter(Boolean).join("\n\n");
+        const personaRes = await fetch("/api/personas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: genData.name?.trim() || role.title,
+            roleId: role.id,
+            role: role.slug,
+            personality: personality || undefined,
+            avatar: avatarData.avatar || undefined,
+            skills: [],
+            processes: [],
+            goals: [],
+            permissions: { tools: [], folders: [] },
+            projectId: projectId || undefined,
+          }),
+        });
+        const personaData = await personaRes.json();
+
+        // Add to generating workers for UI display
+        if (personaData.persona) {
+          setGeneratingWorkers(prev => [...prev, personaData.persona]);
+        }
+
+        if (genData.name) allNames.push(genData.name);
+      }
+
+      // Redirect to board after all team members created
+      router.push(`/p/${slug}/board`);
+    } catch (err) {
+      console.error("[handleAcceptRandomTeam] failed:", err);
+      setGeneratingWorkers([]);
+    }
+    setSaving(false);
   }
 
   // ── Step transitions ──
@@ -257,6 +459,13 @@ export default function TeamPage() {
       });
       const genData = await genRes.json();
       if (signal.aborted) return;
+      if (genData.code === "gemini_key_missing") {
+        setGenerating(false);
+        setGeneratingPhase("");
+        setGeminiRetryFn(() => () => generateWorker(roleSlug, genderOverride));
+        setShowGeminiSetup(true);
+        return;
+      }
       if (genData.name) setName(genData.name);
       if (genData.appearance) setAppearance(genData.appearance);
 
@@ -267,13 +476,23 @@ export default function TeamPage() {
         body: JSON.stringify({
           name: genData.name || "Worker",
           role: roleSlug,
-          personality: genData.appearance || "",
-          style: getStylePrompt(),
+          personality: styleImage
+            ? `${genderToText(g)}${genData.appearance ? ". " + genData.appearance : ""}`
+            : (genData.appearance || ""),
+          style: styleImage ? null : getStylePrompt(),
+          styleImage: styleImage || null,
         }),
         signal,
       });
       const avatarData = await avatarRes.json();
       if (signal.aborted) return;
+      if (avatarData.code === "gemini_key_missing") {
+        setGenerating(false);
+        setGeneratingPhase("");
+        setGeminiRetryFn(() => () => generateWorker(roleSlug, genderOverride));
+        setShowGeminiSetup(true);
+        return;
+      }
       if (avatarData.avatar) setAvatarUrl(avatarData.avatar);
     } catch {
       if (signal.aborted) return;
@@ -294,12 +513,20 @@ export default function TeamPage() {
     }
   }, [loading]);
 
+  // Weighted random gender: 45% male, 45% female, 10% non-binary
+  function randomGender(): "male" | "female" | "non-binary" {
+    const r = Math.random();
+    if (r < 0.45) return "male";
+    if (r < 0.90) return "female";
+    return "non-binary";
+  }
+
   // Auto-generate worker with random gender when entering a hire step
   useEffect(() => {
     if (step < 1 || unfilledRoles.length === 0) return;
     const role = unfilledRoles[step - 1];
     if (!role) return;
-    const g = (["male", "female", "non-binary"] as const)[Math.floor(Math.random() * 3)];
+    const g = randomGender();
     queueMicrotask(() => {
       setGender(g);
       generateWorker(role.slug, g);
@@ -321,7 +548,7 @@ export default function TeamPage() {
   async function regenerateAll() {
     const role = currentRole();
     if (!role) return;
-    const g = (["male", "female", "non-binary"] as const)[Math.floor(Math.random() * 3)];
+    const g = randomGender();
     setGender(g);
     setName("");
     setAppearance("");
@@ -376,8 +603,11 @@ export default function TeamPage() {
             body: JSON.stringify({
               name,
               role: role.slug,
-              personality: data.appearance,
-              style: getStylePrompt(),
+              personality: styleImage
+                ? `${genderToText(gender)}${data.appearance ? ". " + data.appearance : ""}`
+                : data.appearance,
+              style: styleImage ? null : getStylePrompt(),
+              styleImage: styleImage || null,
             }),
           });
           const avatarData = await avatarRes.json();
@@ -400,8 +630,11 @@ export default function TeamPage() {
         body: JSON.stringify({
           name,
           role: role.slug,
-          personality: appearance,
-          style: getStylePrompt(),
+          personality: styleImage
+            ? `${genderToText(gender)}${appearance ? ". " + appearance : ""}`
+            : appearance,
+          style: styleImage ? null : getStylePrompt(),
+          styleImage: styleImage || null,
         }),
       });
       const data = await res.json();
@@ -450,6 +683,7 @@ export default function TeamPage() {
                     border: `3px solid ${styleAccent}`,
                     overflow: "hidden",
                     position: "relative",
+                    isolation: "isolate",
                     boxShadow: `0 0 40px ${styleAccent}30, 0 0 80px ${styleAccent}15`,
                   }}
                 >
@@ -461,6 +695,7 @@ export default function TeamPage() {
                         width: "100%",
                         height: "100%",
                         objectFit: "cover",
+                        borderRadius: "50%",
                         opacity: generatingPreview ? 0.4 : 1,
                         transition: "opacity 0.3s",
                       }}
@@ -577,107 +812,291 @@ export default function TeamPage() {
               </button>
             </div>
 
-            {/* ── Textarea ── */}
+            {/* ── Style Prompt / Image Drop ── */}
+            <input
+              ref={styleFileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleStyleFileInput}
+              style={{ display: "none" }}
+            />
             <div
+              onDragOver={(e) => { e.preventDefault(); setStyleDragOver(true); }}
+              onDragLeave={() => setStyleDragOver(false)}
+              onDrop={handleStyleFileDrop}
               style={{
-                border: `1px solid ${styleAccent}20`,
+                border: `1px solid ${styleDragOver ? styleAccent + "80" : generatingPreview || randomizing ? styleAccent + "60" : styleAccent + "20"}`,
                 borderRadius: 10,
-                backgroundColor: `${styleAccent}04`,
+                backgroundColor: styleDragOver ? `${styleAccent}10` : `${styleAccent}04`,
                 padding: "16px 18px",
+                position: "relative",
+                transition: "all 0.15s",
               }}
             >
+              {(generatingPreview || randomizing) && (
+                <div style={{
+                  position: "absolute",
+                  inset: 0,
+                  borderRadius: 10,
+                  backgroundColor: "rgba(0,0,0,0.3)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  zIndex: 2,
+                  gap: 8,
+                }}>
+                  <svg className="w-4 h-4 animate-spin" style={{ color: styleAccent }} fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: styleAccent }}>
+                    {randomizing ? "Generating style..." : "Generating avatar..."}
+                  </span>
+                </div>
+              )}
+
+              {/* Header row — always visible */}
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
                 <label style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)" }}>
                   Style Prompt
                 </label>
+                {/* Randomize — only in text mode */}
+                {!styleImage && (
+                  <button
+                    onClick={randomizeStyle}
+                    disabled={generatingPreview}
+                    title="Randomize style"
+                    style={{
+                      width: 20, height: 20, borderRadius: 4, border: "none",
+                      backgroundColor: "transparent", color: "#fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      cursor: generatingPreview ? "not-allowed" : "pointer",
+                      opacity: generatingPreview ? 0.3 : 0.5,
+                      transition: "opacity 0.2s", padding: 0,
+                    }}
+                    onMouseEnter={(e) => { if (!generatingPreview) e.currentTarget.style.opacity = "1"; }}
+                    onMouseLeave={(e) => { if (!generatingPreview) e.currentTarget.style.opacity = "0.5"; }}
+                  >
+                    <svg className={`w-3.5 h-3.5 ${randomizing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                    </svg>
+                  </button>
+                )}
+                {/* Upload photo button */}
                 <button
-                  onClick={randomizeStyle}
-                  disabled={generatingPreview}
-                  title="Randomize style"
+                  onClick={() => styleFileInputRef.current?.click()}
+                  title="Upload style reference photo"
                   style={{
-                    width: 20,
-                    height: 20,
-                    borderRadius: 4,
-                    border: "none",
-                    backgroundColor: "transparent",
-                    color: "#fff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: generatingPreview ? "not-allowed" : "pointer",
-                    opacity: generatingPreview ? 0.3 : 0.5,
-                    transition: "opacity 0.2s",
-                    padding: 0,
+                    width: 20, height: 20, borderRadius: 4, border: "none",
+                    backgroundColor: "transparent", color: "#fff",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    cursor: "pointer", opacity: 0.5, transition: "opacity 0.2s", padding: 0,
                   }}
-                  onMouseEnter={(e) => { if (!generatingPreview) e.currentTarget.style.opacity = "1"; }}
-                  onMouseLeave={(e) => { if (!generatingPreview) e.currentTarget.style.opacity = "0.5"; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.5"; }}
                 >
-                  <svg className={`w-3.5 h-3.5 ${randomizing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
                   </svg>
                 </button>
+                {/* Clear image — only when image is set */}
+                {styleImage && (
+                  <button
+                    onClick={() => { setStyleImage(null); setStyleMode("text"); }}
+                    title="Remove photo, use text prompt"
+                    style={{
+                      width: 20, height: 20, borderRadius: 4, border: "none",
+                      backgroundColor: "transparent", color: "#fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      cursor: "pointer", opacity: 0.5, transition: "opacity 0.2s", padding: 0,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.5"; }}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
               </div>
-              <textarea
-                value={stylePromptText}
-                onChange={(e) => setStylePromptText(e.target.value)}
-                rows={6}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: 6,
-                  fontSize: 12,
-                  backgroundColor: "var(--bg-input)",
-                  border: "1px solid var(--border-medium)",
-                  color: "var(--text-primary)",
-                  outline: "none",
-                  resize: "vertical",
-                  lineHeight: 1.6,
-                }}
-                onFocus={(e) => { e.currentTarget.style.borderColor = styleAccent; }}
-                onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-medium)"; }}
-              />
+
+              {/* Image preview when a photo is set, textarea otherwise */}
+              {styleImage ? (
+                <div
+                  onClick={() => styleFileInputRef.current?.click()}
+                  style={{ position: "relative", cursor: "pointer", borderRadius: 6, overflow: "hidden" }}
+                >
+                  <img
+                    src={styleImage}
+                    alt="Style reference"
+                    style={{ width: "100%", maxHeight: 200, objectFit: "cover", display: "block", borderRadius: 6 }}
+                  />
+                  <div style={{
+                    position: "absolute", inset: 0, borderRadius: 6,
+                    background: "linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 55%)",
+                    display: "flex", alignItems: "flex-end", justifyContent: "center", padding: 10,
+                  }}>
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                      Click or drag to replace
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <textarea
+                  value={stylePromptText}
+                  onChange={(e) => setStylePromptText(e.target.value)}
+                  rows={6}
+                  placeholder="Describe the art style, or drag a reference photo onto this box..."
+                  style={{
+                    width: "100%", padding: "10px 12px", borderRadius: 6, fontSize: 12,
+                    backgroundColor: "var(--bg-input)", border: "1px solid var(--border-medium)",
+                    color: "var(--text-primary)", outline: "none", resize: "vertical", lineHeight: 1.6,
+                  }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = styleAccent; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-medium)"; }}
+                />
+              )}
             </div>
           </div>
         </div>
 
         {/* ── Bottom: Create Team + Back ── */}
-        <div style={{ padding: "20px 40px 32px", display: "flex", justifyContent: "center", gap: 12, alignItems: "center" }}>
+        <div style={{ padding: "20px 40px 32px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <button
+              onClick={() => router.push("/onboard/project")}
+              style={{
+                padding: "12px 24px",
+                borderRadius: 10,
+                border: "1px solid var(--border-medium)",
+                backgroundColor: "transparent",
+                color: "var(--text-secondary)",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+            >
+              Back
+            </button>
+            <button
+              onClick={handleCreateTeam}
+              disabled={(styleMode === "photo" ? !styleImage : !previewAvatar) || generatingPreview}
+              style={{
+                padding: "12px 40px",
+                borderRadius: 10,
+                border: `2px solid ${styleAccent}`,
+                backgroundColor: styleAccent,
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 700,
+                letterSpacing: "0.05em",
+                cursor: !previewAvatar || generatingPreview ? "not-allowed" : "pointer",
+                opacity: !previewAvatar || generatingPreview ? 0.4 : 1,
+                boxShadow: `0 0 16px ${styleAccent}30`,
+                transition: "all 0.3s",
+              }}
+            >
+              Create Your Team
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", letterSpacing: "0.05em" }}>or</div>
           <button
-            onClick={() => router.push("/onboard/project")}
+            onClick={handleAcceptRandomTeam}
+            disabled={generatingPreview || saving}
             style={{
-              padding: "12px 24px",
-              borderRadius: 10,
+              padding: "10px 32px",
+              borderRadius: 8,
               border: "1px solid var(--border-medium)",
               backgroundColor: "transparent",
               color: "var(--text-secondary)",
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: 600,
-              cursor: "pointer",
+              cursor: generatingPreview || saving ? "not-allowed" : "pointer",
+              opacity: generatingPreview || saving ? 0.4 : 1,
               transition: "all 0.2s",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
             }}
           >
-            Back
+            {saving ? (
+              <>
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Generating team...
+              </>
+            ) : (
+              "Accept Random Team"
+            )}
           </button>
-          <button
-            onClick={handleCreateTeam}
-            disabled={!previewAvatar || generatingPreview}
-            style={{
-              padding: "12px 40px",
-              borderRadius: 10,
-              border: `2px solid ${styleAccent}`,
-              backgroundColor: styleAccent,
-              color: "#fff",
-              fontSize: 14,
-              fontWeight: 700,
-              letterSpacing: "0.05em",
-              cursor: !previewAvatar || generatingPreview ? "not-allowed" : "pointer",
-              opacity: !previewAvatar || generatingPreview ? 0.4 : 1,
-              boxShadow: `0 0 16px ${styleAccent}30`,
-              transition: "all 0.3s",
-            }}
-          >
-            Create Your Team
-          </button>
+
+          {/* Show generating workers progressively */}
+          {generatingWorkers.length > 0 && (
+            <div style={{
+              display: "flex",
+              gap: 12,
+              marginTop: 16,
+              padding: "12px 20px",
+              borderRadius: 8,
+              backgroundColor: `${styleAccent}08`,
+              border: `1px solid ${styleAccent}20`,
+            }}>
+              {generatingWorkers.map((worker, idx) => (
+                <div key={`gen-${idx}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                  <div
+                    style={{
+                      width: 52,
+                      height: 52,
+                      borderRadius: "50%",
+                      border: `2px solid ${worker.color || styleAccent}`,
+                      overflow: "hidden",
+                      boxShadow: `0 0 12px ${worker.color || styleAccent}30`,
+                    }}
+                  >
+                    {worker.avatar ? (
+                      <img src={worker.avatar} alt={worker.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      <div style={{
+                        width: "100%",
+                        height: "100%",
+                        backgroundColor: worker.color || styleAccent,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 18,
+                        fontWeight: 700,
+                        color: "#fff"
+                      }}>
+                        {worker.name[0].toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: worker.color || styleAccent,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                    }}>
+                      {worker.name}
+                    </span>
+                    <span style={{
+                      fontSize: 9,
+                      fontWeight: 500,
+                      color: "var(--text-muted)",
+                      textTransform: "capitalize",
+                    }}>
+                      {worker.role}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <style>{`
@@ -685,6 +1104,14 @@ export default function TeamPage() {
             opacity: 1 !important;
           }
         `}</style>
+        <GeminiSetupModal
+          open={showGeminiSetup}
+          onClose={() => setShowGeminiSetup(false)}
+          onSuccess={() => {
+            setShowGeminiSetup(false);
+            geminiRetryFn?.();
+          }}
+        />
       </div>
     );
   }
@@ -1248,6 +1675,14 @@ export default function TeamPage() {
           opacity: 1 !important;
         }
       `}</style>
+      <GeminiSetupModal
+        open={showGeminiSetup}
+        onClose={() => setShowGeminiSetup(false)}
+        onSuccess={() => {
+          setShowGeminiSetup(false);
+          geminiRetryFn?.();
+        }}
+      />
     </div>
   );
 }

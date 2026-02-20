@@ -7,6 +7,8 @@ import type { TicketType } from "@/types";
 import { ticketTypes } from "@/lib/ticket-types";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { VoiceButton } from "@/components/voice-button";
+// EPIC FEATURES DISABLED
+// import { EpicBreakdownWizard } from "@/components/board/epic-breakdown-wizard";
 
 interface NewTicketFormProps {
   projectId: string;
@@ -20,15 +22,18 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState<TicketType | null>(null);
-  const [isEpic, setIsEpic] = useState(false);
-  const [epicAutoSelected, setEpicAutoSelected] = useState(false);
+  // EPIC FEATURES DISABLED
+  // const [isEpic, setIsEpic] = useState(false);
+  // const [epicAutoSelected, setEpicAutoSelected] = useState(false);
   const [acceptanceCriteria, setAcceptanceCriteria] = useState("");
   const [saving, setSaving] = useState(false);
   const [generatingTitle, setGeneratingTitle] = useState(false);
   const [generatingCriteria, setGeneratingCriteria] = useState(false);
-  const [enhancingDescription, setEnhancingDescription] = useState(false);
+
   const [dragOver, setDragOver] = useState(false);
   const [images, setImages] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
+  // EPIC FEATURES DISABLED
+  // const [wizardEpic, setWizardEpic] = useState<{ id: number; title: string } | null>(null);
   const descRef = useRef<HTMLTextAreaElement>(null);
 
   const pendingVoiceBlurRef = useRef(false);
@@ -70,64 +75,78 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
     addImageFiles(files);
   }
 
+  // EPIC FEATURES DISABLED
   // Auto-select Epic when total content is long (likely a large, multi-part ticket)
-  const EPIC_THRESHOLD = 500;
-  useEffect(() => {
-    const totalLen = (description + title + acceptanceCriteria).length;
-    if (totalLen >= EPIC_THRESHOLD && !isEpic && !epicAutoSelected) {
-      setIsEpic(true);
-      setType(null);
-      setEpicAutoSelected(true);
-    }
-  }, [description, title, acceptanceCriteria, isEpic, epicAutoSelected]);
+  // const EPIC_THRESHOLD = 500;
+  // useEffect(() => {
+  //   const totalLen = (description + title + acceptanceCriteria).length;
+  //   if (totalLen >= EPIC_THRESHOLD && !isEpic && !epicAutoSelected) {
+  //     setIsEpic(true);
+  //     setType(null);
+  //     setEpicAutoSelected(true);
+  //   }
+  // }, [description, title, acceptanceCriteria, isEpic, epicAutoSelected]);
 
-  const accent = isEpic ? "#f97316" : type ? ticketTypes[type].color : "var(--badge-feature)";
+  const accent = type ? ticketTypes[type].color : "var(--badge-feature)";
 
-  async function generateFromDescription(opts?: { skipEnhance?: boolean }) {
+  async function generateFromDescription() {
     if (!description.trim()) return;
     const jobs: Promise<void>[] = [];
-    if (!opts?.skipEnhance) {
-      jobs.push((async () => {
-        setEnhancingDescription(true);
-        try {
-          const res = await fetch("/api/generate-title", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ description: description.trim(), field: "enhance" }),
-          });
-          const data = await res.json();
-          if (data.enhance) setDescription(data.enhance);
-        } catch {} finally { setEnhancingDescription(false); }
-      })());
-    }
+
+    // Helper to add timeout to fetch
+    const fetchWithTimeout = (url: string, options: RequestInit, timeout = 30000) => {
+      return Promise.race([
+        fetch(url, options),
+        new Promise<Response>((_, reject) =>
+          setTimeout(() => reject(new Error('Request timeout')), timeout)
+        )
+      ]);
+    };
+
     if (!title.trim()) {
       jobs.push((async () => {
         setGeneratingTitle(true);
         try {
-          const res = await fetch("/api/generate-title", {
+          const res = await fetchWithTimeout("/api/generate-title", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ description: description.trim(), field: "title" }),
-          });
+          }, 30000);
+          if (!res.ok) {
+            const error = await res.text();
+            console.error("Failed to generate title:", error);
+            return;
+          }
           const data = await res.json();
           if (data.title) setTitle(data.title);
-        } catch {}
-        setGeneratingTitle(false);
+        } catch (err) {
+          console.error("Error generating title:", err);
+        } finally {
+          setGeneratingTitle(false);
+        }
       })());
     }
     if (!acceptanceCriteria.trim()) {
       jobs.push((async () => {
         setGeneratingCriteria(true);
         try {
-          const res = await fetch("/api/generate-title", {
+          const res = await fetchWithTimeout("/api/generate-title", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ description: description.trim(), field: "criteria" }),
-          });
+          }, 30000);
+          if (!res.ok) {
+            const error = await res.text();
+            console.error("Failed to generate criteria:", error);
+            return;
+          }
           const data = await res.json();
           if (data.criteria) setAcceptanceCriteria(data.criteria);
-        } catch {}
-        setGeneratingCriteria(false);
+        } catch (err) {
+          console.error("Error generating criteria:", err);
+        } finally {
+          setGeneratingCriteria(false);
+        }
       })());
     }
     await Promise.all(jobs);
@@ -136,7 +155,7 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
   useEffect(() => {
     if (pendingVoiceBlurRef.current && description.trim()) {
       pendingVoiceBlurRef.current = false;
-      generateFromDescription({ skipEnhance: true });
+      generateFromDescription();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [description]);
@@ -153,7 +172,8 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
         description: description.trim() || undefined,
         acceptanceCriteria: acceptanceCriteria.trim() || undefined,
         projectId,
-        isEpic: isEpic || undefined,
+        // EPIC FEATURES DISABLED
+        // isEpic: isEpic || undefined,
       }),
     });
     const data = await res.json();
@@ -180,11 +200,30 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
         }
       }));
     }
+    // EPIC FEATURES DISABLED
+    // if (isEpic && ticketId) {
+    //   setWizardEpic({ id: ticketId, title: title.trim() });
+    //   setSaving(false);
+    //   return;
+    // }
     router.push(`/p/${projectSlug}${ticketId ? `?openTicket=${ticketId}` : ""}`);
   }
 
+  // EPIC FEATURES DISABLED
+  // if (wizardEpic) {
+  //   return (
+  //     <EpicBreakdownWizard
+  //       epicId={wizardEpic.id}
+  //       epicTitle={wizardEpic.title}
+  //       projectSlug={projectSlug}
+  //       projectId={projectId}
+  //       onClose={() => router.push(`/p/${projectSlug}`)}
+  //     />
+  //   );
+  // }
+
   return (
-    <div className="flex-1 flex flex-col overflow-hidden" style={{ backgroundColor: "var(--bg-primary)" }}>
+    <div className="h-full flex flex-col overflow-hidden" style={{ backgroundColor: "var(--bg-primary)" }}>
       {/* Header */}
       <div
         className="grid grid-cols-3 items-center px-10 py-6 border-b"
@@ -233,7 +272,7 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
       {/* Body — two columns */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: main content */}
-        <div className="flex-1 flex flex-col px-10 py-8 gap-6 overflow-y-auto">
+        <div className="flex-1 flex flex-col px-10 py-8 gap-6 overflow-y-auto min-h-0">
           {/* Description */}
           <div className="flex flex-col" style={{ height: "50vh" }}>
             <div className="flex items-center justify-between mb-2">
@@ -252,18 +291,18 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
                 onPaste={handleDescPaste}
                 placeholder={voice.isRecording ? voice.interimTranscript || "Listening..." : ticketTypes[type || "feature"].placeholder}
                 autoFocus
-                disabled={voice.isProcessingAI || enhancingDescription}
+                disabled={voice.isProcessingAI}
                 className="w-full h-full px-5 py-4 rounded-lg text-base leading-relaxed outline-none transition-all resize-none bg-[var(--bg-input)] border text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
                 style={{ borderColor: dragOver ? "var(--accent-blue)" : undefined }}
               />
-              {(voice.isProcessingAI || enhancingDescription) && (
+              {voice.isProcessingAI && (
                 <div className="absolute inset-0 bg-[var(--bg-primary)]/80 backdrop-blur-sm rounded-lg flex items-center justify-center">
                   <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
-                    {voice.isProcessingAI ? "Cleaning up your description..." : "Enhancing description..."}
+                    Cleaning up your description...
                   </div>
                 </div>
               )}
@@ -326,7 +365,7 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
                 onChange={(e) => setAcceptanceCriteria(e.target.value)}
                 placeholder={criteriaVoice.isRecording ? criteriaVoice.interimTranscript || "Listening..." : generatingCriteria ? "Generating criteria..." : ticketTypes[type || "feature"].criteriaPlaceholder}
                 disabled={criteriaVoice.isProcessingAI}
-                className="flex-1 w-full h-full px-5 py-4 rounded-lg text-base leading-relaxed outline-none transition-all resize-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] min-h-[120px] focus:border-[var(--accent-blue)]"
+                className="flex-1 w-full h-full px-5 py-4 rounded-lg text-base leading-relaxed outline-none transition-all resize-none bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] min-h-[240px] focus:border-[var(--accent-blue)]"
               />
               {criteriaVoice.isProcessingAI && (
                 <div className="absolute inset-0 bg-[var(--bg-primary)]/80 backdrop-blur-sm rounded-lg flex items-center justify-center">
@@ -351,8 +390,9 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
           <div>
             <label className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">Type</label>
             <div className="flex flex-col gap-2">
+              {/* EPIC FEATURES DISABLED */}
               {/* Epic option */}
-              <button
+              {/* <button
                 onClick={() => { setIsEpic(true); setType(null); setEpicAutoSelected(true); }}
                 className="px-4 py-2 rounded-lg text-sm font-medium transition-colors text-left border"
                 style={{
@@ -362,14 +402,14 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
                 }}
               >
                 Epic
-              </button>
+              </button> */}
               {(Object.keys(ticketTypes) as TicketType[]).map((key) => {
                 const opt = ticketTypes[key];
                 const selected = type === key;
                 return (
                   <button
                     key={key}
-                    onClick={() => { setType(key); setIsEpic(false); }}
+                    onClick={() => setType(key)}
                     className="px-4 py-2 rounded-lg text-sm font-medium transition-colors text-left border"
                     style={{
                       backgroundColor: selected ? `color-mix(in srgb, ${opt.color} 15%, transparent)` : "transparent",
@@ -398,7 +438,7 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
               className="w-full px-8 py-3 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
               style={{ backgroundColor: accent }}
             >
-              {saving ? "Creating..." : isEpic ? "Create epic" : `Create ${ticketTypes[type || "feature"].label.toLowerCase()}`}
+              {saving ? "Creating..." : `Create ${ticketTypes[type || "feature"].label.toLowerCase()}`}
             </button>
           </div>
         </div>

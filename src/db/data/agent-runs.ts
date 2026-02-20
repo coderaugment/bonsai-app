@@ -1,6 +1,6 @@
-import { db, asAsync } from "./_driver";
+import { db, asAsync, runAsync } from "./_driver";
 import { agentRuns } from "../schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, ne, sql } from "drizzle-orm";
 
 const STALE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -12,7 +12,8 @@ export function insertAgentRun(params: {
   sessionDir?: string;
   dispatchSource?: string;
 }): Promise<number> {
-  // Abandon any existing running runs for same persona (orphan cleanup)
+  // Abandon any existing running runs for same ticket+persona only (orphan cleanup).
+  // Do NOT abandon runs for other tickets — the 30-min stale timeout handles true orphans.
   db.update(agentRuns)
     .set({
       status: "abandoned",
@@ -20,6 +21,7 @@ export function insertAgentRun(params: {
     })
     .where(
       and(
+        eq(agentRuns.ticketId, params.ticketId),
         eq(agentRuns.personaId, params.personaId),
         eq(agentRuns.status, "running")
       )
@@ -180,4 +182,18 @@ export function getAgentRuns(limit: number = 50, projectId?: number): Promise<Ag
   `) as AgentRunWithContext[];
 
   return asAsync(rows);
+}
+
+export function clearFinishedAgentRuns(projectId?: number): Promise<void> {
+  return runAsync(() => {
+    if (projectId) {
+      db.run(sql`
+        DELETE FROM agent_runs
+        WHERE status != 'running'
+          AND ticket_id IN (SELECT id FROM tickets WHERE project_id = ${projectId})
+      `);
+    } else {
+      db.delete(agentRuns).where(ne(agentRuns.status, "running")).run();
+    }
+  });
 }

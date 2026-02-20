@@ -1,5 +1,5 @@
 import { db, asAsync, runAsync } from "./_driver";
-import { tickets, users, personas } from "../schema";
+import { tickets, personas, agentRuns } from "../schema";
 import {
   eq,
   sql,
@@ -9,6 +9,7 @@ import {
   lt,
   asc,
   or,
+  inArray,
 } from "drizzle-orm";
 import type { Ticket, Persona } from "@/types";
 
@@ -75,18 +76,19 @@ export function getTickets(projectId?: number): Promise<Ticket[]> {
     personaRows.map((p) => [p.id, personaFromRow(p)])
   );
 
-  // Build creator map
-  const creatorIds = [
-    ...new Set(rows.map((r) => r.createdBy).filter(Boolean)),
-  ] as number[];
-  const creatorMap = new Map<number, { name: string; avatarUrl?: string }>();
-  for (const uid of creatorIds) {
-    const u = db.select().from(users).where(eq(users.id, uid)).get();
-    if (u)
-      creatorMap.set(uid, {
-        name: u.name,
-        avatarUrl: u.avatarUrl ?? undefined,
-      });
+  // Query running agent_runs to get real-time active agents per ticket
+  const ticketIds = rows.map((r) => r.id);
+  const runningRunsMap = new Map<number, Set<string>>();
+  if (ticketIds.length > 0) {
+    const runningRuns = db
+      .select({ ticketId: agentRuns.ticketId, personaId: agentRuns.personaId })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.status, "running"), inArray(agentRuns.ticketId, ticketIds)))
+      .all();
+    for (const run of runningRuns) {
+      if (!runningRunsMap.has(run.ticketId)) runningRunsMap.set(run.ticketId, new Set());
+      runningRunsMap.get(run.ticketId)!.add(run.personaId);
+    }
   }
 
   // Compute epic metadata: child counts and epic titles
@@ -103,10 +105,12 @@ export function getTickets(projectId?: number): Promise<Ticket[]> {
   }
 
   const result = rows.map((r) => {
+    const activeRunPersonaIds = [...(runningRunsMap.get(r.id) ?? new Set<string>())];
     const participantIds = new Set<string>();
     if (r.assigneeId) participantIds.add(r.assigneeId);
     if (r.researchCompletedBy) participantIds.add(r.researchCompletedBy);
     if (r.planCompletedBy) participantIds.add(r.planCompletedBy);
+    for (const pid of activeRunPersonaIds) participantIds.add(pid);
     const participants = [...participantIds]
       .map((id) => personaMap.get(id))
       .filter((p): p is NonNullable<typeof p> => p != null);
@@ -121,7 +125,6 @@ export function getTickets(projectId?: number): Promise<Ticket[]> {
       state: r.state,
       priority: r.priority,
       assignee: r.assigneeId ? personaMap.get(r.assigneeId) : undefined,
-      creator: r.createdBy ? creatorMap.get(r.createdBy) : undefined,
       acceptanceCriteria: r.acceptanceCriteria ?? undefined,
       commentCount: r.commentCount ?? 0,
       hasAttachments: r.hasAttachments ?? false,
@@ -130,11 +133,9 @@ export function getTickets(projectId?: number): Promise<Ticket[]> {
       researchCompletedAt: r.researchCompletedAt ?? undefined,
       researchCompletedBy: r.researchCompletedBy ?? undefined,
       researchApprovedAt: r.researchApprovedAt ?? undefined,
-      researchApprovedBy: r.researchApprovedBy ?? undefined,
       planCompletedAt: r.planCompletedAt ?? undefined,
       planCompletedBy: r.planCompletedBy ?? undefined,
       planApprovedAt: r.planApprovedAt ?? undefined,
-      planApprovedBy: r.planApprovedBy ?? undefined,
       lastHumanCommentAt: r.lastHumanCommentAt ?? undefined,
       returnedFromVerification: r.returnedFromVerification ?? false,
       mergedAt: r.mergedAt ?? undefined,
@@ -145,6 +146,7 @@ export function getTickets(projectId?: number): Promise<Ticket[]> {
       childCount: childStats?.total ?? 0,
       childrenShipped: childStats?.shipped ?? 0,
       participants,
+      activeRunPersonaIds,
     } as Ticket;
   });
 
@@ -156,15 +158,24 @@ export function getTicketById(id: number) {
   return asAsync(row ?? null);
 }
 
+/** Find a ticket by project + title (used for inbox ticket lookup) */
+export function getTicketsByProject(projectId: number, title: string) {
+  const row = db
+    .select()
+    .from(tickets)
+    .where(and(eq(tickets.projectId, projectId), eq(tickets.title, title)))
+    .get();
+  return asAsync(row ?? null);
+}
+
 export function createTicket(data: {
   title: string;
   type: "feature" | "bug" | "chore";
-  state: "review" | "planning" | "building" | "test" | "shipped";
+  state: "planning" | "building" | "preview" | "test" | "shipped";
   description?: string | null;
   acceptanceCriteria?: string | null;
   priority: number;
   projectId: number;
-  createdBy?: number | null;
   commentCount?: number;
   hasAttachments?: boolean;
   isEpic?: boolean;
@@ -180,7 +191,6 @@ export function createTicket(data: {
       acceptanceCriteria: data.acceptanceCriteria ?? null,
       priority: data.priority,
       projectId: data.projectId,
-      createdBy: data.createdBy ?? null,
       commentCount: data.commentCount ?? 0,
       hasAttachments: data.hasAttachments ?? false,
       isEpic: data.isEpic ?? false,
@@ -270,7 +280,6 @@ export function getNextTicket(
       isNull(tickets.lastAgentActivity),
       lt(tickets.lastAgentActivity, thirtyMinutesAgo)
     ),
-    sql`${tickets.state} != 'review'`,
     sql`${tickets.state} != 'shipped'`,
     eq(tickets.isEpic, false),
   ];

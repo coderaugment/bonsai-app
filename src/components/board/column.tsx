@@ -9,7 +9,6 @@ const columnConfig: Record<
   TicketState,
   { label: string; color: string }
 > = {
-  review: { label: "Review", color: "var(--column-research)" },
   planning: { label: "Planning", color: "var(--column-plan)" },
   building: { label: "Building", color: "var(--column-build)" },
   preview: { label: "Preview", color: "var(--column-preview, var(--column-test))" },
@@ -28,6 +27,7 @@ interface ColumnProps {
   onDrop: (targetState: TicketState) => void;
   onEdit?: (ticket: Ticket) => void;
   onViewDocument?: (ticket: Ticket, docType: "research" | "implementation_plan") => void;
+  onOpenEpic?: (epicId: number) => void;
 }
 
 export function Column({
@@ -41,6 +41,7 @@ export function Column({
   onDrop,
   onEdit,
   onViewDocument,
+  onOpenEpic,
 }: ColumnProps) {
   const config = columnConfig[state];
   const [dragOver, setDragOver] = useState(false);
@@ -139,6 +140,7 @@ export function Column({
             onDragEnd={onDragEnd}
             onEdit={onEdit}
             onViewDocument={onViewDocument}
+            onOpenEpic={onOpenEpic}
           />
         ))}
 

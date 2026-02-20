@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getUser } from "@/db/data/users";
+import { getSetting } from "@/db/data/settings";
 import { getTicketById, updateTicket } from "@/db/data/tickets";
 import { createSystemCommentAndBumpCount } from "@/db/data/comments";
 import { getPersonasByRole } from "@/db/data/personas";
@@ -14,12 +14,6 @@ interface RouteContext {
 export async function POST(req: Request, context: RouteContext) {
   const { id } = await context.params;
   const ticketId = Number(id);
-
-  // Get current user (first user for now - in production would use auth)
-  const user = await getUser();
-  if (!user) {
-    return NextResponse.json({ error: "No user found" }, { status: 401 });
-  }
 
   // Check that ticket has research completed
   const ticket = await getTicketById(ticketId);
@@ -36,17 +30,17 @@ export async function POST(req: Request, context: RouteContext) {
   }
 
   const now = new Date().toISOString();
+  const userName = await getSetting("user_name");
 
   await updateTicket(ticketId, {
     researchApprovedAt: now,
-    researchApprovedBy: user.id,
-    state: "plan",
+    state: "planning",
   });
 
   // Post system comment for the transition
   await createSystemCommentAndBumpCount(
     ticketId,
-    `Moved from **research** to **plan** — research approved`
+    `Research approved — continuing planning phase`
   );
 
   const origin = new URL(req.url).origin;
@@ -72,8 +66,8 @@ export async function POST(req: Request, context: RouteContext) {
     ticketId,
     event: "research_approved",
     actorType: "human",
-    actorId: user.id,
-    actorName: user.name,
+    actorId: null,
+    actorName: userName ?? "User",
     detail: "Approved research document",
     metadata: { newState: "plan" },
   });
@@ -81,8 +75,7 @@ export async function POST(req: Request, context: RouteContext) {
   return NextResponse.json({
     ok: true,
     approvedAt: now,
-    approvedBy: user.id,
-    state: "plan",
+    state: "planning",
   });
 }
 
@@ -93,16 +86,15 @@ export async function DELETE(req: Request, context: RouteContext) {
 
   await updateTicket(ticketId, {
     researchApprovedAt: null,
-    researchApprovedBy: null,
   });
 
-  const user = await getUser();
+  const userName = await getSetting("user_name");
   await logAuditEvent({
     ticketId,
     event: "research_approval_revoked",
     actorType: "human",
-    actorId: user?.id,
-    actorName: user?.name ?? "Unknown",
+    actorId: null,
+    actorName: userName ?? "User",
     detail: "Revoked research approval",
   });
 

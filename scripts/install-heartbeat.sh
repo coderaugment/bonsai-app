@@ -93,10 +93,9 @@ echo
 echo "Creating directories..."
 mkdir -p "$HOME/.bonsai/logs"
 mkdir -p "$HOME/.bonsai/sessions"
-mkdir -p "$HOME/.bonsai/worktrees"
 echo "✓ Created: ~/.bonsai/logs"
 echo "✓ Created: ~/.bonsai/sessions"
-echo "✓ Created: ~/.bonsai/worktrees"
+echo "  (Note: Worktrees now created inside each project at .bonsai-worktrees/)"
 echo
 
 # ── Make heartbeat.sh executable ────────────────────────────────────

@@ -65,7 +65,7 @@ The system is **idempotent** — safe to run multiple times without duplicating 
 
 - **Lock file with PID check** — Only one heartbeat process runs at a time
 - **Per-ticket activity tracking** — Prevents multiple agents on same ticket
-- **Git worktree isolation** — Each ticket gets isolated workspace at `~/.bonsai/worktrees/{project}/{ticketId}`
+- **Git worktree isolation** — Each ticket gets isolated workspace at `{projectRoot}/worktrees/{ticketId}`
 - **Session isolation** — Agent sessions stored in `~/.bonsai/sessions/{ticketId}-{phase}/`
 
 ### Round-Robin Dispatch
@@ -422,8 +422,9 @@ rm ~/.bonsai/logs/heartbeat.log
 
 **Fix:**
 ```bash
-# Remove stale worktree
-git worktree remove ~/.bonsai/worktrees/{project}/{ticketId}
+# Remove stale worktree (from within project repository)
+cd ~/development/bonsai/projects/{project}/repo
+git worktree remove ../worktrees/{ticketId}
 
 # Or prune all stale worktrees
 git worktree prune

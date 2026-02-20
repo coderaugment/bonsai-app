@@ -1,6 +1,6 @@
 import { db, asAsync, runAsync } from "./_driver";
-import { projects, tickets } from "../schema";
-import { eq, and, or, isNull } from "drizzle-orm";
+import { projects, tickets, comments, ticketDocuments, ticketAttachments, ticketAuditLog, personas, projectMessages } from "../schema";
+import { eq, and, or, isNull, sql } from "drizzle-orm";
 import type { Project } from "@/types";
 import { getSetting } from "./settings";
 
@@ -85,17 +85,6 @@ export function createProject(data: {
   const row = db
     .insert(projects)
     .values(data)
-    .onConflictDoUpdate({
-      target: projects.slug,
-      set: {
-        name: data.name,
-        visibility: data.visibility,
-        description: data.description,
-        githubOwner: data.githubOwner,
-        githubRepo: data.githubRepo,
-        localPath: data.localPath,
-      },
-    })
     .returning()
     .get();
   return asAsync(row);
@@ -112,9 +101,38 @@ export function updateProject(
 
 export function softDeleteProject(id: number): Promise<void> {
   return runAsync(() => {
-    db.update(projects)
-      .set({ deletedAt: new Date().toISOString() })
-      .where(eq(projects.id, id))
-      .run();
+    // Get all ticket IDs for this project
+    const ticketRows = db.select({ id: tickets.id })
+      .from(tickets)
+      .where(eq(tickets.projectId, id))
+      .all();
+    const ticketIds = ticketRows.map((r) => r.id);
+
+    if (ticketIds.length > 0) {
+      // Hard-delete all related data for these tickets
+      for (const tid of ticketIds) {
+        db.delete(comments).where(eq(comments.ticketId, tid)).run();
+        db.delete(ticketDocuments).where(eq(ticketDocuments.ticketId, tid)).run();
+        db.delete(ticketAttachments).where(eq(ticketAttachments.ticketId, tid)).run();
+        db.delete(ticketAuditLog).where(eq(ticketAuditLog.ticketId, tid)).run();
+      }
+      // Hard-delete the tickets themselves
+      db.delete(tickets).where(eq(tickets.projectId, id)).run();
+    }
+
+    // Reset ticket autoincrement if no tickets remain
+    const remaining = db.select({ id: tickets.id }).from(tickets).limit(1).all();
+    if (remaining.length === 0) {
+      db.run(sql`UPDATE sqlite_sequence SET seq = 0 WHERE name = 'tickets'`);
+    }
+
+    // Hard-delete personas for this project
+    db.delete(personas).where(eq(personas.projectId, id)).run();
+
+    // Hard-delete project messages
+    db.delete(projectMessages).where(eq(projectMessages.projectId, id)).run();
+
+    // Hard-delete the project so the slug is freed for reuse
+    db.delete(projects).where(eq(projects.id, id)).run();
   });
 }

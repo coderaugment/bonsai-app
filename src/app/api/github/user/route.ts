@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGithubToken } from "@/lib/vault";
-import { getUser, updateUser } from "@/db/data/users";
+import { getSetting, setSetting } from "@/db/data/settings";
 
 export async function GET() {
   const token = await getGithubToken();
@@ -28,10 +28,10 @@ export async function GET() {
 
   const data = await res.json();
 
-  // Sync name + avatar from GitHub to local user record
-  const user = await getUser();
-  if (user && data.avatar_url) {
-    await updateUser(user.id, { avatarUrl: data.avatar_url, name: data.name || user.name });
+  // Sync name from GitHub to settings if not already set
+  const currentName = await getSetting("user_name");
+  if (!currentName && data.name) {
+    await setSetting("user_name", data.name);
   }
 
   return NextResponse.json({

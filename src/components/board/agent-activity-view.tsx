@@ -268,24 +268,128 @@ function FilterTabs({ active, counts, onChange }: { active: FilterTab; counts: R
 
 // --- Main Component ---
 
+interface HeartbeatStatus {
+  status: "running" | "idle" | "unknown";
+  lastPing: string | null;
+  lastCompleted: string | null;
+  lastResult: { dispatched: number; completed: number; skipped: number } | null;
+  authExpired?: boolean;
+}
+
+function HeartbeatBar({ hb, onReauthDone }: { hb: HeartbeatStatus | null; onReauthDone: () => void }) {
+  const [, setTick] = useState(0);
+  const [reauthState, setReauthState] = useState<"idle" | "triggered">("idle");
+
+  useEffect(() => {
+    const i = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(i);
+  }, []);
+
+  // Auth expired banner — auto-triggered, show status + manual fallback
+  if (hb?.authExpired) {
+    const handleManualTrigger = async () => {
+      setReauthState("triggered");
+      try {
+        await fetch("/api/auth/reauth", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      } catch { /* ignore */ }
+    };
+
+    const handleForceResume = async () => {
+      await fetch("/api/auth/reauth", { method: "DELETE" });
+      onReauthDone();
+    };
+
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
+        <span className="flex-shrink-0" style={{ color: "#f87171" }}>⚠ Auth expired — re-authenticating via Chrome…</span>
+        {reauthState === "idle" && (
+          <button
+            onClick={handleManualTrigger}
+            className="px-2 py-0.5 rounded text-xs font-semibold transition-opacity hover:opacity-80 flex-shrink-0"
+            style={{ backgroundColor: "rgba(239, 68, 68, 0.25)", color: "#f87171", border: "none", cursor: "pointer" }}
+          >
+            Retry
+          </button>
+        )}
+        {reauthState === "triggered" && (
+          <span className="flex-shrink-0" style={{ color: "rgba(255,255,255,0.4)" }}>Chrome opening…</span>
+        )}
+        <button
+          onClick={handleForceResume}
+          className="px-2 py-0.5 rounded text-xs transition-opacity hover:opacity-80 flex-shrink-0"
+          style={{ backgroundColor: "transparent", color: "rgba(255,255,255,0.3)", border: "none", cursor: "pointer" }}
+          title="Clear flag manually if you've already logged in"
+        >
+          Resume
+        </button>
+      </div>
+    );
+  }
+
+  if (!hb || !hb.lastPing) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs" style={{ backgroundColor: "rgba(255,255,255,0.03)", color: "var(--text-muted)" }}>
+        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.2)" }} />
+        Heartbeat — no data yet
+      </div>
+    );
+  }
+
+  const sinceMs = hb.lastPing ? Date.now() - new Date(hb.lastPing).getTime() : null;
+  const sinceCompleteMs = hb.lastCompleted ? Date.now() - new Date(hb.lastCompleted).getTime() : null;
+  const isRunning = hb.status === "running";
+  const isStale = sinceMs !== null && sinceMs > 90_000; // >90s since last ping = possibly stuck
+
+  const color = isRunning ? "#818cf8" : isStale ? "#f59e0b" : "#22c55e";
+  const label = isRunning
+    ? "Scanning now…"
+    : sinceCompleteMs !== null
+    ? `Last scan ${formatElapsed(hb.lastCompleted!)} ago`
+    : "Heartbeat idle";
+
+  const resultStr = hb.lastResult
+    ? `${hb.lastResult.dispatched} dispatched · ${hb.lastResult.completed} completed · ${hb.lastResult.skipped} skipped`
+    : null;
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs" style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+      <div
+        className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+        style={{
+          backgroundColor: color,
+          animation: isRunning ? "pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite" : undefined,
+        }}
+      />
+      <span style={{ color }}>{label}</span>
+      {resultStr && !isRunning && (
+        <span style={{ color: "var(--text-muted)" }}>— {resultStr}</span>
+      )}
+    </div>
+  );
+}
+
 export function AgentActivityView({ projectSlug }: { projectSlug: string }) {
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [creditPause, setCreditPause] = useState<CreditPauseStatus | null>(null);
   const [filter, setFilter] = useState<FilterTab>("all");
+  const [heartbeat, setHeartbeat] = useState<HeartbeatStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function fetchData() {
       try {
-        const [runsRes, pauseRes] = await Promise.all([
+        const [runsRes, pauseRes, hbRes] = await Promise.all([
           fetch(`/api/agent-runs?limit=100&projectSlug=${projectSlug}`),
           fetch("/api/credit-pause"),
+          fetch("/api/heartbeat-status"),
         ]);
         if (cancelled) return;
         const runsData = await runsRes.json();
         const pauseData = await pauseRes.json();
+        const hbData = await hbRes.json();
         setRuns(Array.isArray(runsData) ? runsData : []);
         setCreditPause(pauseData);
+        setHeartbeat(hbData);
       } catch {}
     }
     fetchData();
@@ -317,15 +421,45 @@ export function AgentActivityView({ projectSlug }: { projectSlug: string }) {
     <div className="h-full flex flex-col" style={{ backgroundColor: "var(--bg-primary)" }}>
       {/* Header */}
       <div className="flex-shrink-0 border-b px-8 py-5" style={{ borderColor: "var(--border-subtle)" }}>
-        <div className="flex items-center gap-3 mb-4">
-          <h1 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>Agent Activity</h1>
-          {activeRuns.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "#22c55e", animation: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite" }} />
-              <span className="text-xs" style={{ color: "#22c55e" }}>{activeRuns.length} active</span>
-            </div>
-          )}
-          <span className="text-xs" style={{ color: "var(--text-muted)" }}>Refreshes every 5s</span>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>Agent Activity</h1>
+            {activeRuns.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "#22c55e", animation: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite" }} />
+                <span className="text-xs" style={{ color: "#22c55e" }}>{activeRuns.length} active</span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            {/* Heart icon — pulses when heartbeat is running, dim when paused */}
+            <svg
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              className="w-4 h-4 flex-shrink-0"
+              style={{
+                color: (() => {
+                  if (heartbeat?.authExpired) return "#ef4444"; // auth expired — bright red
+                  if (creditPause?.paused) return "rgba(255,255,255,0.12)";
+                  if (!heartbeat?.lastPing) return "rgba(255,255,255,0.12)"; // no data
+                  const sinceMs = Date.now() - new Date(heartbeat.lastPing).getTime();
+                  if (sinceMs > 90_000) return "#6b7280"; // stale — grey
+                  if (heartbeat.status === "running") return "#f43f5e"; // active — red
+                  return "rgba(255,255,255,0.25)"; // idle — dim
+                })(),
+                animation: (heartbeat?.authExpired || (heartbeat?.status === "running" && !creditPause?.paused))
+                  ? "pulse 0.8s cubic-bezier(0.4, 0, 0.6, 1) infinite"
+                  : undefined,
+                transition: "color 0.3s",
+              }}
+            >
+              <path d="M11.645 20.91l-.007-.003-.022-.012a15.247 15.247 0 01-.383-.218 25.18 25.18 0 01-4.244-3.17C4.688 15.36 2.25 12.174 2.25 8.25 2.25 5.322 4.714 3 7.688 3A5.5 5.5 0 0112 5.052 5.5 5.5 0 0116.313 3c2.973 0 5.437 2.322 5.437 5.25 0 3.925-2.438 7.111-4.739 9.256a25.175 25.175 0 01-4.244 3.17 15.247 15.247 0 01-.383.219l-.022.012-.007.004-.003.001a.752.752 0 01-.704 0l-.003-.001z" />
+            </svg>
+            <HeartbeatBar
+              hb={heartbeat}
+              onReauthDone={() => setHeartbeat(hb => hb ? { ...hb, authExpired: false } : hb)}
+            />
+          </div>
         </div>
 
         {/* Stat Cards */}
@@ -375,9 +509,23 @@ export function AgentActivityView({ projectSlug }: { projectSlug: string }) {
 
         {/* Run History Section */}
         <div>
-          <h2 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-muted)" }}>
-            Run History
-          </h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+              Run History
+            </h2>
+            {finishedRuns.length > 0 && (
+              <button
+                onClick={async () => {
+                  await fetch(`/api/agent-runs?projectSlug=${projectSlug}`, { method: "DELETE" });
+                  setRuns((prev) => prev.filter((r) => r.status === "running"));
+                }}
+                className="text-xs transition-colors hover:opacity-80"
+                style={{ color: "var(--text-muted)" }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
           <FilterTabs active={filter} counts={counts} onChange={setFilter} />
 
           {filteredRuns.length === 0 ? (

@@ -5,8 +5,15 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1770401380308,
-      "tag": "0000_fantastic_green_goblin",
+      "when": 1771475505333,
+      "tag": "0000_initial_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1771476232822,
+      "tag": "0001_remove_users_table",
       "breakpoints": true
     }
   ]

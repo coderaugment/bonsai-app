@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { GeminiSetupModal } from "@/components/gemini-setup-modal";
 
 type Section = "preferences" | "api-keys" | "prompts" | "roles";
 
@@ -203,6 +204,7 @@ function PreferencesSection({
   onAvatarChange: (url: string) => void;
 }) {
   const [generatingAvatar, setGeneratingAvatar] = useState(false);
+  const [showGeminiSetup, setShowGeminiSetup] = useState(false);
 
   const displayAvatar = data.userAvatarUrl || data.githubAvatarUrl;
 
@@ -216,6 +218,11 @@ function PreferencesSection({
         body: JSON.stringify({ name: data.name, role: "user", personality: null, useUserStyle: true }),
       });
       const result = await res.json();
+      if (result.code === "gemini_key_missing") {
+        setGeneratingAvatar(false);
+        setShowGeminiSetup(true);
+        return;
+      }
       if (result.avatar) {
         await fetch("/api/settings/avatar", {
           method: "POST",
@@ -370,6 +377,14 @@ function PreferencesSection({
           )}
         </div>
       </div>
+      <GeminiSetupModal
+        open={showGeminiSetup}
+        onClose={() => setShowGeminiSetup(false)}
+        onSuccess={() => {
+          setShowGeminiSetup(false);
+          handleGenerateAvatar();
+        }}
+      />
     </div>
   );
 }

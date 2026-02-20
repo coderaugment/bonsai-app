@@ -3,7 +3,6 @@
 import type { Ticket, TicketState } from "@/types";
 
 const COLUMNS: { state: TicketState; label: string; color: string }[] = [
-  { state: "review", label: "Review", color: "#6b7280" },
   { state: "planning", label: "Planning", color: "#f59e0b" },
   { state: "building", label: "Building", color: "#22c55e" },
   { state: "preview", label: "Preview", color: "#3b82f6" },

@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { getUser } from "@/db/data/users";
 import { getProjectBySlug, getProjects } from "@/db/data/projects";
 import { ProjectHeader } from "@/components/layout/project-header";
 
@@ -11,11 +10,6 @@ export default async function ProjectLayout({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-
-  const user = await getUser();
-  if (!user) {
-    redirect("/onboard/welcome");
-  }
 
   const project = await getProjectBySlug(slug);
   if (!project) {

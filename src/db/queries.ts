@@ -1,6 +1,6 @@
 import { db } from ".";
 import { eq, or, sql, desc, and, isNull, lt, asc } from "drizzle-orm";
-import { projects, personas, tickets, settings, users, comments, ticketDocuments, roles, ticketAuditLog } from "./schema";
+import { projects, personas, tickets, settings, comments, ticketDocuments, roles, ticketAuditLog } from "./schema";
 import type { Ticket, Persona, Project, WorkerRole } from "@/types";
 import { workerRoles } from "@/lib/worker-types";
 
@@ -132,14 +132,6 @@ export function getTickets(projectId?: number): Ticket[] {
     getPersonas(projectId).map((p) => [p.id, p])
   );
 
-  // Build creator lookup from users table
-  const creatorIds = [...new Set(rows.map((r) => r.createdBy).filter(Boolean))] as number[];
-  const creatorMap = new Map<number, { name: string; avatarUrl?: string }>();
-  for (const uid of creatorIds) {
-    const u = db.select().from(users).where(eq(users.id, uid)).get();
-    if (u) creatorMap.set(uid, { name: u.name, avatarUrl: u.avatarUrl ?? undefined });
-  }
-
   return rows.map((r) => {
     // Collect all unique personas who have interacted with this ticket
     const participantIds = new Set<string>();
@@ -158,7 +150,6 @@ export function getTickets(projectId?: number): Ticket[] {
       state: r.state,
       priority: r.priority,
       assignee: r.assigneeId ? personaMap.get(r.assigneeId) : undefined,
-      creator: r.createdBy ? creatorMap.get(r.createdBy) : undefined,
       acceptanceCriteria: r.acceptanceCriteria ?? undefined,
       commentCount: r.commentCount ?? 0,
       hasAttachments: r.hasAttachments ?? false,
@@ -168,11 +159,9 @@ export function getTickets(projectId?: number): Ticket[] {
       researchCompletedAt: r.researchCompletedAt ?? undefined,
       researchCompletedBy: r.researchCompletedBy ?? undefined,
       researchApprovedAt: r.researchApprovedAt ?? undefined,
-      researchApprovedBy: r.researchApprovedBy ?? undefined,
       planCompletedAt: r.planCompletedAt ?? undefined,
       planCompletedBy: r.planCompletedBy ?? undefined,
       planApprovedAt: r.planApprovedAt ?? undefined,
-      planApprovedBy: r.planApprovedBy ?? undefined,
       lastHumanCommentAt: r.lastHumanCommentAt ?? undefined,
       returnedFromVerification: r.returnedFromVerification ?? false,
       // Merge tracking
@@ -193,14 +182,6 @@ export function setSetting(key: string, value: string) {
     .values({ key, value })
     .onConflictDoUpdate({ target: settings.key, set: { value } })
     .run();
-}
-
-export function getUser() {
-  return db.select().from(users).limit(1).get() ?? null;
-}
-
-export function createUser(name: string) {
-  return db.insert(users).values({ name }).returning().get();
 }
 
 export function createProject(data: {
