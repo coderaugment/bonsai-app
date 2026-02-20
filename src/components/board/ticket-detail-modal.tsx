@@ -20,13 +20,12 @@ interface TicketDetailModalProps {
 }
 
 const typeOptions: TicketType[] = ["feature", "bug", "chore"];
-const stateOptions: TicketState[] = ["planning", "building", "preview", "test", "shipped"];
+const stateOptions: TicketState[] = ["planning", "building", "shipped"];
 
-// Board state mentions — referenceable via #review, #planning, etc.
+// Board state mentions — referenceable via #planning, #building, etc.
 const BOARD_STATES = [
   { name: "planning", label: "Planning", color: "var(--column-planning)", icon: "📋" },
   { name: "building", label: "Building", color: "var(--column-building)", icon: "🔨" },
-  { name: "review", label: "Review", color: "var(--column-review)", icon: "🔍" },
   { name: "shipped", label: "Shipped", color: "var(--column-shipped)", icon: "🚀" },
 ] as const;
 // Render comment text with highlighted @mentions (personas + team) and #columns (board states)
@@ -1395,9 +1394,9 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                   </svg>
                 </button>
               )}
-              {/* Live preview toggle - enabled for building/review/shipped */}
+              {/* Live preview toggle - enabled for building/shipped */}
               {(() => {
-                const canPreview = ticket.state === "building" || ticket.state === "review" || ticket.state === "shipped";
+                const canPreview = ticket.state === "building" || ticket.state === "shipped";
                 return (
                   <button
                     onClick={() => canPreview && setViewMode(viewMode === "info" ? "preview" : "info")}
@@ -2168,55 +2167,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
             </div>
           )}
 
-          {/* Test state action bar */}
-          {ticket.state === "review" && (
-            <div
-              className="mx-8 mb-4 rounded-xl p-5 flex items-center justify-between"
-              style={{
-                backgroundColor: "rgba(99, 102, 241, 0.08)",
-                border: "1px solid rgba(99, 102, 241, 0.3)",
-              }}
-            >
-              <div className="flex items-center gap-3">
-                <svg className="w-5 h-5" style={{ color: "#818cf8" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                  Ready for review
-                </span>
-                <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  Preview the work, then accept to ship
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handlePreview}
-                  disabled={previewing}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors hover:opacity-90"
-                  style={{
-                    backgroundColor: "rgba(99, 102, 241, 0.15)",
-                    color: "#818cf8",
-                    border: "1px solid rgba(99, 102, 241, 0.3)",
-                    opacity: previewing ? 0.5 : 1,
-                  }}
-                >
-                  {previewing ? "Starting..." : "Preview"}
-                </button>
-                <button
-                  onClick={handleAcceptTicket}
-                  disabled={accepting}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold transition-colors hover:opacity-90"
-                  style={{
-                    backgroundColor: "#22c55e",
-                    color: "#fff",
-                    opacity: accepting ? 0.5 : 1,
-                  }}
-                >
-                  {accepting ? "Accepting..." : "Accept & Ship"}
-                </button>
-              </div>
-            </div>
-          )}
               </>
             )}
           </div>

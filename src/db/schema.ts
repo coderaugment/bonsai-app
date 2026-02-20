@@ -101,7 +101,7 @@ export const tickets = sqliteTable("tickets", {
   description: text("description"),
   type: text("type", { enum: ["feature", "bug", "chore"] }).notNull(),
   state: text("state", {
-    enum: ["planning", "building", "review", "shipped"],
+    enum: ["planning", "building", "shipped"],
   })
     .notNull()
     .default("planning"),

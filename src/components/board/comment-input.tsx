@@ -11,11 +11,10 @@ type MentionItem =
   | { kind: "team" };
 
 const BOARD_STATES = [
-  { name: "research", label: "Research", color: "var(--column-research)", icon: "🔍" },
-  { name: "plan", label: "Plan", color: "var(--column-plan)", icon: "📋" },
-  { name: "build", label: "Build", color: "var(--column-build)", icon: "🔨" },
-  { name: "review", label: "Review", color: "var(--column-test)", icon: "🧪" },
-  { name: "ship", label: "Ship", color: "var(--column-ship)", icon: "🚀" },
+  { name: "planning", label: "Planning", color: "var(--column-planning)", icon: "📋" },
+  { name: "building", label: "Building", color: "var(--column-building)", icon: "🔨" },
+  { name: "review", label: "Review", color: "var(--column-review)", icon: "🔍" },
+  { name: "shipped", label: "Shipped", color: "var(--column-shipped)", icon: "🚀" },
 ] as const;
 
 const ROLE_SLUGS = ["designer", "developer", "critic", "researcher", "hacker"];

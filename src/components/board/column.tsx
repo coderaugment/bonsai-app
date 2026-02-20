@@ -11,7 +11,6 @@ const columnConfig: Record<
 > = {
   planning: { label: "Planning", color: "var(--column-planning)" },
   building: { label: "Building", color: "var(--column-building)" },
-  review: { label: "Review", color: "var(--column-review)" },
   shipped: { label: "Shipped", color: "var(--column-shipped)" },
 };
 

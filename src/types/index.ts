@@ -3,7 +3,6 @@ export type TicketType = "feature" | "bug" | "chore";
 export type TicketState =
   | "planning"
   | "building"
-  | "review"
   | "shipped";
 
 /** Format integer ticket ID as display slug: 1 → "tkt_01" */
