@@ -6,13 +6,17 @@ import path from "node:path";
 import fs from "node:fs";
 
 const HOME = process.env.HOME || "~";
-const BONSAI_DIR = path.join(HOME, ".bonsai");
-const WORKTREES_DIR = path.join(BONSAI_DIR, "worktrees");
 const PROJECTS_DIR = path.join(HOME, "development", "bonsai", "projects");
 
-function resolveMainRepo(project: { githubRepo: string | null; slug: string; localPath: string | null }): string {
+function resolveProjectRoot(project: { githubRepo: string | null; slug: string; localPath: string | null }): string {
   if (project.localPath) return project.localPath;
   return path.join(PROJECTS_DIR, project.githubRepo || project.slug);
+}
+
+function resolveMainRepo(project: { githubRepo: string | null; slug: string; localPath: string | null }): string {
+  if (project.localPath) return path.join(project.localPath, "repo");
+  const projectRoot = path.join(PROJECTS_DIR, project.githubRepo || project.slug);
+  return path.join(projectRoot, "repo");
 }
 
 const gitOpts = (cwd: string) => ({
@@ -37,8 +41,8 @@ export async function POST(
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   const mainRepo = resolveMainRepo(project);
-  const slug = project.slug || project.githubRepo || "unknown";
-  const worktreePath = path.join(WORKTREES_DIR, slug, ticketSlug);
+  const projectRoot = resolveProjectRoot(project);
+  const worktreePath = path.join(projectRoot, "worktrees", ticketSlug);
   const branchName = `ticket/${ticketSlug}`;
 
   if (!fs.existsSync(mainRepo)) {
@@ -182,9 +186,9 @@ export async function POST(
     }
 
     // Update ticket DB
-    await updateTicket(ticketId, { state: "ship" });
+    await updateTicket(ticketId, { state: "shipped", mergedAt: new Date().toISOString(), mergeCommit });
 
-    log.push("Ticket state set to ship.");
+    log.push("Ticket state set to shipped.");
 
     await logAuditEvent({
       ticketId,
