@@ -94,6 +94,19 @@ export async function POST(req: Request, context: RouteContext) {
     // Mark research completed immediately after v1
     if (!ticket.researchCompletedAt) {
       await updateTicket(ticketId, { researchCompletedAt: now, researchCompletedBy: personaId || null });
+
+      // Auto-dispatch developer to create implementation plan
+      const origin = process.env.API_BASE || `http://localhost:${process.env.PORT || 3080}`;
+      fireDispatch(
+        origin,
+        ticketId,
+        {
+          commentContent: "Research complete. Creating implementation plan based on findings.",
+          targetRole: "developer",
+          silent: false,
+        },
+        "research-complete"
+      );
     }
   } else {
     // Design and implementation_plan: upsert (single row, version increments)
