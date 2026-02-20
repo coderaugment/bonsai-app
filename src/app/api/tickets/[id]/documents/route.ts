@@ -6,9 +6,25 @@ import { logAuditEvent } from "@/db/data/audit";
 import { createCommentAndBumpCount } from "@/db/data/comments";
 import { getSetting } from "@/db/data/settings";
 import { fireDispatch } from "@/lib/dispatch-agent";
+import { spawn } from "node:child_process";
+import path from "node:path";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
+}
+
+// Trigger QMD sync in background (non-blocking) so new artifacts are searchable
+function triggerQMDSync() {
+  const bonsaiCli = path.join(process.cwd(), "bin", "bonsai-cli.ts");
+  const webappDir = process.cwd();
+
+  const child = spawn("npx", ["tsx", bonsaiCli, "sync-artifacts"], {
+    cwd: webappDir,
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, BONSAI_ENV: process.env.BONSAI_ENV || "dev" },
+  });
+  child.unref();
 }
 
 const DOC_TYPES = ["research", "implementation_plan"] as const;
@@ -126,7 +142,8 @@ export async function POST(req: Request, context: RouteContext) {
     metadata: { docType: type, version: savedVersion },
   });
 
-  // No auto-dispatch needed - research v1 and plan v1 are final
+  // Trigger QMD sync so this artifact is immediately searchable
+  triggerQMDSync();
 
   return NextResponse.json({ ok: true, version: savedVersion, type });
 }

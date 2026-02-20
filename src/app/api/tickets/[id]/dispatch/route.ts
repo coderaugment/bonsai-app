@@ -826,6 +826,45 @@ async function buildAgentSystemPrompt(
   ].filter(Boolean).join("\n");
 }
 
+// ── QMD Search for prior work ────────────────────────
+async function searchQMDForTicket(ticketId: number, role: string): Promise<string> {
+  try {
+    const { spawn } = await import("node:child_process");
+
+    // Search QMD for artifacts related to this ticket
+    const query = `ticket ${ticketId} ${role}`;
+
+    return new Promise((resolve) => {
+      let output = "";
+      const proc = spawn("qmd", ["search", query, "-c", "bonsai-artifacts", "--limit", "3"], {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+
+      proc.stdout.on("data", (data) => {
+        output += data.toString();
+      });
+
+      proc.on("close", () => {
+        // Return the search results or empty string if search failed
+        resolve(output.trim() || "");
+      });
+
+      proc.on("error", () => {
+        // QMD not installed or search failed - return empty
+        resolve("");
+      });
+
+      // Timeout after 2 seconds
+      setTimeout(() => {
+        proc.kill();
+        resolve("");
+      }, 2000);
+    });
+  } catch {
+    return "";
+  }
+}
+
 // ── Agent task assembler ─────────────────────────────
 async function assembleAgentTask(
   commentContent: string,
@@ -869,6 +908,9 @@ async function assembleAgentTask(
 
   const { enrichedComments, researchDoc, implPlan, researchCritique, planCritique } = await getTicketContext(ticket.id);
 
+  // QMD search for prior work on this ticket to prevent redundant effort
+  const qmdContext = await searchQMDForTicket(ticket.id, persona.role || "developer");
+
   const sections: string[] = [
     `# Ticket: ${ticket.title}`,
     `ID: ${ticket.id} | State: ${ticket.state} | Type: ${ticket.type}`,
@@ -879,6 +921,21 @@ async function assembleAgentTask(
   }
   if (ticket.acceptanceCriteria) {
     sections.push("", "## Acceptance Criteria", ticket.acceptanceCriteria);
+  }
+
+  // Inject QMD search results to prevent redundant work
+  if (qmdContext) {
+    sections.push(
+      "",
+      "## PRIOR WORK ON THIS TICKET — READ THIS FIRST",
+      "CRITICAL: Before starting any work, review what's already been done. The following artifacts have been found for this ticket:",
+      "",
+      qmdContext,
+      "",
+      "DO NOT repeat work that's already been completed. DO NOT re-research what's already been researched. If research exists, build on it. If a plan exists, implement it.",
+      "Use `./bonsai-cli read-artifact ${ticket.id} research` or `./bonsai-cli read-artifact ${ticket.id} implementation_plan` to read the full artifacts if needed.",
+      ""
+    );
   }
 
   if (researchDoc) {

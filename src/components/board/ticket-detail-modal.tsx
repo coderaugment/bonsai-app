@@ -696,6 +696,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
         return;
       }
       router.refresh();
+      onClose();
     } finally {
       setAccepting(false);
     }
