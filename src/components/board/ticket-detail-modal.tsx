@@ -1436,7 +1436,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
           <div className="flex-1 overflow-y-auto px-8 py-6 space-y-8">
             {viewMode === "preview" ? (
               /* Live preview iframe - auto-starts dev server if needed */
-              <div className="h-full w-full -mx-8 -my-6 relative">
+              <div className="h-full w-full -mx-8 -my-6 flex flex-col">
                 {previewError ? (
                   <div className="flex items-center justify-center h-full p-8" style={{ color: "var(--text-secondary)" }}>
                     <div className="flex flex-col items-center gap-3 text-center max-w-md">
@@ -1469,37 +1469,39 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                 ) : (
                   <>
                     {/* Refresh button - Apple glass style */}
-                    <button
-                      onClick={() => setIframeKey(prev => prev + 1)}
-                      className="absolute top-4 right-4 z-10 p-2 rounded-full transition-all hover:scale-110 active:scale-95"
-                      style={{
-                        backgroundColor: "rgba(255, 255, 255, 0.1)",
-                        backdropFilter: "blur(20px) saturate(180%)",
-                        WebkitBackdropFilter: "blur(20px) saturate(180%)",
-                        border: "1px solid rgba(255, 255, 255, 0.18)",
-                        boxShadow: "0 8px 32px rgba(0, 0, 0, 0.1)",
-                      }}
-                      title="Refresh preview"
-                    >
-                      <svg
-                        className="w-5 h-5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                        style={{ color: "rgba(255, 255, 255, 0.9)" }}
+                    <div className="flex items-center justify-center py-3 px-8">
+                      <button
+                        onClick={() => setIframeKey(prev => prev + 1)}
+                        className="p-2 rounded-full transition-all hover:scale-110 active:scale-95"
+                        style={{
+                          backgroundColor: "rgba(255, 255, 255, 0.1)",
+                          backdropFilter: "blur(20px) saturate(180%)",
+                          WebkitBackdropFilter: "blur(20px) saturate(180%)",
+                          border: "1px solid rgba(255, 255, 255, 0.18)",
+                          boxShadow: "0 8px 32px rgba(0, 0, 0, 0.1)",
+                        }}
+                        title="Refresh preview"
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
-                        />
-                      </svg>
-                    </button>
+                        <svg
+                          className="w-5 h-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                          style={{ color: "rgba(255, 255, 255, 0.9)" }}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+                          />
+                        </svg>
+                      </button>
+                    </div>
                     <iframe
                       key={iframeKey}
                       src={previewUrl || `http://localhost:${3100 + (Number(projectId) % 100)}`}
-                      className="w-full h-full border-0"
+                      className="flex-1 w-full border-0"
                       title="Live Preview"
                       sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
                     />
