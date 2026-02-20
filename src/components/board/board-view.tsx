@@ -11,8 +11,7 @@ import { ProjectChatPanel } from "./project-chat-panel";
 const columnOrder: TicketState[] = [
   "planning",
   "building",
-  "preview",
-  "test",
+  "review",
   "shipped",
 ];
 
@@ -72,19 +71,15 @@ function scoreTicket(t: Ticket): number {
 interface BoardViewProps {
   tickets: Ticket[];
   projectId: string;
-  leadAvatar?: string;
-  leadName?: string;
   personas?: Persona[];
   project?: Project;
-  ticketStats?: { planning: number; building: number; test: number; shipped: number };
+  ticketStats?: { planning: number; building: number; review: number; shipped: number };
   awakePersonaIds?: string[];
 }
 
 export function BoardView({
   tickets: initialTickets,
   projectId,
-  leadAvatar,
-  leadName,
   personas = [],
   project,
   ticketStats,
@@ -290,8 +285,6 @@ export function BoardView({
             ticket={selectedTicket}
             initialDocType={initialDocType}
             projectId={projectId}
-            leadAvatar={leadAvatar}
-            leadName={leadName}
             onClose={() => {
               setSelectedTicket(null);
               setInitialDocType(undefined);

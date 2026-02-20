@@ -14,11 +14,11 @@ const BOARD_STATES = [
   { name: "research", label: "Research", color: "var(--column-research)", icon: "🔍" },
   { name: "plan", label: "Plan", color: "var(--column-plan)", icon: "📋" },
   { name: "build", label: "Build", color: "var(--column-build)", icon: "🔨" },
-  { name: "test", label: "Test", color: "var(--column-test)", icon: "🧪" },
+  { name: "review", label: "Review", color: "var(--column-test)", icon: "🧪" },
   { name: "ship", label: "Ship", color: "var(--column-ship)", icon: "🚀" },
 ] as const;
 
-const ROLE_SLUGS = ["lead", "designer", "developer", "critic", "researcher", "hacker"];
+const ROLE_SLUGS = ["designer", "developer", "critic", "researcher", "hacker"];
 
 interface CommentInputProps {
   personasList: Persona[];

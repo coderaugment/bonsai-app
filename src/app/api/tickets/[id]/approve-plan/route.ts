@@ -47,6 +47,7 @@ export async function POST(req: Request, context: RouteContext) {
   fireDispatch(origin, ticketId, {
     commentContent: "The implementation plan has been approved. Begin coding the implementation now. Follow the plan step by step.",
     targetRole: "developer",
+    urgent: true, // Bypass cooldown — plan approval is a critical state transition
   }, "approve-plan");
 
   await logAuditEvent({

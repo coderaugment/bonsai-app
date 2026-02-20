@@ -52,14 +52,13 @@ const insertRole = sqlite.prepare(
   `INSERT INTO roles (slug, title, description, color) VALUES (?, ?, ?, ?)`
 );
 
-insertRole.run("lead", "Lead", "Coordinates work, removes blockers, and keeps the team aligned.", "#22c55e");
 insertRole.run("researcher", "Researcher", "Investigates problems, analyzes codebases, and produces research documents.", "#8b5cf6");
 insertRole.run("developer", "Developer", "Builds features, fixes bugs, writes tests, and ships code.", "#3b82f6");
 insertRole.run("designer", "Designer", "Creates UI/UX designs, design systems, and visual assets.", "#f59e0b");
 insertRole.run("critic", "Critic", "Challenges assumptions and stress-tests ideas. The constructive contrarian.", "#ef4444");
 insertRole.run("hacker", "Hacker", "Security-focused engineer who finds vulnerabilities and hardens the codebase.", "#06b6d4");
 
-console.log("Seeded 6 default roles: lead, researcher, developer, designer, critic, hacker");
+console.log("Seeded 5 default roles: researcher, developer, designer, critic, hacker");
 
 sqlite.pragma("foreign_keys = ON");
 sqlite.close();

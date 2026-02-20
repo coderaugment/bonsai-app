@@ -67,11 +67,11 @@ export async function PATCH(req: Request) {
 
   const origin = new URL(req.url).origin;
 
-  // When moved to "planning", dispatch lead to orchestrate planning phase
+  // When moved to "planning", dispatch researcher to begin research
   if (state === "planning") {
     fireDispatch(origin, numTicketId, {
-      commentContent: "Research has been approved. Orchestrate the planning phase now.",
-      targetRole: "lead",
+      commentContent: "Begin research on this ticket. Investigate the codebase and document your findings.",
+      targetRole: "researcher",
     }, "state-change/planning");
   }
 
@@ -183,18 +183,18 @@ export async function POST(req: Request) {
     const leadContext = await getSetting("context_role_lead") || "";
     const leadPrompt = await getSetting("prompt_lead_new_ticket") || "New ticket created. Evaluate it and dispatch the researcher to begin research. Do NOT dispatch developer or designer — they work in the building phase only.";
     fireDispatch(origin, id, {
-      commentContent: [leadContext, leadPrompt, ticketSummary].filter(Boolean).join("\n\n"),
-      targetRole: "lead",
-    }, "ticket-create/lead-evaluate");
+      commentContent: [ticketSummary, "New ticket created. Begin research on this ticket. Investigate the codebase, understand the requirements, and document your findings."].filter(Boolean).join("\n\n"),
+      targetRole: "researcher",
+    }, "ticket-create/researcher-research");
   } else {
     // Standalone ticket: lead evaluates first, then dispatches researcher for planning.
     const leadContext = await getSetting("context_role_lead") || "";
     const leadPrompt = await getSetting("prompt_lead_new_ticket") || "New ticket created. Evaluate it and dispatch the researcher to begin research. Do NOT dispatch developer or designer — they run in the building phase only.";
     const leadContent = [leadContext, leadPrompt, ticketSummary].filter(Boolean).join("\n\n");
     fireDispatch(origin, id, {
-      commentContent: leadContent,
-      targetRole: "lead",
-    }, "ticket-create/lead-evaluate");
+      commentContent: [ticketSummary, "New ticket created. Begin research on this ticket. Investigate the codebase, understand the requirements, and document your findings."].filter(Boolean).join("\n\n"),
+      targetRole: "researcher",
+    }, "ticket-create/researcher-research");
   }
 
   return NextResponse.json({ success: true, ticket });

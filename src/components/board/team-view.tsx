@@ -7,7 +7,6 @@ import type { Role, Persona, ClaudeSkillDefinition } from "@/types";
 import { ConfirmDelete } from "@/components/ui/confirm-delete";
 
 const PROMPT_LABELS: Record<string, string> = {
-  prompt_role_lead: "Role: Lead",
   prompt_role_researcher: "Role: Researcher",
   prompt_role_developer: "Role: Developer",
   prompt_role_designer: "Role: Designer",
@@ -27,7 +26,6 @@ const PROMPT_LABELS: Record<string, string> = {
 };
 
 const ROLE_PROMPT_MAP: Record<string, string[]> = {
-  lead: ["prompt_role_lead", "prompt_phase_conversational"],
   researcher: ["prompt_role_researcher", "prompt_phase_research", "prompt_dispatch_researcher_v3"],
   developer: ["prompt_role_developer", "prompt_phase_planning", "prompt_phase_implementation", "prompt_phase_test"],
   designer: ["prompt_role_designer", "prompt_phase_designer"],

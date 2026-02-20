@@ -3,8 +3,7 @@ export type TicketType = "feature" | "bug" | "chore";
 export type TicketState =
   | "planning"
   | "building"
-  | "preview"
-  | "test"
+  | "review"
   | "shipped";
 
 /** Format integer ticket ID as display slug: 1 → "tkt_01" */
@@ -63,7 +62,7 @@ export interface TicketDocument {
 }
 
 // Legacy type - keeping for backward compatibility
-export type WorkerRole = "lead" | "researcher" | "developer" | "designer" | "critic" | "hacker";
+export type WorkerRole = "researcher" | "developer" | "designer" | "critic" | "hacker";
 
 // ============================================================================
 // SKILLS - Individual capabilities that can be attached to roles

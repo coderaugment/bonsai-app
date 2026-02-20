@@ -306,7 +306,6 @@ async function toolsForRole(role: string): Promise<string[]> {
   // Read-only roles
   if (role === "researcher") return TOOLS_READONLY;
   if (role === "critic") return TOOLS_READONLY;
-  if (role === "lead") return ["Bash"];
 
   // Check DB for role-specific tools
   const roleRow = await getRoleBySlug(role);
@@ -318,15 +317,15 @@ async function toolsForRole(role: string): Promise<string[]> {
 
 // Resolve phase label for agent run tracking
 function resolvePhaseForRun(ticket: typeof tickets.$inferSelect): string {
-  if (ticket.state === "test") return "test";
+  if (ticket.state === "review") return "review";
   if (ticket.planApprovedAt) return "implementation";      // Plan approved = building
   if (ticket.researchApprovedAt) return "planning";        // Research approved = planning
   return "research";                                        // Nothing approved = research
 }
 
 // Determine which role should handle based on ticket state
-function resolveTargetRole(ticket: typeof tickets.$inferSelect): string {
-  // Planning column has two phases:
+function resolveTargetRole(ticket: typeof tickets.$inferSelect): string | null {
+  // Planning column → researcher owns it
   if (ticket.state === "planning") {
     // 1. Research (researcher does initial investigation)
     if (!ticket.researchCompletedAt) return "researcher";
@@ -335,8 +334,8 @@ function resolveTargetRole(ticket: typeof tickets.$inferSelect): string {
   }
   // Building phase → developer implements the code
   if (ticket.state === "building") return "developer";
-  // All other states (preview, test, shipped) → lead coordinates
-  return "lead";
+  // Preview, test, shipped → human owns these columns (no auto-dispatch)
+  return null;
 }
 
 // ── Fetch ticket context ─────────────────────────────
@@ -372,7 +371,7 @@ export async function POST(
     );
   }
 
-  const { commentContent, targetRole: requestedRole, targetPersonaName, targetPersonaId, team, silent, conversational, documentId } = await req.json();
+  const { commentContent, targetRole: requestedRole, targetPersonaName, targetPersonaId, team, silent, conversational, documentId, urgent } = await req.json();
 
   if (conversational) {
     console.log(`[dispatch] Conversational dispatch for ${ticketId}, documentId=${documentId}, targetPersonaId=${targetPersonaId}`);
@@ -402,24 +401,23 @@ export async function POST(
     const dispatched: Array<{ id: string; name: string; role: string | null; color: string | null; avatarUrl: string | null }> = [];
 
     // @team dispatches relevant roles only (not designer/hacker/researcher unless in their phase)
-    // Non-mentioned human comments go to lead (or developer in build/test)
+    // Non-mentioned human comments go to column owner (researcher in planning, developer in build/test)
     let dispatchTargets = projectPersonas;
     if (isUnmentionedHumanComment) {
       const inBuildOrTest = !!ticket.planApprovedAt;
-      const targetRole = inBuildOrTest ? "developer" : "lead";
+      const targetRole = inBuildOrTest ? "developer" : "researcher";
       dispatchTargets = projectPersonas.filter((p) => p.role === targetRole);
     } else if (team) {
       // @team: only dispatch roles relevant to the current phase
       const inResearch = !ticket.researchApprovedAt;
       const inPlanning = !!ticket.researchApprovedAt && !ticket.planApprovedAt;
-      const inTest = ticket.state === "test";
-      const inBuild = !!ticket.planApprovedAt && !inTest;
+      const inReview = ticket.state === "review";
+      const inBuild = !!ticket.planApprovedAt && !inReview;
       const relevantRoles = new Set<string>();
-      relevantRoles.add("lead");
       if (inResearch) { relevantRoles.add("researcher"); relevantRoles.add("critic"); }
       if (inPlanning) { relevantRoles.add("developer"); relevantRoles.add("critic"); relevantRoles.add("hacker"); }
       if (inBuild) { relevantRoles.add("developer"); relevantRoles.add("hacker"); }
-      if (inTest) { relevantRoles.add("developer"); relevantRoles.add("hacker"); relevantRoles.add("critic"); }
+      if (inReview) { relevantRoles.add("developer"); relevantRoles.add("hacker"); relevantRoles.add("critic"); }
       dispatchTargets = projectPersonas.filter((p) => relevantRoles.has(p.role || ""));
     }
 
@@ -531,10 +529,20 @@ export async function POST(
 
   if (!targetPersona) {
     const targetRole = requestedRole || resolveTargetRole(ticket);
+
+    // If no role can be resolved (preview/test/shipped are human-owned), skip dispatch
+    if (!targetRole) {
+      console.log(`[dispatch] No auto-dispatch for ${ticket.state} state — human owns this column`);
+      return NextResponse.json({
+        skipped: true,
+        reason: "human_owned_column",
+        state: ticket.state
+      });
+    }
+
     console.log(`[dispatch] Role-based routing: ${targetRole} for ticket ${ticketId} (project personas: ${projectPersonas.map(p => `${p.name}/${p.role}`).join(", ")})`);
     targetPersona = projectPersonas.find((p) => p.role === targetRole)
       || projectPersonas.find((p) => p.role === "developer")
-      || projectPersonas.find((p) => p.role !== "lead")
       || projectPersonas[0];
   }
 
@@ -543,8 +551,9 @@ export async function POST(
   }
 
   // Per-persona cooldown: 30s for direct human @mentions, 5 min for auto-dispatch chains
+  // Skip cooldown for urgent dispatches (plan approval, research completion)
   const isDirectMention = !!targetPersonaName;
-  if (isPersonaOnCooldown(ticketId, targetPersona.id, isDirectMention)) {
+  if (!urgent && isPersonaOnCooldown(ticketId, targetPersona.id, isDirectMention)) {
     const cd = isDirectMention ? "30s" : "5 min";
     console.log(`[dispatch] Skipping ${targetPersona.name} — dispatched to ${ticketId} within last ${cd}`);
     return NextResponse.json({
@@ -688,14 +697,6 @@ async function buildAgentSystemPrompt(
       "Bash (read-only commands)",
       "./bonsai-cli report (post progress updates)",
       "./bonsai-cli write-artifact (save research/plan/design documents)",
-    ],
-    lead: [
-      "Bash (run helper scripts only — you have NO file access tools)",
-      "./bonsai-cli report (post progress updates)",
-      "./bonsai-cli credit-status (check if API credits are paused)",
-      // EPIC FEATURES DISABLED
-      // "set-epic.sh (mark ticket as epic)",
-      // "create-sub-ticket.sh (create sub-tickets for epic breakdown)",
     ],
   };
 
@@ -966,7 +967,7 @@ async function assembleAgentTask(
   }
 
   // Determine current phase based on what's been approved
-  const phase = ticket.state === "test" ? "test"
+  const phase = ticket.state === "review" ? "review"
     : ticket.planApprovedAt ? "implementation"  // Plan approved = building phase
     : ticket.researchApprovedAt ? "planning"    // Research approved = planning phase
     : "research";                                // Nothing approved = research phase
@@ -979,12 +980,12 @@ async function assembleAgentTask(
     if (opts?.conversational) {
       sections.push("", "You were @mentioned. Answer briefly, but your PRIMARY job is to BUILD — write code, not documents. If the message is asking you to do work, DO the work (write code), don't just describe what you'd do.");
     }
-  } else if (phase === "test") {
-    // TEST phase — test thoroughly, even in conversational mode
+  } else if (phase === "review") {
+    // REVIEW phase — test thoroughly, even in conversational mode
     const prompt = await getSetting("prompt_phase_test");
-    sections.push("", prompt || "## PHASE: TESTING\nTest the app thoroughly. Run it, verify acceptance criteria, find bugs.");
+    sections.push("", prompt || "## PHASE: REVIEW\nTest the app thoroughly. Run it, verify acceptance criteria, find bugs.");
     if (opts?.conversational) {
-      sections.push("", "You were @mentioned. Answer briefly, but your PRIMARY job is to TEST — run the app, verify features work, find bugs.");
+      sections.push("", "You were @mentioned. Answer briefly, but your PRIMARY job is to REVIEW — run the app, verify features work, find bugs.");
     }
   } else if (opts?.conversational) {
     // Conversational in research/planning — just reply

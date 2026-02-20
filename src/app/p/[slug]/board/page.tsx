@@ -44,7 +44,7 @@ export default async function BoardPage({
   const ticketStats = {
     planning: visibleTickets.filter((t) => t.state === "planning").length,
     building: visibleTickets.filter((t) => t.state === "building").length,
-    test: visibleTickets.filter((t) => t.state === "test").length,
+    review: visibleTickets.filter((t) => t.state === "review").length,
     shipped: visibleTickets.filter((t) => t.state === "shipped").length,
   };
 
@@ -66,8 +66,6 @@ export default async function BoardPage({
       <BoardView
         tickets={tickets}
         projectId={project.id}
-        leadAvatar={personas.find((p) => p.role === "lead")?.avatar}
-        leadName={personas.find((p) => p.role === "lead")?.name}
         personas={personas}
         project={project}
         ticketStats={ticketStats}

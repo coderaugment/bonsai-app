@@ -92,8 +92,8 @@ export default function TeamPage() {
       }
 
       // Compute unfilled roles: roles with no active persona matching that roleId
-      // ONLY ENABLE: lead, researcher, developer
-      const enabledRoleSlugs = ["lead", "researcher", "developer"];
+      // ONLY ENABLE: researcher, developer
+      const enabledRoleSlugs = ["researcher", "developer"];
       const filledRoleIds = new Set(allPersonas.map((p) => p.roleId).filter(Boolean));
       const unfilled = allRoles
         .filter((r) => enabledRoleSlugs.includes(r.slug))
@@ -138,7 +138,7 @@ export default function TeamPage() {
     if (typeof styleOverride !== "string") styleOverride = undefined;
     setGeneratingPreview(true);
     try {
-      const roles = ["developer", "designer", "lead", "researcher"];
+      const roles = ["developer", "designer", "researcher"];
       const role = roles[Math.floor(Math.random() * roles.length)];
       const genders = ["male", "female", "non-binary"] as const;
       const g = genders[Math.floor(Math.random() * genders.length)];

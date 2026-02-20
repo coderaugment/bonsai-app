@@ -13,11 +13,9 @@ import { VoiceButton } from "@/components/voice-button";
 interface NewTicketFormProps {
   projectId: string;
   projectSlug: string;
-  leadAvatar?: string;
-  leadName?: string;
 }
 
-export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: NewTicketFormProps) {
+export function NewTicketForm({ projectId, projectSlug }: NewTicketFormProps) {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -237,28 +235,17 @@ export function NewTicketForm({ projectId, projectSlug, leadAvatar, leadName }: 
             New ticket
           </h1>
           <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-            {leadName ? `Tell ${leadName} what to work on` : "What should your team work on?"}
+            What should your team work on?
           </p>
         </div>
         <div className="flex flex-col items-center gap-1 justify-self-center">
-          {leadAvatar ? (
-            <img
-              src={leadAvatar}
-              alt={leadName || "Lead"}
-              className="w-14 h-14 rounded-full object-cover ring-2 ring-[var(--border-medium)]"
-            />
-          ) : (
-            <Image
-              src="/bonsai-os-logo-d.png"
-              alt="Bonsai"
-              width={56}
-              height={56}
-              className="rounded-full"
-            />
-          )}
-          {leadName && (
-            <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>{leadName}</span>
-          )}
+          <Image
+            src="/bonsai-os-logo-d.png"
+            alt="Bonsai"
+            width={56}
+            height={56}
+            className="rounded-full"
+          />
         </div>
         <button
           onClick={() => router.push(`/p/${projectSlug}`)}

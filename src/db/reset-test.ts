@@ -48,7 +48,6 @@ console.log("Set user name to Ryan");
 
 // Seed roles (available for team building)
 const roleData = [
-  { slug: "lead", title: "Lead", description: "Coordinates work and removes blockers. Keeps the team aligned and stakeholders informed.", color: "#22c55e" },
   { slug: "researcher", title: "Researcher", description: "Investigates tickets before implementation. Explores the codebase, identifies constraints, and documents findings.", color: "#8b5cf6" },
   { slug: "developer", title: "Developer", description: "Implements features and fixes bugs. Writes clean, tested code following project patterns.", color: "#3b82f6" },
   { slug: "designer", title: "Designer", description: "Creates user interfaces and experiences. Focuses on usability, accessibility, and visual design.", color: "#f59e0b" },

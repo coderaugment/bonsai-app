@@ -19,17 +19,17 @@ export async function POST(
     return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
   }
 
-  if (ticket.state !== "test") {
+  if (ticket.state !== "review") {
     return NextResponse.json(
-      { error: "Ticket is not in test state" },
+      { error: "Ticket is not in review state" },
       { status: 400 }
     );
   }
 
-  // Set returned flag and move back to build
+  // Set returned flag and move back to building
   await updateTicket(ticketId, {
     returnedFromVerification: true,
-    state: "build",
+    state: "building",
   });
 
   // Add a comment with the reason
@@ -59,7 +59,7 @@ export async function POST(
     actorType: authorType === "agent" ? "agent" : "human",
     actorName: authorType === "agent" ? "Agent" : "Human",
     detail: reason ? `Returned from verification: ${reason.slice(0, 200)}` : "Returned from verification",
-    metadata: { from: "test", to: "build" },
+    metadata: { from: "review", to: "building" },
   });
 
   return NextResponse.json({ success: true });

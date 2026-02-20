@@ -104,6 +104,7 @@ export async function POST(req: Request, context: RouteContext) {
           commentContent: "Research complete. Creating implementation plan based on findings.",
           targetRole: "developer",
           silent: false,
+          urgent: true, // Bypass cooldown — research completion is a critical state transition
         },
         "research-complete"
       );

@@ -92,7 +92,7 @@ export function ProjectChatPanel({
         );
         return pat.test(text);
       });
-      const responder = mentioned || personas.find((p) => p.role === "lead");
+      const responder = mentioned || personas.find((p) => p.role === "researcher");
       if (responder) {
         setTypingPersona({
           name: responder.name,

@@ -115,29 +115,6 @@ export async function POST(
   //   }
   // }
 
-  // ── Lead triage handoff ─────────────────────────────────
-  // Fallback: if the lead completed on a planning ticket but didn't @mention researcher,
-  // dispatch researcher directly. The cooldown will block double-dispatch if lead already mentioned them.
-  const mentionedAnyone = mentioned.size > 0; // @mention chaining already dispatched someone
-  if (
-    completingPersona?.role === "lead" &&
-    freshTicket &&
-    freshTicket.state === "planning" &&
-    !freshTicket.isEpic &&
-    !mentionedAnyone
-  ) {
-    const ticketSummary = `${freshTicket.title}${freshTicket.description ? `\n\n${freshTicket.description}` : ""}${freshTicket.acceptanceCriteria ? `\n\nAcceptance Criteria:\n${freshTicket.acceptanceCriteria}` : ""}`;
-
-    console.log(`[agent-complete] Lead finished triage for ${ticketId} — dispatching researcher`);
-
-    const researcherContext = await getSetting("context_role_researcher") || "";
-    const researcherPrompt = await getSetting("prompt_researcher_new_ticket") || "New ticket assigned. Begin researching.";
-    fireDispatch("http://localhost:3080", ticketId, {
-      commentContent: [researcherContext, researcherPrompt, ticketSummary].filter(Boolean).join("\n\n"),
-      targetRole: "researcher",
-    }, "lead-triage/research");
-  }
-
   // ── Mark agent run completed ────────────────────────────
   if (personaId) {
     await completeAgentRun(ticketId, personaId, "completed");

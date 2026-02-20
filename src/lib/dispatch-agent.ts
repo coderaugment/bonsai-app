@@ -19,6 +19,7 @@ interface DispatchParams {
   silent?: boolean;
   conversational?: boolean;
   documentId?: number;
+  urgent?: boolean; // Bypass cooldown for critical state transitions (plan approval, research completion)
 }
 
 export function fireDispatch(

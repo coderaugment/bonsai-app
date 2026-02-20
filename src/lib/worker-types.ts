@@ -11,16 +11,6 @@ export interface WorkerRoleConfig {
 }
 
 export const workerRoles: Record<WorkerRole, WorkerRoleConfig> = {
-  lead: {
-    label: "Lead",
-    color: "#22c55e",
-    defaultSkills: [],
-    defaultProcesses: [],
-    defaultGoals: [],
-    defaultPermissions: { tools: [], folders: [] },
-    placeholder:
-      "## Core Truths\nNo surprises. A late 'heads up' is worse than an early 'I don't know.' Ship dates are promises.\n\n## Boundaries\nWon't let meetings run without an agenda. Won't say 'let's circle back' and then not.\n\n## Vibe\nCalm, organized, slightly terrifying attention to detail. Uses checklists like weapons. Celebrates wins loudly.\n\n## Continuity\nKnows exactly which task has been 'almost done' for three sprints.",
-  },
   researcher: {
     label: "Researcher",
     color: "#8b5cf6",
@@ -76,14 +66,6 @@ export const workerRoles: Record<WorkerRole, WorkerRoleConfig> = {
 // --- Random persona generation (MVP: template-based, no AI) ---
 
 const namePool: Record<WorkerRole, string[]> = {
-  lead: [
-    "Cameron", "Priya", "Marcus", "Elena", "Ben",
-    "Naomi", "Devin", "Amara", "Theo", "Sasha",
-    "Owen", "Lia", "Raj", "Maya", "Ezra",
-    "Mike", "Sarah", "Tom", "Dan", "Rachel",
-    "Chris", "Laura", "James", "Meg", "Dave",
-    "Jenny", "Rob", "Karen", "Pete", "Steve",
-  ],
   researcher: [
     "Dana", "Kai", "Robin", "Sage", "Ellis",
     "Noor", "Finley", "Rowan", "Lane", "Ari",
@@ -127,12 +109,6 @@ const namePool: Record<WorkerRole, string[]> = {
 };
 
 const personalityTemplates: Record<WorkerRole, string[]> = {
-  lead: [
-    "Calm under pressure with a talent for breaking big goals into achievable sprints. The team's favorite meeting facilitator.",
-    "Data-driven organizer who tracks velocity and uses retros to continuously improve. Believes in transparency over status theater.",
-    "Relationship builder who knows every team member's strengths. Removes blockers before anyone notices them.",
-    "Strategic planner who balances long-term vision with daily execution. Keeps stakeholders informed without creating noise.",
-  ],
   researcher: [
     "Systematic thinker who builds mental models before diving in. Keeps meticulous notes and loves connecting dots across domains.",
     "Skeptical by nature — always asks 'what does the data say?' before trusting intuition. Writes reports that change minds.",

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getProjectBySlug } from "@/db/data/projects";
-import { isTeamComplete, getProjectPersonasRaw } from "@/db/data/personas";
+import { isTeamComplete } from "@/db/data/personas";
 import { NewTicketForm } from "./new-ticket-form";
 
 export const dynamic = "force-dynamic";
@@ -17,15 +17,10 @@ export default async function NewTicketPage({
 
   if (!await isTeamComplete(Number(project.id))) redirect(`/p/${slug}/onboard/team`);
 
-  const projectPersonas = await getProjectPersonasRaw(Number(project.id));
-  const lead = projectPersonas.find((p) => p.role === "lead");
-
   return (
     <NewTicketForm
       projectId={project.id}
       projectSlug={slug}
-      leadAvatar={lead?.avatar || undefined}
-      leadName={lead?.name || undefined}
     />
   );
 }

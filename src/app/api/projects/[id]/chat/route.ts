@@ -64,7 +64,7 @@ export async function POST(
   // Check for @team mention
   const isTeam = /@team\b/i.test(trimmed);
 
-  // Dispatch via inbox ticket — route to mentioned personas, or lead by default
+  // Dispatch via inbox ticket — route to mentioned personas, or researcher by default
   const inboxTicketId = await ensureInboxTicket(projectId);
 
   if (isTeam) {
@@ -84,13 +84,13 @@ export async function POST(
       }, `project-chat/@mention`);
     }
   } else {
-    // No @mention — route to @lead
+    // No @mention — route to @researcher
     fireDispatch("http://localhost:3080", inboxTicketId, {
       commentContent: trimmed,
-      targetRole: "lead",
+      targetRole: "researcher",
       conversational: true,
       silent: true,
-    }, "project-chat/lead");
+    }, "project-chat/researcher");
   }
 
   return NextResponse.json({ ok: true, message: msg });

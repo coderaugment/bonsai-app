@@ -15,8 +15,6 @@ interface TicketDetailModalProps {
   ticket: Ticket | null;
   initialDocType?: "research" | "implementation_plan";
   projectId?: string;
-  leadAvatar?: string;
-  leadName?: string;
   onClose: () => void;
   onDelete?: (ticketId: number) => void;
 }
@@ -113,7 +111,7 @@ function highlightMentionsInChildren(children: React.ReactNode, personas: Person
   });
 }
 
-export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvatar, leadName, onClose, onDelete }: TicketDetailModalProps) {
+export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, onDelete }: TicketDetailModalProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -552,7 +550,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           commentContent: `This is an epic ticket. Break it down into smaller, focused sub-tickets using the create-sub-ticket tool. Each sub-ticket should be a single, independently workable item.\n\nEpic:\n${epicSummary}`,
-          targetRole: "lead",
+          targetRole: "researcher",
         }),
       });
       // Poll for children after a delay (agent takes time)
@@ -720,7 +718,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
     }
   }
 
-  const ROLE_SLUGS = ["lead", "designer", "developer", "critic", "researcher", "hacker"];
+  const ROLE_SLUGS = ["designer", "developer", "critic", "researcher", "hacker"];
 
   // Extract first @mentioned persona name from comment text
   // Supports both @Name and @role (e.g., @designer, @lead, @researcher)
@@ -1196,13 +1194,6 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
             className="flex items-start justify-between px-8 py-6 border-b flex-shrink-0"
             style={{ borderColor: "var(--border-subtle)" }}
           >
-            {leadAvatar && (
-              <img
-                src={leadAvatar}
-                alt={leadName || "Lead"}
-                className="w-14 h-14 rounded-full object-cover ring-2 ring-[var(--border-medium)] flex-shrink-0 mt-1 mr-5"
-              />
-            )}
             <div className="flex-1 pr-4">
               <div className="flex items-center gap-3 mb-4">
                 <select
@@ -2030,7 +2021,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
           )}
 
           {/* Test state action bar */}
-          {ticket.state === "test" && (
+          {ticket.state === "review" && (
             <div
               className="mx-8 mb-4 rounded-xl p-5 flex items-center justify-between"
               style={{
