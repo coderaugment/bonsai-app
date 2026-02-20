@@ -13,6 +13,7 @@ import { getRoleBySlug } from "@/db/data/roles";
 import { getSetting } from "@/db/data/settings";
 import { logAuditEvent } from "@/db/data/audit";
 import { insertAgentRun } from "@/db/data/agent-runs";
+import { getRecentProjectMessagesFormatted } from "@/db/data/project-messages";
 import { CREDITS_PAUSED_UNTIL, isPaused, pauseRemainingMs } from "@/lib/credit-pause";
 
 // ── Config ──────────────────────────────────────────
@@ -20,7 +21,8 @@ const HOME = process.env.HOME || "~";
 const CLAUDE_CLI = path.join(HOME, ".local", "bin", "claude");
 const MODEL = "opus";
 const BONSAI_DIR = path.join(HOME, ".bonsai");
-const API_BASE = "http://localhost:3000";
+const API_BASE = process.env.API_BASE || "http://localhost:3080";
+const BONSAI_CLI = path.join(process.cwd(), "bin", "bonsai-cli.ts");
 
 const TOOLS_READONLY = ["Read", "Grep", "Glob", "Bash"];
 const TOOLS_FULL = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
@@ -35,11 +37,15 @@ function shellEscape(s: string): string {
 const PROJECTS_DIR = path.join(HOME, "development", "bonsai", "projects");
 
 function resolveMainRepo(project: { githubRepo: string | null; slug: string; localPath: string | null }): string {
+  if (project.localPath) return path.join(project.localPath, "repo");
+  const projectRoot = path.join(PROJECTS_DIR, project.githubRepo || project.slug);
+  return path.join(projectRoot, "repo");
+}
+
+function resolveProjectRoot(project: { githubRepo: string | null; slug: string; localPath: string | null }): string {
   if (project.localPath) return project.localPath;
   return path.join(PROJECTS_DIR, project.githubRepo || project.slug);
 }
-
-const WORKTREES_DIR = path.join(BONSAI_DIR, "worktrees");
 
 function ensureWorktree(
   project: { githubRepo: string | null; slug: string; localPath: string | null },
@@ -51,13 +57,16 @@ function ensureWorktree(
   const gitDir = path.join(mainRepo, ".git");
   if (!fs.existsSync(gitDir)) return mainRepo;
 
-  const slug = project.slug || project.githubRepo || "unknown";
-  const worktreePath = path.join(WORKTREES_DIR, slug, ticketSlug);
+  // Worktrees live at {projectRoot}/worktrees/{ticketSlug}
+  const projectRoot = resolveProjectRoot(project);
+  const worktreesDir = path.join(projectRoot, "worktrees");
+  const worktreePath = path.join(worktreesDir, ticketSlug);
   const branchName = `ticket/${ticketSlug}`;
 
   if (fs.existsSync(worktreePath)) return worktreePath;
 
-  fs.mkdirSync(path.join(WORKTREES_DIR, slug), { recursive: true });
+  // Create worktrees directory if needed
+  fs.mkdirSync(worktreesDir, { recursive: true });
 
   try {
     const opts = { cwd: mainRepo, encoding: "utf-8" as const, stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"] };
@@ -119,114 +128,71 @@ function spawnAgent(
   const outputFile = path.join(sessionDir, "output.md");
   const stderrFile = path.join(sessionDir, "stderr.log");
   const promptFile = path.join(sessionDir, "system-prompt.txt");
-  const reportScript = path.join(sessionDir, "report.sh");
 
-  // Write a helper script the agent can call to post progress updates
-  fs.writeFileSync(reportScript, [
-    `#!/usr/bin/env node`,
-    `const msg = process.argv.slice(2).join(" ");`,
-    `if (!msg) process.exit(0);`,
-    `fetch("${API_BASE}/api/tickets/${ticketId}/report", {`,
-    `  method: "POST",`,
-    `  headers: { "Content-Type": "application/json" },`,
-    `  body: JSON.stringify({ personaId: "${personaId}", content: msg }),`,
-    `}).catch(() => {});`,
-  ].join("\n"));
-  fs.chmodSync(reportScript, 0o755);
+  // EPIC FEATURES DISABLED - set-epic.sh and create-sub-ticket.sh removed
+  // // Write set-epic helper script (lead can promote a ticket to epic)
+  // const setEpicScript = path.join(sessionDir, "set-epic.sh");
+  // fs.writeFileSync(setEpicScript, [
+  //   `#!/usr/bin/env node`,
+  //   `fetch("${API_BASE}/api/tickets", {`,
+  //   `  method: "PUT",`,
+  //   `  headers: { "Content-Type": "application/json" },`,
+  //   `  body: JSON.stringify({ ticketId: ${ticketId}, isEpic: true }),`,
+  //   `}).then(r => r.json()).then(d => {`,
+  //   `  if (d.ok) console.log("Marked ticket ${ticketId} as epic.");`,
+  //   `  else console.error("Failed:", d.error);`,
+  //   `}).catch(e => console.error(e));`,
+  //   `]).join("\n"));
+  // fs.chmodSync(setEpicScript, 0o755);
 
-  // Write save-document helper — agent calls: save-document.sh <type> <file>
-  // Types: research, implementation_plan, design
-  const saveDocScript = path.join(sessionDir, "save-document.sh");
-  fs.writeFileSync(saveDocScript, [
-    `#!/usr/bin/env node`,
-    `const fs = require("fs");`,
-    `const type = process.argv[2];`,
-    `const file = process.argv[3];`,
-    `if (!type || !file) { console.error("Usage: save-document.sh <type> <file>"); console.error("Types: research, implementation_plan, design"); process.exit(1); }`,
-    `const content = fs.readFileSync(file, "utf-8");`,
-    `if (!content.trim()) { console.error("File is empty"); process.exit(1); }`,
-    `fetch("${API_BASE}/api/tickets/${ticketId}/documents", {`,
-    `  method: "POST",`,
-    `  headers: { "Content-Type": "application/json" },`,
-    `  body: JSON.stringify({ type, content: content.trim(), personaId: "${personaId}" }),`,
-    `}).then(r => r.json()).then(data => {`,
-    `  if (data.ok) console.log(type + " v" + data.version + " saved.");`,
-    `  else { console.error("Failed:", data.error, data.detail || ""); process.exit(1); }`,
-    `}).catch(e => { console.error("Error:", e.message); process.exit(1); });`,
-  ].join("\n"));
-  fs.chmodSync(saveDocScript, 0o755);
+  // // Write create-sub-ticket helper script (for epic breakdown)
+  // // Accepts a JSON file path: { title, type?, description?, acceptanceCriteria? }
+  // const createSubTicketScript = path.join(sessionDir, "create-sub-ticket.sh");
+  // fs.writeFileSync(createSubTicketScript, [
+  //   `#!/usr/bin/env node`,
+  //   `const fs = require("fs");`,
+  //   `const file = process.argv[2];`,
+  //   `if (!file) { console.error("Usage: create-sub-ticket.sh <json-file>"); console.error("JSON: { title, type?, description?, acceptanceCriteria? }"); process.exit(1); }`,
+  //   `let data;`,
+  //   `try { data = JSON.parse(fs.readFileSync(file, "utf-8")); } catch(e) { console.error("Failed to read/parse JSON:", e.message); process.exit(1); }`,
+  //   `if (!data.title) { console.error("JSON must include 'title'"); process.exit(1); }`,
+  //   `fetch("${API_BASE}/api/tickets", {`,
+  //   `  method: "POST",`,
+  //   `  headers: { "Content-Type": "application/json" },`,
+  //   `  body: JSON.stringify({ title: data.title, type: data.type || "feature", description: data.description || "", acceptanceCriteria: data.acceptanceCriteria || "", epicId: ${ticketId} }),`,
+  //   `}).then(r => r.json()).then(d => {`,
+  //   `  if (d.success) console.log("Created sub-ticket: " + d.ticket.id + " — " + data.title);`,
+  //   `  else console.error("Failed:", d.error);`,
+  //   `}).catch(e => console.error(e));`,
+  //   `]).join("\n"));
+  // fs.chmodSync(createSubTicketScript, 0o755);
 
-  // Write check-criteria helper script
-  const checkCriteriaScript = path.join(sessionDir, "check-criteria.sh");
-  fs.writeFileSync(checkCriteriaScript, [
-    `#!/usr/bin/env node`,
-    `const idx = parseInt(process.argv[2], 10);`,
-    `if (isNaN(idx)) { console.error("Usage: check-criteria.sh <index>"); process.exit(1); }`,
-    `fetch("${API_BASE}/api/tickets/${ticketId}/check-criteria", {`,
-    `  method: "POST",`,
-    `  headers: { "Content-Type": "application/json" },`,
-    `  body: JSON.stringify({ index: idx }),`,
-    `}).then(r => r.json()).then(d => {`,
-    `  if (d.ok) console.log("Checked criterion " + idx);`,
-    `  else console.error("Failed:", d.error);`,
-    `}).catch(e => console.error(e));`,
-  ].join("\n"));
-  fs.chmodSync(checkCriteriaScript, 0o755);
-
-  // Write set-epic helper script (lead can promote a ticket to epic)
-  const setEpicScript = path.join(sessionDir, "set-epic.sh");
-  fs.writeFileSync(setEpicScript, [
-    `#!/usr/bin/env node`,
-    `fetch("${API_BASE}/api/tickets", {`,
-    `  method: "PUT",`,
-    `  headers: { "Content-Type": "application/json" },`,
-    `  body: JSON.stringify({ ticketId: ${ticketId}, isEpic: true }),`,
-    `}).then(r => r.json()).then(d => {`,
-    `  if (d.ok) console.log("Marked ticket ${ticketId} as epic.");`,
-    `  else console.error("Failed:", d.error);`,
-    `}).catch(e => console.error(e));`,
-  ].join("\n"));
-  fs.chmodSync(setEpicScript, 0o755);
-
-  // Write create-sub-ticket helper script (for epic breakdown)
-  // Accepts a JSON file path: { title, type?, description?, acceptanceCriteria? }
-  const createSubTicketScript = path.join(sessionDir, "create-sub-ticket.sh");
-  fs.writeFileSync(createSubTicketScript, [
-    `#!/usr/bin/env node`,
-    `const fs = require("fs");`,
-    `const file = process.argv[2];`,
-    `if (!file) { console.error("Usage: create-sub-ticket.sh <json-file>"); console.error("JSON: { title, type?, description?, acceptanceCriteria? }"); process.exit(1); }`,
-    `let data;`,
-    `try { data = JSON.parse(fs.readFileSync(file, "utf-8")); } catch(e) { console.error("Failed to read/parse JSON:", e.message); process.exit(1); }`,
-    `if (!data.title) { console.error("JSON must include 'title'"); process.exit(1); }`,
-    `fetch("${API_BASE}/api/tickets", {`,
-    `  method: "POST",`,
-    `  headers: { "Content-Type": "application/json" },`,
-    `  body: JSON.stringify({ title: data.title, type: data.type || "feature", description: data.description || "", acceptanceCriteria: data.acceptanceCriteria || "", epicId: ${ticketId} }),`,
-    `}).then(r => r.json()).then(d => {`,
-    `  if (d.success) console.log("Created sub-ticket: " + d.ticket.id + " — " + data.title);`,
-    `  else console.error("Failed:", d.error);`,
-    `}).catch(e => console.error(e));`,
-  ].join("\n"));
-  fs.chmodSync(createSubTicketScript, 0o755);
-
-  // Write credit-status helper script (useful for @lead to check pause state)
+  // credit-status.sh - check if API credits are paused
   const creditStatusScript = path.join(sessionDir, "credit-status.sh");
   fs.writeFileSync(creditStatusScript, [
-    `#!/usr/bin/env node`,
-    `fetch("${API_BASE}/api/credit-pause")`,
-    `  .then(r => r.json())`,
-    `  .then(d => {`,
-    `    if (d.paused) {`,
-    `      const mins = Math.ceil(d.remainingMs / 60000);`,
-    `      console.log("PAUSED — resumes at " + new Date(d.resumesAt).toLocaleTimeString() + " (" + mins + "m remaining)");`,
-    `    } else {`,
-    `      console.log("OK — credits active, no pause");`,
-    `    }`,
-    `  })`,
-    `  .catch(e => console.error("Failed to check:", e.message));`,
+    `#!/bin/bash`,
+    `BONSAI_API_BASE="${API_BASE}" \\`,
+    `npx tsx ${BONSAI_CLI} credit-status`,
   ].join("\n"));
   fs.chmodSync(creditStatusScript, 0o755);
+
+  // bonsai-cli wrapper - makes CLI available as "bonsai-cli" command
+  const bonsaiCliWrapper = path.join(sessionDir, "bonsai-cli");
+  const webappDir = path.join(process.cwd()); // webapp root
+  fs.writeFileSync(bonsaiCliWrapper, [
+    `#!/bin/bash`,
+    `# Unified Bonsai CLI wrapper`,
+    `BONSAI_ENV=dev BONSAI_PERSONA_ID="${personaId}" BONSAI_API_BASE="${API_BASE}" BONSAI_DB_DIR="${webappDir}" \\`,
+    `exec npx tsx ${BONSAI_CLI} "$@"`,
+  ].join("\n"));
+  fs.chmodSync(bonsaiCliWrapper, 0o755);
+
+  // Create symlink in worktree so agents can run ./bonsai-cli from their cwd
+  const bonsaiCliSymlink = path.join(cwd, "bonsai-cli");
+  if (fs.existsSync(bonsaiCliSymlink)) {
+    fs.unlinkSync(bonsaiCliSymlink); // Remove old symlink if exists
+  }
+  fs.symlinkSync(bonsaiCliWrapper, bonsaiCliSymlink);
 
   // Build --add-dir flags for skill discovery
   const addDirFlags: string[] = [];
@@ -257,8 +223,25 @@ function spawnAgent(
   const postScriptFile = path.join(sessionDir, "post-output.mjs");
   fs.writeFileSync(postScriptFile, [
     `import fs from "fs";`,
-    `// Check stderr for credit limit errors before processing output`,
     `const stderrContent = fs.existsSync(${JSON.stringify(stderrFile)}) ? fs.readFileSync(${JSON.stringify(stderrFile)}, "utf-8") : "";`,
+    `const stdoutContent = fs.existsSync(${JSON.stringify(outputFile)}) ? fs.readFileSync(${JSON.stringify(outputFile)}, "utf-8") : "";`,
+    `const allOutput = stderrContent + " " + stdoutContent;`,
+    `// Check for OAuth token expiry (401 auth error) — trigger autonomous Chrome re-auth`,
+    `if (/OAuth token has expired|authentication_error|Failed to authenticate|Please obtain a new token/i.test(allOutput)) {`,
+    `  try {`,
+    `    const reauthRes = await fetch(${JSON.stringify(`${API_BASE}/api/auth/reauth`)}, {`,
+    `      method: "POST",`,
+    `      headers: { "Content-Type": "application/json" },`,
+    `      body: "{}",`,
+    `    });`,
+    `    const reauthBody = await reauthRes.json();`,
+    `    fs.writeFileSync(${JSON.stringify(path.join(sessionDir, "post-error.log"))}, "Auth expired — " + (reauthBody.message || reauthBody.error || "re-auth triggered"));`,
+    `  } catch (e) {`,
+    `    fs.writeFileSync(${JSON.stringify(path.join(sessionDir, "post-error.log"))}, "Auth expired but failed to trigger reauth: " + String(e));`,
+    `  }`,
+    `  process.exit(0);`,
+    `}`,
+    `// Check stderr for credit limit errors before processing output`,
     `if (stderrContent && /hit your limit|rate limit|out of credits|\\b429\\b|quota exceeded/i.test(stderrContent)) {`,
     `  try {`,
     `    await fetch(${JSON.stringify(`${API_BASE}/api/credit-pause`)}, {`,
@@ -323,7 +306,7 @@ async function toolsForRole(role: string): Promise<string[]> {
   // Read-only roles
   if (role === "researcher") return TOOLS_READONLY;
   if (role === "critic") return TOOLS_READONLY;
-  if (role === "lead") return TOOLS_READONLY;
+  if (role === "lead") return ["Bash"];
 
   // Check DB for role-specific tools
   const roleRow = await getRoleBySlug(role);
@@ -335,19 +318,18 @@ async function toolsForRole(role: string): Promise<string[]> {
 
 // Resolve phase label for agent run tracking
 function resolvePhaseForRun(ticket: typeof tickets.$inferSelect): string {
-  if (!ticket.researchApprovedAt) return "research";
-  if (!ticket.planApprovedAt) return "planning";
   if (ticket.state === "test") return "test";
-  return "implementation";
+  if (ticket.planApprovedAt) return "implementation";      // Plan approved = building
+  if (ticket.researchApprovedAt) return "planning";        // Research approved = planning
+  return "research";                                        // Nothing approved = research
 }
 
 // Determine which role should handle based on ticket state
 function resolveTargetRole(ticket: typeof tickets.$inferSelect): string {
   // Research phase → always researcher
   if (!ticket.researchApprovedAt) return "researcher";
-  // Planning phase → developer for code work, lead for everything else
+  // Planning phase → lead orchestrates (researcher still active, but lead handles routing)
   if (!ticket.planApprovedAt) {
-    if (ticket.type === "feature" || ticket.type === "bug") return "developer";
     return "lead";
   }
   // Test phase → developer (to run tests and fix bugs)
@@ -578,8 +560,8 @@ export async function POST(
     console.warn(`[dispatch] Created missing workspace: ${cwd}`);
   }
 
-  // Create agent session
-  const sessionDir = path.join(BONSAI_DIR, "sessions", `${ticketSlug}-agent-${Date.now()}`);
+  // Create agent session (include personaId to prevent race conditions with parallel dispatches)
+  const sessionDir = path.join(BONSAI_DIR, "sessions", `${ticketSlug}-agent-${Date.now()}-${targetPersona.id}`);
   fs.mkdirSync(sessionDir, { recursive: true });
 
   fs.writeFileSync(
@@ -656,10 +638,9 @@ async function buildAgentSystemPrompt(
   teamMembers: (typeof personas.$inferSelect)[] = []
 ): Promise<string> {
   const workspace = ensureWorktree(project, formatTicketSlug(ticket.id));
-  const reportScript = path.join(sessionDir, "report.sh");
-  const saveDocScript = path.join(sessionDir, "save-document.sh");
-  const createSubTicketScript = path.join(sessionDir, "create-sub-ticket.sh");
-  const setEpicScript = path.join(sessionDir, "set-epic.sh");
+  // EPIC FEATURES DISABLED
+  // const createSubTicketScript = path.join(sessionDir, "create-sub-ticket.sh");
+  // const setEpicScript = path.join(sessionDir, "set-epic.sh");
 
   // Role instructions: read from roles table (editable in Settings > Roles)
   const role = persona.role || "developer";
@@ -673,15 +654,16 @@ async function buildAgentSystemPrompt(
     researcher: [
       "Read, Grep, Glob (read-only file access)",
       "Bash (read-only commands)",
-      "report.sh (post progress updates)",
-      "save-document.sh (save research/plan/design documents)",
+      "./bonsai-cli report (post progress updates)",
+      "./bonsai-cli write-artifact (save research/plan/design documents)",
     ],
     developer: [
       "Read, Write, Edit, Grep, Glob (full file access)",
       "Bash (full command access)",
       "Git (status, diff, commit, push)",
-      "report.sh (post progress updates)",
-      "save-document.sh (save research/plan/design documents)",
+      "./bonsai-cli report (post progress updates)",
+      "./bonsai-cli check-criteria (mark acceptance criteria complete)",
+      "./bonsai-cli write-artifact (save research/plan/design documents)",
       "apply_transparency (remove grey backgrounds from images)",
     ],
     designer: [
@@ -689,50 +671,71 @@ async function buildAgentSystemPrompt(
       "Bash (full command access)",
       "nano_banana (AI image generation via Gemini)",
       "apply_transparency (remove grey backgrounds from images)",
-      "report.sh (post progress updates)",
-      "save-document.sh (save research/plan/design documents)",
+      "./bonsai-cli report (post progress updates)",
+      "./bonsai-cli write-artifact (save research/plan/design documents)",
     ],
     hacker: [
       "Read, Write, Edit, Grep, Glob (full file access)",
       "Bash (full command access)",
       "Git (status, diff, commit, push)",
-      "report.sh (post progress updates)",
-      "save-document.sh (save research/plan/design documents)",
+      "./bonsai-cli report (post progress updates)",
+      "./bonsai-cli write-artifact (save research/plan/design documents)",
       "apply_transparency (remove grey backgrounds from images)",
     ],
     critic: [
       "Read, Grep, Glob (read-only file access)",
       "Bash (read-only commands)",
-      "report.sh (post progress updates)",
-      "save-document.sh (save research/plan/design documents)",
+      "./bonsai-cli report (post progress updates)",
+      "./bonsai-cli write-artifact (save research/plan/design documents)",
     ],
     lead: [
-      "Read, Grep, Glob (read-only file access)",
-      "Bash (read-only commands)",
-      "report.sh (post progress updates)",
-      "save-document.sh (save research/plan/design documents)",
-      "set-epic.sh (mark ticket as epic)",
-      "create-sub-ticket.sh (create sub-tickets for epic breakdown)",
-      "credit-status.sh (check if API credits are paused)",
+      "Bash (run helper scripts only — you have NO file access tools)",
+      "./bonsai-cli report (post progress updates)",
+      "./bonsai-cli credit-status (check if API credits are paused)",
+      // EPIC FEATURES DISABLED
+      // "set-epic.sh (mark ticket as epic)",
+      // "create-sub-ticket.sh (create sub-tickets for epic breakdown)",
     ],
   };
 
   const capabilities = roleCapabilities[role] || roleCapabilities.developer;
 
   const timestamp = new Date().toISOString();
+  const projectRoot = resolveProjectRoot(project);
+  const mainRepo = resolveMainRepo(project);
 
   return [
     `You are ${persona.name}, working on project "${project.name}".`,
     `Workspace: ${workspace}`,
+    `Project Root: ${projectRoot}`,
+    `Main Repository: ${mainRepo}`,
     `Session started: ${timestamp}`,
     "",
-    "CRITICAL WORKSPACE RULES:",
+    "CRITICAL WORKSPACE RULES — HARD BOUNDARIES:",
     `- Your workspace is: ${workspace}`,
-    "- ONLY read and modify files inside this directory.",
-    "- Do NOT navigate to parent directories. Do NOT use ../",
+    `- Your project root is: ${projectRoot}`,
+    `- Main repository code is at: ${mainRepo}`,
+    "",
+    "YOU ARE JAILED TO YOUR PROJECT DIRECTORY:",
+    `- You are ONLY allowed to read, write, or execute files inside: ${projectRoot}`,
+    `- You CANNOT access other projects in /Users/michaeloneal/development/bonsai/projects/`,
+    `- You CANNOT access parent directories like /Users/michaeloneal/development/bonsai/`,
+    `- You CANNOT access system files or other locations on the machine`,
+    `- Even if you see a path like ${projectRoot}/../other-project, you MUST NOT access it`,
+    "- Reading files OUTSIDE your project root is STRICTLY FORBIDDEN for ANY reason.",
+    "- Do NOT use ../ or any path that escapes your project directory.",
+    "- Do NOT use absolute paths like /Users/michaeloneal/development/bonsai/webapp/ (unless inside your project)",
+    "",
+    "BOUNDARY ENFORCEMENT:",
+    `- If a Read/Glob/Grep call would target a path outside ${projectRoot}, DO NOT make that call. Stop.`,
+    `- If a Bash command would access files outside ${projectRoot}, DO NOT run it.`,
+    `- If you need to reference the Bonsai webapp code, you CANNOT — that is outside your project.`,
     "- If your workspace is empty or has only a README, that is NORMAL — this is a new/greenfield project.",
-    "- You are managed by Bonsai (a separate ticketing/orchestration system). Bonsai's source code exists in a parent directory. IGNORE IT. It is NOT your project.",
-    "- If you find files like src/db/schema.ts, src/app/api/*, or package.json with 'next'/'drizzle' — that is Bonsai, NOT your project. Stop and re-orient.",
+    "- There is other software on this machine (the Bonsai orchestration system, other apps). You are NOT allowed to read them.",
+    "",
+    "VIOLATION CONSEQUENCES:",
+    "- Reading files outside your project will cause incorrect research and wrong technology assumptions.",
+    "- You will receive an error or be terminated if you attempt to access files outside your project.",
     "",
     "EVIDENCE-BASED WORK — MANDATORY:",
     "- NEVER make claims about the codebase, technology versions, or project state without citing evidence from actual files you have read.",
@@ -761,7 +764,7 @@ async function buildAgentSystemPrompt(
     `State: ${ticket.state} | Type: ${ticket.type}`,
     "",
     "## Progress Reporting",
-    `You MUST report progress to the ticket thread as you work using: \`${reportScript} "your message"\``,
+    `You MUST report progress to the ticket thread as you work using: \`./bonsai-cli report ${ticket.id} "your message"\``,
     "Post a report when you:",
     "- **Start investigating** a new area (e.g. \"Examining auth middleware in src/middleware.ts\")",
     "- **Find something significant** (e.g. \"Found that session tokens are stored in localStorage, not httpOnly cookies\")",
@@ -771,45 +774,48 @@ async function buildAgentSystemPrompt(
     "Keep reports short (1-3 sentences). They form the audit trail of your work.",
     "",
     "## Saving Documents",
-    "When you produce a research document, implementation plan, or design document, you MUST save it using the save-document tool.",
-    "1. Write your document to a file (e.g. /tmp/doc.md)",
-    `2. Run: \`${saveDocScript} <type> <file>\``,
+    "When you produce a research document, implementation plan, or design document, you MUST save it using the bonsai-cli tool.",
+    "1. Write your document to a file (e.g. /tmp/research.md)",
+    `2. Run: \`./bonsai-cli write-artifact ${ticket.id} <type> <file>\``,
     "   Types: research, implementation_plan, design",
-    `   Example: \`${saveDocScript} research /tmp/doc.md\``,
+    `   Example: \`./bonsai-cli write-artifact ${ticket.id} research /tmp/research.md\``,
     "3. Your final chat response should be a brief summary (1-2 sentences), NOT the full document.",
     "",
-    "CRITICAL: Do NOT output the full document as your response. Save it with save-document.sh. Your response is just a chat message.",
+    "CRITICAL: Do NOT output the full document as your response. Save it with ./bonsai-cli. Your response is just a chat message.",
     "",
-    "## Epic Evaluation & Breakdown",
-    "When evaluating a new ticket, decide: is this a single focused work item, or should it be an epic broken into sub-tickets?",
-    "If the ticket describes a large feature with multiple distinct phases, components, or deliverables, it should be an epic.",
+    "Note: ./bonsai-cli is available in your current directory and configured automatically for this ticket.",
     "",
-    "### Marking as Epic",
-    `To mark this ticket as an epic: \`${setEpicScript}\``,
-    "",
-    "### Creating Sub-tickets",
-    "After marking as epic, break it down. Write a JSON file for each sub-ticket, then call the script:",
-    "",
-    "```json",
-    "// /tmp/sub-ticket-1.json",
-    "{",
-    '  "title": "Short descriptive title",',
-    '  "type": "feature",',
-    '  "description": "What needs to be built and why.",',
-    '  "acceptanceCriteria": "- [ ] First criterion\\n- [ ] Second criterion\\n- [ ] Third criterion"',
-    "}",
-    "```",
-    `\`${createSubTicketScript} /tmp/sub-ticket-1.json\``,
-    "",
-    "Types: feature, bug, chore.",
-    "CRITICAL: Every sub-ticket MUST include acceptanceCriteria — a checklist of specific, testable conditions.",
-    "Create one sub-ticket per focused work item. Each should be small enough for a single agent to complete.",
+    // EPIC FEATURES DISABLED - removed epic evaluation and breakdown instructions
+    // "## Epic Evaluation & Breakdown",
+    // "When evaluating a new ticket, decide: is this a single focused work item, or should it be an epic broken into sub-tickets?",
+    // "If the ticket describes a large feature with multiple distinct phases, components, or deliverables, it should be an epic.",
+    // "",
+    // "### Marking as Epic",
+    // `To mark this ticket as an epic: \`${setEpicScript}\``,
+    // "",
+    // "### Creating Sub-tickets",
+    // "After marking as epic, break it down. Write a JSON file for each sub-ticket, then call the script:",
+    // "",
+    // "```json",
+    // "// /tmp/sub-ticket-1.json",
+    // "{",
+    // '  "title": "Short descriptive title",',
+    // '  "type": "feature",',
+    // '  "description": "What needs to be built and why.",',
+    // '  "acceptanceCriteria": "- [ ] First criterion\\n- [ ] Second criterion\\n- [ ] Third criterion"',
+    // "}",
+    // "```",
+    // `\`${createSubTicketScript} /tmp/sub-ticket-1.json\``,
+    // "",
+    // "Types: feature, bug, chore.",
+    // "CRITICAL: Every sub-ticket MUST include acceptanceCriteria — a checklist of specific, testable conditions.",
+    // "Create one sub-ticket per focused work item. Each should be small enough for a single agent to complete.",
     ticket.acceptanceCriteria ? [
       "",
       "## Acceptance Criteria Verification",
-      `Use the check-criteria tool to mark each criterion as done (0-indexed):`,
-      `\`${path.join(sessionDir, "check-criteria.sh")} 0\`  # checks off the first criterion`,
-      `\`${path.join(sessionDir, "check-criteria.sh")} 1\`  # checks off the second criterion`,
+      `Use the bonsai-cli tool to mark each criterion as done (0-indexed):`,
+      `\`./bonsai-cli check-criteria ${ticket.id} 0\`  # checks off the first criterion`,
+      `\`./bonsai-cli check-criteria ${ticket.id} 1\`  # checks off the second criterion`,
       "",
       "The acceptance criteria are:",
       ticket.acceptanceCriteria,
@@ -826,6 +832,40 @@ async function assembleAgentTask(
   persona: typeof personas.$inferSelect,
   opts?: { conversational?: boolean; mentioned?: boolean }
 ): Promise<string> {
+  // ── Inbox ticket: project-level chat context ──────────
+  if (ticket.title === "[Inbox]" && ticket.projectId) {
+    const project = await getProjectById(ticket.projectId);
+    const chatHistory = await getRecentProjectMessagesFormatted(ticket.projectId, 20);
+
+    const sections: string[] = [
+      `# Project Chat — ${project?.name || "Unknown"}`,
+      "",
+      "## Project Info",
+      project?.description ? `Description: ${project.description}` : "",
+      project?.techStack ? `Tech Stack: ${project.techStack}` : "",
+      "",
+      "## CONVERSATIONAL MODE",
+      "You are responding in the project-wide chat. This is NOT a ticket — there is no specific ticket context.",
+      "Reply conversationally — be direct and helpful. Keep responses concise (under 800 characters).",
+      "You can reference the project's codebase, suggest improvements, answer questions, or coordinate with teammates.",
+    ].filter(Boolean);
+
+    if (chatHistory.length > 0) {
+      sections.push("", "## Recent Chat History");
+      sections.push(...chatHistory.map((c) => c + "\n---"));
+    }
+
+    sections.push(
+      "",
+      "## New Message (respond to this)",
+      commentContent,
+      "",
+      `You are ${persona.name} (${persona.role}). Respond to the message above.`,
+    );
+
+    return sections.join("\n");
+  }
+
   const { enrichedComments, researchDoc, implPlan, researchCritique, planCritique } = await getTicketContext(ticket.id);
 
   const sections: string[] = [
@@ -867,11 +907,11 @@ async function assembleAgentTask(
     sections.push(...enrichedComments.map((c) => c + "\n---"));
   }
 
-  // Determine current phase
-  const phase = !ticket.researchApprovedAt ? "research"
-    : !ticket.planApprovedAt ? "planning"
-    : ticket.state === "test" ? "test"
-    : "implementation";
+  // Determine current phase based on what's been approved
+  const phase = ticket.state === "test" ? "test"
+    : ticket.planApprovedAt ? "implementation"  // Plan approved = building phase
+    : ticket.researchApprovedAt ? "planning"    // Research approved = planning phase
+    : "research";                                // Nothing approved = research phase
 
   // Always inject phase context so the agent knows where we are
   if (phase === "implementation") {
@@ -894,7 +934,7 @@ async function assembleAgentTask(
     sections.push("", convPrompt || "## CONVERSATIONAL MODE\nReply conversationally — short, direct, under 500 characters.");
   } else {
     // Phase-specific document instructions (research/planning only)
-    if (phase === "planning" && (persona.role === "developer" || persona.role === "lead")) {
+    if (phase === "planning" && persona.role === "developer") {
       const prompt = await getSetting("prompt_phase_planning");
       sections.push("", prompt || "## PHASE: PLANNING\nProduce the implementation plan as your response.");
     } else if (phase === "research" && persona.role === "researcher") {

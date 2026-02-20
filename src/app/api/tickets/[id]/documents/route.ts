@@ -64,38 +64,20 @@ export async function POST(req: Request, context: RouteContext) {
   let documentContent = trimmed;
 
   if (type === "research") {
-    // Research uses append-only versioned rows (v1, v2, v3)
-    const currentMax = await getLatestDocumentVersion(ticketId, "research");
-    if (currentMax >= 3) {
-      return NextResponse.json({ error: "Research capped at 3 versions" }, { status: 400 });
-    }
-    const nextVersion = currentMax + 1;
-
-    // Regression guard
-    const previousDoc = currentMax > 0 ? await getLatestDocumentByType(ticketId, "research") : null;
-    if (previousDoc && isRegression(trimmed, previousDoc.content)) {
-      return NextResponse.json({
-        error: "Regression rejected",
-        detail: `New content (${trimmed.length} chars) is less than 30% of previous (${previousDoc.content.length} chars)`,
-      }, { status: 422 });
-    }
-
-    // Accumulative v2: append critic review below v1
-    if (nextVersion === 2 && previousDoc?.content) {
-      const criticName = agentName;
-      documentContent = previousDoc.content
-        + `\n\n---\n\n## Review by ${criticName}\n\n`
-        + trimmed;
+    // Research: single version only (v1)
+    const existing = await getDocumentByType(ticketId, "research");
+    if (existing) {
+      return NextResponse.json({ error: "Research v1 already exists" }, { status: 400 });
     }
 
     await createDocument({
-      ticketId, type: "research", content: documentContent,
-      version: nextVersion, authorPersonaId: personaId || null,
+      ticketId, type: "research", content: trimmed,
+      version: 1, authorPersonaId: personaId || null,
     });
-    savedVersion = nextVersion;
+    savedVersion = 1;
 
-    // Mark research completed after v3
-    if (nextVersion >= 3 && !ticket.researchCompletedAt) {
+    // Mark research completed immediately after v1
+    if (!ticket.researchCompletedAt) {
       await updateTicket(ticketId, { researchCompletedAt: now, researchCompletedBy: personaId || null });
     }
   } else {
@@ -145,34 +127,7 @@ export async function POST(req: Request, context: RouteContext) {
     metadata: { docType: type, version: savedVersion },
   });
 
-  // ── Auto-dispatch chain ────────────────────────────────
-  if (type === "research") {
-    if (savedVersion === 1) {
-      const template = await getSetting("prompt_dispatch_critic_v2") || "{{authorName}} just completed initial research (v1). Review it critically and produce v2.";
-      fireDispatch("http://localhost:3000", ticketId, {
-        commentContent: template.replace(/\{\{authorName\}\}/g, agentName),
-        targetRole: "critic", silent: true,
-      }, "documents/research-v1");
-    } else if (savedVersion === 2) {
-      const template = await getSetting("prompt_dispatch_researcher_v3") || "{{criticName}} completed the critic review (v2). Produce the final v3 research document.";
-      fireDispatch("http://localhost:3000", ticketId, {
-        commentContent: template.replace(/\{\{criticName\}\}/g, agentName),
-        targetRole: "researcher", silent: true,
-      }, "documents/research-v2");
-    }
-  } else if (type === "implementation_plan" && savedVersion === 1 && persona?.role !== "critic") {
-    const criticTemplate = await getSetting("prompt_dispatch_plan_critic") || "{{authorName}} just completed the implementation plan. Review it critically.";
-    fireDispatch("http://localhost:3000", ticketId, {
-      commentContent: criticTemplate.replace(/\{\{authorName\}\}/g, agentName),
-      targetRole: "critic",
-    }, "documents/plan-critique");
-
-    const hackerTemplate = await getSetting("prompt_dispatch_plan_hacker") || "{{authorName}} just completed the implementation plan. Review it from a security perspective.";
-    fireDispatch("http://localhost:3000", ticketId, {
-      commentContent: hackerTemplate.replace(/\{\{authorName\}\}/g, agentName),
-      targetRole: "hacker", conversational: true, silent: true,
-    }, "documents/plan-security");
-  }
+  // No auto-dispatch needed - research v1 and plan v1 are final
 
   return NextResponse.json({ ok: true, version: savedVersion, type });
 }
