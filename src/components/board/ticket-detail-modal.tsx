@@ -266,7 +266,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, leadAvata
 
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticketId]);
+  }, [ticketId, ticket?.state]);
 
   useEffect(() => {
     setMounted(true);
