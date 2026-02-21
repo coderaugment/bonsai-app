@@ -73,15 +73,19 @@ export async function POST(
         }
       }
 
-      // Symlink node_modules from main repo instead of reinstalling
-      // This avoids native module rebuild issues and is much faster
+      // Symlink dependencies from monorepo so worktree is self-contained
+      // node_modules: avoids native module rebuild issues and is much faster
+      // agent: needed for heartbeat-dispatch.ts imports (../../agent/src/roles/)
+
       const mainNodeModules = path.join(mainRepo, "node_modules");
       const worktreeNodeModules = path.join(worktreePath, "node_modules");
+      const monorepoRoot = path.resolve(mainRepo, "../..");
+      const agentDir = path.join(monorepoRoot, "agent");
+      const worktreeAgentLink = path.join(worktreePath, "..", "..", "agent");
 
       if (fs.existsSync(mainNodeModules)) {
         console.log(`[ticket-preview] Symlinking node_modules for ticket ${ticket.id}...`);
         if (fs.existsSync(worktreeNodeModules)) {
-          // Remove if it's a regular directory (shouldn't happen but handle it)
           if (!fs.lstatSync(worktreeNodeModules).isSymbolicLink()) {
             fs.rmSync(worktreeNodeModules, { recursive: true, force: true });
           } else {
@@ -90,7 +94,24 @@ export async function POST(
         }
         fs.symlinkSync(mainNodeModules, worktreeNodeModules, "dir");
       } else {
-        console.warn(`[ticket-preview] Warning: node_modules not found in main repo at ${mainNodeModules}`);
+        console.warn(`[ticket-preview] Warning: node_modules not found at ${mainNodeModules}`);
+      }
+
+      // Symlink agent directory so ../../agent/src imports work from worktree
+      if (fs.existsSync(agentDir)) {
+        console.log(`[ticket-preview] Symlinking agent directory for ticket ${ticket.id}...`);
+        // Create parent dirs if needed
+        fs.mkdirSync(path.dirname(worktreeAgentLink), { recursive: true });
+        if (fs.existsSync(worktreeAgentLink)) {
+          if (!fs.lstatSync(worktreeAgentLink).isSymbolicLink()) {
+            fs.rmSync(worktreeAgentLink, { recursive: true, force: true });
+          } else {
+            fs.unlinkSync(worktreeAgentLink);
+          }
+        }
+        fs.symlinkSync(agentDir, worktreeAgentLink, "dir");
+      } else {
+        console.warn(`[ticket-preview] Warning: agent directory not found at ${agentDir}`);
       }
 
       console.log(`[ticket-preview] Created worktree for ticket ${ticket.id} at ${worktreePath}`);
