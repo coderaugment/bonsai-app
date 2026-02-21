@@ -13,9 +13,10 @@ set -euo pipefail
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WEBAPP_DIR="$(dirname "$SCRIPT_DIR")"
-LOG_DIR="$HOME/.bonsai/logs"
+PROJECT_ROOT="$(dirname "$WEBAPP_DIR")"
+LOG_DIR="$PROJECT_ROOT/.bonsai-data/logs"
 LOG_FILE="$LOG_DIR/heartbeat.log"
-LOCK_FILE="$HOME/.bonsai/heartbeat.lock"
+LOCK_FILE="$PROJECT_ROOT/.bonsai-data/heartbeat.lock"
 
 # Environment (dev or prod)
 BONSAI_ENV="${1:-prod}"

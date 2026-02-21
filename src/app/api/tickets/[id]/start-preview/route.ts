@@ -73,13 +73,25 @@ export async function POST(
         }
       }
 
-      // Install dependencies in the worktree
-      console.log(`[ticket-preview] Installing dependencies for ticket ${ticket.id}...`);
-      execSync("npm install", {
-        cwd: worktreePath,
-        stdio: "ignore",
-        timeout: 300000, // 5 minutes
-      });
+      // Symlink node_modules from main repo instead of reinstalling
+      // This avoids native module rebuild issues and is much faster
+      const mainNodeModules = path.join(mainRepo, "node_modules");
+      const worktreeNodeModules = path.join(worktreePath, "node_modules");
+
+      if (fs.existsSync(mainNodeModules)) {
+        console.log(`[ticket-preview] Symlinking node_modules for ticket ${ticket.id}...`);
+        if (fs.existsSync(worktreeNodeModules)) {
+          // Remove if it's a regular directory (shouldn't happen but handle it)
+          if (!fs.lstatSync(worktreeNodeModules).isSymbolicLink()) {
+            fs.rmSync(worktreeNodeModules, { recursive: true, force: true });
+          } else {
+            fs.unlinkSync(worktreeNodeModules);
+          }
+        }
+        fs.symlinkSync(mainNodeModules, worktreeNodeModules, "dir");
+      } else {
+        console.warn(`[ticket-preview] Warning: node_modules not found in main repo at ${mainNodeModules}`);
+      }
 
       console.log(`[ticket-preview] Created worktree for ticket ${ticket.id} at ${worktreePath}`);
     } catch (error) {

@@ -32,18 +32,20 @@ ${description.trim()}`,
       text: `Generate acceptance criteria for this task as a markdown checklist. Each item should be a concrete, testable condition. Use "- [ ]" format. Return 3-6 items, ONLY the checklist, no other text.\n\nDescription:\n${description.trim()}`,
     },
     enhance: {
-      text: `Fix typos, spelling, and grammar in the text below. Keep the EXACT same content, meaning, and structure — do not rewrite, rephrase, or reorganize sentences. Do not add any information that isn't already there. Do not remove any information. Do not change technical terms, tool names, or stack choices.
+      text: `Fix typos, spelling, grammar, and formatting in the text below. Keep the EXACT same content and meaning — do not rewrite, rephrase, or reorganize ideas. Do not add any information that isn't already there. Do not remove any information. Do not change technical terms, tool names, or stack choices.
 
 Rules:
-- ONLY fix typos, spelling, grammar, and obvious formatting issues
+- Fix typos, spelling, grammar, and formatting issues
+- Add paragraph breaks where natural thought breaks occur (blank lines between paragraphs)
+- Use markdown formatting for emphasis where appropriate (bold **text**, bullet lists, etc.)
 - Keep every detail, number, URL, and technical term exactly as written
 - Keep the author's voice — do not make it formal or corporate
 - Keep all image references ![...](...) exactly as-is
 - Do NOT add new content, explanations, or details the author didn't write
-- Do NOT rewrite sentences — only fix errors within them
-- Do NOT summarize or restructure
+- Do NOT rewrite sentences — only fix errors within them and format them nicely
+- Do NOT summarize or change the order of ideas
 
-Return ONLY the cleaned text, nothing else.
+Return ONLY the cleaned and formatted text, nothing else.
 
 Text:
 ${description.trim()}`,

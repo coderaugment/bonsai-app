@@ -2244,6 +2244,99 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
 
           {/* Comments list */}
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            {/* Active Agent Block */}
+            {(() => {
+              if (!ticket?.lastAgentActivity) return null;
+              const activeMs = Date.now() - new Date(ticket.lastAgentActivity).getTime();
+              const isActive = activeMs < 30 * 60 * 1000; // 30 minutes
+              if (!isActive) return null;
+
+              // Find the latest agent comment to show as progress summary
+              const latestAgentComment = [...comments]
+                .filter(c => c.authorType === "agent")
+                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+              if (!latestAgentComment?.author) return null;
+
+              const persona = personasList.find(p => p.name === latestAgentComment.author?.name);
+              const elapsed = (() => {
+                const secs = Math.floor(activeMs / 1000);
+                if (secs < 60) return `${secs}s`;
+                const mins = Math.floor(secs / 60);
+                if (mins < 60) return `${mins}m`;
+                const hrs = Math.floor(mins / 60);
+                const remMins = mins % 60;
+                return `${hrs}h ${remMins}m`;
+              })();
+
+              return (
+                <div
+                  className="rounded-lg p-4 mb-4"
+                  style={{
+                    backgroundColor: "rgba(34, 197, 94, 0.08)",
+                    border: "1px solid rgba(34, 197, 94, 0.25)",
+                    borderLeft: "3px solid #22c55e",
+                  }}
+                >
+                  <div className="flex items-start gap-3">
+                    {/* Agent avatar with pulsing indicator */}
+                    <div className="relative flex-shrink-0">
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold text-white overflow-hidden"
+                        style={{ backgroundColor: persona?.color || latestAgentComment.author.color || "#6366f1" }}
+                      >
+                        {persona?.avatar || latestAgentComment.author.avatarUrl ? (
+                          <img
+                            src={persona?.avatar || latestAgentComment.author.avatarUrl!}
+                            alt={latestAgentComment.author.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          latestAgentComment.author.name[0]?.toUpperCase() || "A"
+                        )}
+                      </div>
+                      <div
+                        className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2"
+                        style={{
+                          backgroundColor: "#22c55e",
+                          borderColor: "var(--bg-primary)",
+                          animation: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+                        }}
+                      />
+                    </div>
+
+                    {/* Agent info and progress */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="text-sm font-semibold" style={{ color: "#22c55e" }}>
+                          {latestAgentComment.author.name} is working
+                        </span>
+                        {persona?.role && (
+                          <span
+                            className="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase"
+                            style={{ backgroundColor: "rgba(107, 114, 128, 0.15)", color: "#9ca3af" }}
+                          >
+                            {persona.role}
+                          </span>
+                        )}
+                        <span className="text-xs font-mono" style={{ color: "rgba(34, 197, 94, 0.7)" }}>
+                          {elapsed}
+                        </span>
+                      </div>
+
+                      {/* Latest progress message */}
+                      <div
+                        className="text-sm leading-relaxed line-clamp-2"
+                        style={{ color: "rgba(255, 255, 255, 0.7)" }}
+                      >
+                        {latestAgentComment.content}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {loadingComments ? (
               <div className="flex items-center justify-center py-12" style={{ color: "var(--text-muted)" }}>
                 <span className="text-sm">Loading comments...</span>

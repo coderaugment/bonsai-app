@@ -10,6 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WEBAPP_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$WEBAPP_DIR")"
 
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║           Bonsai Heartbeat Installer                           ║"
@@ -91,11 +92,11 @@ echo
 
 # ── Create required directories ─────────────────────────────────────
 echo "Creating directories..."
-mkdir -p "$HOME/.bonsai/logs"
-mkdir -p "$HOME/.bonsai/sessions"
-echo "✓ Created: ~/.bonsai/logs"
-echo "✓ Created: ~/.bonsai/sessions"
-echo "  (Note: Worktrees now created inside each project at worktrees/)"
+mkdir -p "$PROJECT_ROOT/.bonsai-data/logs"
+mkdir -p "$PROJECT_ROOT/.bonsai-data/sessions"
+echo "✓ Created: .bonsai-data/logs"
+echo "✓ Created: .bonsai-data/sessions"
+echo "  (Note: All data stored in project root, not home directory)"
 echo
 
 # ── Make heartbeat.sh executable ────────────────────────────────────
@@ -134,7 +135,7 @@ if [[ "$PLATFORM" == "macos" ]]; then
         echo
         echo "Commands:"
         echo "  Status:  launchctl list | grep bonsai"
-        echo "  Logs:    tail -f ~/.bonsai/logs/heartbeat.log"
+        echo "  Logs:    tail -f $PROJECT_ROOT/.bonsai-data/logs/heartbeat.log"
         echo "  Stop:    launchctl unload $PLIST_DST"
         echo "  Restart: launchctl unload $PLIST_DST && launchctl load $PLIST_DST"
     else
@@ -168,7 +169,7 @@ if [[ "$PLATFORM" == "linux" ]]; then
         echo "Commands:"
         echo "  View:    crontab -l"
         echo "  Edit:    crontab -e"
-        echo "  Logs:    tail -f ~/.bonsai/logs/heartbeat.log"
+        echo "  Logs:    tail -f $PROJECT_ROOT/.bonsai-data/logs/heartbeat.log"
         echo "  Remove:  crontab -e (delete the line)"
     else
         echo "Skipped automatic installation."
@@ -187,7 +188,7 @@ echo "  • Planning (tickets with research, no plan)"
 echo "  • Implementation (in_progress tickets with approved plans)"
 echo
 echo "Monitor logs:"
-echo "  tail -f ~/.bonsai/logs/heartbeat.log"
+echo "  tail -f $PROJECT_ROOT/.bonsai-data/logs/heartbeat.log"
 echo
 echo "Test manually:"
 echo "  cd $WEBAPP_DIR"
