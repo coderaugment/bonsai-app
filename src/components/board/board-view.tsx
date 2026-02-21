@@ -7,11 +7,11 @@ import { Column } from "./column";
 import { TicketDetailModal } from "./ticket-detail-modal";
 import { ProjectInfoPanel } from "./project-info-panel";
 import { ProjectChatPanel } from "./project-chat-panel";
+import { PreviewPanel } from "./preview-panel";
 
 const columnOrder: TicketState[] = [
   "planning",
   "building",
-  "review",
   "shipped",
 ];
 
@@ -75,6 +75,10 @@ interface BoardViewProps {
   project?: Project;
   ticketStats?: { planning: number; building: number; review: number; shipped: number };
   awakePersonaIds?: string[];
+  previewUrl?: string | null;
+  startingPreview?: boolean;
+  previewError?: string | null;
+  onPreviewClose?: () => void;
 }
 
 export function BoardView({
@@ -84,6 +88,10 @@ export function BoardView({
   project,
   ticketStats,
   awakePersonaIds: awakePersonaIdsList = [],
+  previewUrl: externalPreviewUrl = null,
+  startingPreview = false,
+  previewError = null,
+  onPreviewClose,
 }: BoardViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -95,6 +103,9 @@ export function BoardView({
   // Chat panel state
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMentionPersonaId, setChatMentionPersonaId] = useState<string | null>(null);
+
+  // Preview state
+  const previewUrl = externalPreviewUrl;
 
   const awakePersonaIds = useMemo(() => new Set(awakePersonaIdsList), [awakePersonaIdsList]);
 
@@ -242,11 +253,22 @@ export function BoardView({
         />
       )}
 
-      {/* Main content area: columns + chat sidebar */}
+      {/* Main content area: columns OR preview + chat sidebar */}
       <div className="flex flex-1 h-full overflow-hidden">
-        {/* Board columns */}
-        <div className="flex gap-6 overflow-x-auto px-6 py-5 flex-1">
-          {columnOrder.map((state) => {
+        {previewUrl || startingPreview || previewError ? (
+          /* Main branch preview */
+          <div className="flex-1 flex flex-col h-full w-full">
+            <PreviewPanel
+              url={previewUrl}
+              loading={startingPreview}
+              error={previewError}
+              onClose={onPreviewClose}
+            />
+          </div>
+        ) : (
+          /* Board columns */
+          <div className="flex gap-6 overflow-x-auto px-6 py-5 flex-1">
+            {columnOrder.map((state) => {
             const defaultCollapsed = state === "shipped";
             const collapsed = state in collapseOverrides ? collapseOverrides[state] : defaultCollapsed;
             return (
@@ -306,6 +328,7 @@ export function BoardView({
             }}
           />
         </div>
+        )}
 
         {/* Project Chat Sidebar */}
         <ProjectChatPanel

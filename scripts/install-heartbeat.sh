@@ -95,7 +95,7 @@ mkdir -p "$HOME/.bonsai/logs"
 mkdir -p "$HOME/.bonsai/sessions"
 echo "✓ Created: ~/.bonsai/logs"
 echo "✓ Created: ~/.bonsai/sessions"
-echo "  (Note: Worktrees now created inside each project at .bonsai-worktrees/)"
+echo "  (Note: Worktrees now created inside each project at worktrees/)"
 echo
 
 # ── Make heartbeat.sh executable ────────────────────────────────────

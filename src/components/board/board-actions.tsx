@@ -9,9 +9,14 @@ interface BoardActionsProps {
   project: Project;
   shippedCount: number;
   hasCommands: boolean;
+  previewMode: boolean;
+  onPreviewToggle: () => void;
+  onPreviewStart: () => void;
+  onPreviewReady: (url: string) => void;
+  onPreviewError: (error: string) => void;
 }
 
-export function BoardActions({ project, shippedCount, hasCommands }: BoardActionsProps) {
+export function BoardActions({ project, shippedCount, hasCommands, previewMode, onPreviewToggle, onPreviewStart, onPreviewReady, onPreviewError }: BoardActionsProps) {
   const router = useRouter();
   const [previewing, setPreviewing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -52,6 +57,12 @@ export function BoardActions({ project, shippedCount, hasCommands }: BoardAction
   const previewEnabled = shippedCount >= 1 && hasCommands;
 
   async function handlePreview() {
+    // If already in preview mode, toggle it off
+    if (previewMode) {
+      onPreviewToggle();
+      return;
+    }
+
     if (!previewEnabled) {
       setSettingsNotice("Configure build and run commands in project settings to enable preview.");
       setSettingsOpen(true);
@@ -59,6 +70,7 @@ export function BoardActions({ project, shippedCount, hasCommands }: BoardAction
     }
 
     setPreviewing(true);
+    onPreviewStart();
     try {
       const res = await fetch(`/api/projects/${project.id}/preview`, { method: "POST" });
       const data = await res.json();
@@ -66,17 +78,24 @@ export function BoardActions({ project, shippedCount, hasCommands }: BoardAction
         const msg = data.details
           ? `Build failed:\n${data.details}`
           : data.error || "Preview failed";
+        onPreviewError(msg);
         setSettingsNotice(msg);
         setSettingsOpen(true);
         setPreviewing(false);
         return;
       }
+      // Replace 0.0.0.0 with localhost for browser compatibility
+      const url = data.url.replace('0.0.0.0', 'localhost');
+
+      // Wait for server to be ready if just started
       if (!data.alreadyRunning) {
-        await new Promise((r) => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, 3000));
       }
-      window.open(data.url, "_blank");
+
+      onPreviewReady(url);
     } catch (err) {
       console.error("[preview]", err);
+      onPreviewError("Failed to start preview");
     } finally {
       setPreviewing(false);
     }
@@ -121,17 +140,17 @@ export function BoardActions({ project, shippedCount, hasCommands }: BoardAction
           disabled={previewing}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           style={{
-            backgroundColor: "var(--bg-input)",
-            border: "1px solid var(--border-medium)",
-            color: "var(--text-secondary)",
-            opacity: previewEnabled && !previewing ? 1 : 0.4,
-            cursor: previewing ? "wait" : previewEnabled ? "pointer" : "not-allowed",
+            backgroundColor: previewMode ? "rgba(91, 141, 249, 0.1)" : "var(--bg-input)",
+            border: previewMode ? "1px solid var(--accent-blue)" : "1px solid var(--border-medium)",
+            color: previewMode ? "var(--accent-blue)" : "var(--text-secondary)",
+            opacity: (previewEnabled && !previewing) || previewMode ? 1 : 0.4,
+            cursor: previewing ? "wait" : (previewEnabled || previewMode) ? "pointer" : "not-allowed",
           }}
         >
           <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
             <path d="M8 5v14l11-7z" />
           </svg>
-          {previewing ? "Starting..." : "Preview"}
+          {previewing ? "Starting..." : previewMode ? "Close Preview" : "Preview"}
         </button>
 
         <button

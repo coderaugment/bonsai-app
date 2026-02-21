@@ -148,7 +148,7 @@ export const tickets: Ticket[] = [
     description:
       "Implement Jupyter-style token auth. Generate token on first run, validate via cookie and Authorization header.",
     type: "feature",
-    state: "test",
+    state: "building",
     priority: 950,
     assignee: personas[1],
     commentCount: 7,
@@ -190,7 +190,7 @@ export const tickets: Ticket[] = [
     description:
       "Add automated cleanup of agent locks older than 45 minutes. Prevent stuck tickets after heartbeat crashes.",
     type: "chore",
-    state: "test",
+    state: "building",
     priority: 800,
     assignee: personas[2],
     commentCount: 2,

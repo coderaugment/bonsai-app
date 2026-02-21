@@ -1,8 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { Project } from "@/types";
+
+interface EnvVar {
+  key: string;
+  value: string;
+}
 
 export function ProjectSettings({ project }: { project: Project }) {
   const router = useRouter();
@@ -11,6 +16,38 @@ export function ProjectSettings({ project }: { project: Project }) {
   const [ghOwner, setGhOwner] = useState(project.githubOwner || "");
   const [ghRepo, setGhRepo] = useState(project.githubRepo || "");
   const connected = !!(ghOwner && ghRepo);
+
+  // Settings state
+  const [buildCommand, setBuildCommand] = useState("");
+  const [runCommand, setRunCommand] = useState("");
+  const [envVars, setEnvVars] = useState<EnvVar[]>([]);
+  const [worktreeDir, setWorktreeDir] = useState("");
+  const [worktreeExists, setWorktreeExists] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+
+  // Fetch project settings
+  useEffect(() => {
+    fetchSettings();
+  }, [project.id]);
+
+  async function fetchSettings() {
+    try {
+      const res = await fetch(`/api/projects/${project.id}/settings`);
+      if (res.ok) {
+        const data = await res.json();
+        setBuildCommand(data.buildCommand || "");
+        setRunCommand(data.runCommand || "");
+        setEnvVars(data.envVars || []);
+        setWorktreeDir(data.worktreeDir || "");
+        setWorktreeExists(data.worktreeExists || false);
+      }
+    } catch (err) {
+      console.error("Failed to fetch settings:", err);
+    } finally {
+      setLoadingSettings(false);
+    }
+  }
 
   async function handleConnectGithub() {
     setConnecting(true);
@@ -32,6 +69,69 @@ export function ProjectSettings({ project }: { project: Project }) {
       setError("Network error");
     }
     setConnecting(false);
+  }
+
+  async function handleSaveCommands() {
+    setSaving(true);
+    try {
+      await fetch(`/api/projects/${project.id}/settings`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ buildCommand, runCommand }),
+      });
+    } catch (err) {
+      console.error("Failed to save commands:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSaveEnv() {
+    setSaving(true);
+    try {
+      await fetch(`/api/projects/${project.id}/settings`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ envVars }),
+      });
+    } catch (err) {
+      console.error("Failed to save env vars:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function addEnvVar() {
+    setEnvVars([...envVars, { key: "", value: "" }]);
+  }
+
+  function updateEnvVar(index: number, field: "key" | "value", value: string) {
+    const updated = [...envVars];
+    updated[index][field] = value;
+    setEnvVars(updated);
+  }
+
+  function removeEnvVar(index: number) {
+    setEnvVars(envVars.filter((_, i) => i !== index));
+  }
+
+  async function handleCreateWorktree() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/create-worktree-dir`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        await fetchSettings(); // Refresh to show verified status
+      } else {
+        const data = await res.json();
+        setError(data.error || "Failed to create worktree directory");
+      }
+    } catch (err) {
+      setError("Network error");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -60,7 +160,7 @@ export function ProjectSettings({ project }: { project: Project }) {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-10 py-8">
-        <div className="max-w-lg flex flex-col gap-8">
+        <div className="max-w-2xl flex flex-col gap-8">
           {/* Local Path */}
           <section>
             <h2
@@ -80,6 +180,158 @@ export function ProjectSettings({ project }: { project: Project }) {
                 {project.localPath || "Not set"}
               </code>
             </div>
+            {!loadingSettings && (
+              <div className="mt-2 flex items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
+                <span>Worktree directory: {worktreeDir}</span>
+                {worktreeExists ? (
+                  <span className="px-2 py-0.5 rounded" style={{ backgroundColor: "rgba(52, 211, 153, 0.15)", color: "#34d399" }}>
+                    ✓ Verified
+                  </span>
+                ) : (
+                  <>
+                    <span className="px-2 py-0.5 rounded" style={{ backgroundColor: "rgba(239, 68, 68, 0.15)", color: "#ef4444" }}>
+                      Not found
+                    </span>
+                    <button
+                      onClick={handleCreateWorktree}
+                      disabled={saving}
+                      className="px-2 py-0.5 rounded text-xs font-medium transition-colors hover:bg-white/10"
+                      style={{ color: "var(--accent-blue)" }}
+                    >
+                      Create Worktree Directory
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* Build & Run Commands */}
+          <section>
+            <h2
+              className="text-sm font-semibold uppercase tracking-wider mb-4"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Build & Run Commands
+            </h2>
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="block text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
+                  Build Command (optional, runs before dev server starts)
+                </label>
+                <input
+                  type="text"
+                  value={buildCommand}
+                  onChange={(e) => setBuildCommand(e.target.value)}
+                  placeholder="e.g., npm run build"
+                  className="w-full px-4 py-2 rounded-lg text-sm border outline-none"
+                  style={{
+                    backgroundColor: "var(--bg-secondary)",
+                    borderColor: "var(--border-medium)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
+                  Run Command (required, use {'{{PORT}}'} for dynamic port)
+                </label>
+                <input
+                  type="text"
+                  value={runCommand}
+                  onChange={(e) => setRunCommand(e.target.value)}
+                  placeholder="e.g., npm run dev -- --port {{PORT}}"
+                  className="w-full px-4 py-2 rounded-lg text-sm border outline-none"
+                  style={{
+                    backgroundColor: "var(--bg-secondary)",
+                    borderColor: "var(--border-medium)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </div>
+              <button
+                onClick={handleSaveCommands}
+                disabled={saving}
+                className="self-start px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 hover:opacity-90"
+                style={{ backgroundColor: "var(--accent-blue)" }}
+              >
+                {saving ? "Saving..." : "Save Commands"}
+              </button>
+            </div>
+          </section>
+
+          {/* Environment Variables */}
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h2
+                className="text-sm font-semibold uppercase tracking-wider"
+                style={{ color: "var(--text-muted)" }}
+              >
+                Environment Variables
+              </h2>
+              <button
+                onClick={addEnvVar}
+                className="px-3 py-1.5 rounded text-xs font-medium transition-colors hover:bg-white/10"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                + Add Variable
+              </button>
+            </div>
+            <div className="flex flex-col gap-2">
+              {envVars.map((envVar, index) => (
+                <div key={index} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={envVar.key}
+                    onChange={(e) => updateEnvVar(index, "key", e.target.value)}
+                    placeholder="KEY"
+                    className="flex-1 px-3 py-2 rounded-lg text-sm border outline-none font-mono"
+                    style={{
+                      backgroundColor: "var(--bg-secondary)",
+                      borderColor: "var(--border-medium)",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                  <input
+                    type="text"
+                    value={envVar.value}
+                    onChange={(e) => updateEnvVar(index, "value", e.target.value)}
+                    placeholder="value"
+                    className="flex-[2] px-3 py-2 rounded-lg text-sm border outline-none font-mono"
+                    style={{
+                      backgroundColor: "var(--bg-secondary)",
+                      borderColor: "var(--border-medium)",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                  <button
+                    onClick={() => removeEnvVar(index)}
+                    className="px-3 py-2 rounded-lg text-sm transition-colors hover:bg-red-500/10"
+                    style={{ color: "#ef4444" }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {envVars.length === 0 && (
+                <div
+                  className="text-center py-8 text-sm"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  No environment variables. Click "Add Variable" to add one.
+                </div>
+              )}
+            </div>
+            {envVars.length > 0 && (
+              <button
+                onClick={handleSaveEnv}
+                disabled={saving}
+                className="mt-4 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 hover:opacity-90"
+                style={{ backgroundColor: "var(--accent-blue)" }}
+              >
+                {saving ? "Saving..." : "Save Environment Variables"}
+              </button>
+            )}
           </section>
 
           {/* GitHub Repository */}

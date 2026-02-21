@@ -171,7 +171,7 @@ export function getTicketsByProject(projectId: number, title: string) {
 export function createTicket(data: {
   title: string;
   type: "feature" | "bug" | "chore";
-  state: "planning" | "building" | "preview" | "test" | "shipped";
+  state: "planning" | "building" | "shipped";
   description?: string | null;
   acceptanceCriteria?: string | null;
   priority: number;

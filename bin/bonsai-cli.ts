@@ -20,6 +20,8 @@ Bonsai CLI — database and workflow utilities
 Usage: bonsai-cli <command> [args]
 
 Commands:
+  create-ticket <project-slug> <title> --type <feature|bug|chore> [--description <text>] [--acceptance-criteria <text>]
+                                              Create a new ticket
   get-comments <project-slug> <ticket-id> [--head N | --tail N]
                                               Get all comments for a ticket
   get-persona <persona-id>                    Get persona details (name, role, avatar status)
@@ -32,6 +34,7 @@ Commands:
   credit-status                               Check if API credits are paused
 
 Examples:
+  bonsai-cli create-ticket my-project "Add login feature" --type feature --description "Implement user login" --acceptance-criteria "User can log in with email/password"
   bonsai-cli get-comments digitalworker-ai-demo 41 --tail 5
   bonsai-cli get-persona p8
   bonsai-cli write-artifact 41 research /tmp/research.md
@@ -108,6 +111,63 @@ function getComments(projectSlug: string, ticketId: string, limit?: {type: 'head
   });
 
   console.log(`\n────────────────────────────────────────────────────────────────\n`);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// create-ticket <project-slug> <title> --type <type> [--description <text>] [--acceptance-criteria <text>]
+// ───────────────────────────────────────────────────────────────────────────
+async function createTicketCmd(projectSlug: string, title: string, options: { type?: string; description?: string; acceptanceCriteria?: string }) {
+  // Verify project exists
+  const project = db.select().from(projects).where(and(
+    eq(projects.slug, projectSlug),
+    isNull(projects.deletedAt)
+  )).get();
+
+  if (!project) {
+    console.error(`Error: project '${projectSlug}' not found`);
+    process.exit(1);
+  }
+
+  // Validate type
+  const validTypes = ["feature", "bug", "chore"];
+  if (!options.type || !validTypes.includes(options.type)) {
+    console.error(`Error: --type is required and must be one of: ${validTypes.join(", ")}`);
+    process.exit(1);
+  }
+
+  // Create ticket via API
+  try {
+    const res = await fetch(`http://localhost:3080/api/tickets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: project.id,
+        title: title,
+        type: options.type,
+        description: options.description || "",
+        acceptanceCriteria: options.acceptanceCriteria || "",
+        state: "planning",
+        priority: 0,
+      }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      console.error(`Error creating ticket: ${data.error || res.statusText}`);
+      process.exit(1);
+    }
+
+    const ticket = await res.json();
+    console.log(`✓ Created ticket #${ticket.id}: ${ticket.title}`);
+    console.log(`  Type: ${ticket.type}`);
+    console.log(`  State: ${ticket.state}`);
+    console.log(`  Project: ${project.name} (${project.slug})`);
+    if (options.description) console.log(`  Description: ${options.description.substring(0, 100)}${options.description.length > 100 ? '...' : ''}`);
+    if (options.acceptanceCriteria) console.log(`  Acceptance criteria: ${options.acceptanceCriteria.substring(0, 100)}${options.acceptanceCriteria.length > 100 ? '...' : ''}`);
+  } catch (err: any) {
+    console.error(`Error creating ticket: ${err.message}`);
+    process.exit(1);
+  }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -464,6 +524,33 @@ async function main() {
   if (!command) usage();
 
   switch (command) {
+    case "create-ticket": {
+      if (args.length < 2) {
+        console.error("Error: create-ticket requires <project-slug> <title>");
+        usage();
+      }
+      const projectSlug = args[0];
+      const title = args[1];
+      const options: { type?: string; description?: string; acceptanceCriteria?: string } = {};
+
+      // Parse flags
+      for (let i = 2; i < args.length; i++) {
+        if (args[i] === '--type' && args[i + 1]) {
+          options.type = args[i + 1];
+          i++;
+        } else if (args[i] === '--description' && args[i + 1]) {
+          options.description = args[i + 1];
+          i++;
+        } else if (args[i] === '--acceptance-criteria' && args[i + 1]) {
+          options.acceptanceCriteria = args[i + 1];
+          i++;
+        }
+      }
+
+      await createTicketCmd(projectSlug, title, options);
+      break;
+    }
+
     case "get-comments": {
       if (args.length < 2) {
         console.error("Error: get-comments requires <project-slug> <ticket-id>");

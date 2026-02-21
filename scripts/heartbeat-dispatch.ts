@@ -21,7 +21,6 @@ import { researcherRole } from "../../agent/src/roles/researcher.js";
 import { plannerRole } from "../../agent/src/roles/planner.js";
 import { developerRole } from "../../agent/src/roles/developer.js";
 import { buildSystemPrompt } from "../src/lib/prompt-builder.js";
-import { getVault } from "../src/lib/vault.js";
 import { isCreditError, computePauseUntil, isPaused, pauseRemainingMs, isAuthError, AUTH_EXPIRED } from "../src/lib/credit-pause.js";
 
 const execAsync = promisify(exec);
@@ -416,25 +415,6 @@ function ensureWorktree(project: ProjectRow, ticketId: number): string | null {
   }
 }
 
-// ── Vault → env vars ────────────────────────────
-// Load all api_key entries from the vault and return as env var map
-async function loadVaultEnv(): Promise<Record<string, string>> {
-  try {
-    const vault = await getVault();
-    const keys = await vault.list();
-    const env: Record<string, string> = {};
-    for (const entry of keys) {
-      if (entry.type === "api_key") {
-        const value = await vault.get(entry.key);
-        if (value) env[entry.key.toUpperCase()] = value;
-      }
-    }
-    return env;
-  } catch (err) {
-    log(`  WARN: failed to load vault keys: ${(err as Error).message}`);
-    return {};
-  }
-}
 
 // ── Claude CLI ──────────────────────────────────
 const CLAUDE_CLI = path.join(process.env.HOME || "", ".local", "bin", "claude");
@@ -783,7 +763,7 @@ async function runAgentPhase(
         if (body.ok) {
           log(`  [${ticket.id}] Re-auth triggered: ${body.message}`);
         } else {
-          log(`  [${ticket.id}] Re-auth failed: ${body.error || "unknown error"} — add ANTHROPIC_API_KEY to vault via Settings > API Keys`);
+          log(`  [${ticket.id}] Re-auth failed: ${body.error || "unknown error"} — add CLAUDE_REAUTH_KEY to .env file`);
         }
       } catch (e) {
         log(`  [${ticket.id}] Failed to trigger re-auth: ${e instanceof Error ? e.message : String(e)}`);
@@ -850,10 +830,7 @@ async function dispatch(maxTickets: number) {
     deleteSettingSync("credits_pause_reason");
   }
 
-  // Load API keys from vault for agent environment
-  const vaultEnv = await loadVaultEnv();
-  const vaultKeyCount = Object.keys(vaultEnv).length;
-  if (vaultKeyCount > 0) log(`  loaded ${vaultKeyCount} API key(s) from vault`);
+  // API keys are loaded from process.env (from .env file)
 
   // Get all projects and all personas (company-wide)
   const allProjects = db.prepare(`SELECT id FROM projects`).all() as { id: number }[];
@@ -1014,7 +991,7 @@ async function dispatch(maxTickets: number) {
         : undefined;
       const preRunVersion = preRunDoc?.version || 0;
 
-      const result = await runAgentPhase(ticket, persona, project, phase, systemPrompt, taskContent, tools, timeoutMs, vaultEnv);
+      const result = await runAgentPhase(ticket, persona, project, phase, systemPrompt, taskContent, tools, timeoutMs);
 
       if (phase === "research") {
         // Check if agent saved the document via save-document.sh (API)

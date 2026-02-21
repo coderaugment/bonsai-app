@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { getGithubToken } from "@/lib/vault";
+// GitHub token stored in settings table
 
 export async function GET() {
-  const token = await getGithubToken();
+  const token = process.env.GITHUB_TOKEN;
 
   if (!token) {
     return NextResponse.json(

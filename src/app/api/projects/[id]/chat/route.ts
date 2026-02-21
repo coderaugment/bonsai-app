@@ -27,9 +27,9 @@ export async function POST(
 ) {
   const { id } = await params;
   const projectId = Number(id);
-  const { content, authorId } = await req.json();
+  const { content, authorId, attachments } = await req.json();
 
-  if (!content?.trim()) {
+  if (!content?.trim() && (!attachments || attachments.length === 0)) {
     return NextResponse.json({ error: "empty message" }, { status: 400 });
   }
 
@@ -38,12 +38,13 @@ export async function POST(
     return NextResponse.json({ error: "project not found" }, { status: 404 });
   }
 
-  // Save human message
+  // Save human message with attachments
   const msg = await createProjectMessage({
     projectId,
     authorType: "human",
     authorId: authorId || 1,
-    content: content.trim(),
+    content: content?.trim() || "",
+    attachments: attachments && attachments.length > 0 ? JSON.stringify(attachments) : null,
   });
 
   // Extract @mentions from content

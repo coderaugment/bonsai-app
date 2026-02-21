@@ -1029,6 +1029,25 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
+  async function handleShip() {
+    if (!ticket) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticket.id}/ship`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(`Ship failed: ${data.error || "Unknown error"}\n\nLog:\n${data.log?.join("\n") || ""}`);
+        return;
+      }
+      router.refresh();
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || !ticket) return;
@@ -1502,7 +1521,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                       src={previewUrl || `http://localhost:${3100 + (Number(projectId) % 100)}`}
                       className="flex-1 w-full border-0"
                       title="Live Preview"
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
                     />
                   </>
                 )}
@@ -1884,10 +1903,10 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                           className="relative group rounded-lg overflow-hidden cursor-pointer"
                           style={{
                             aspectRatio: '8.5 / 11',
-                            backgroundImage: 'linear-gradient(45deg, #808080 25%, transparent 25%), linear-gradient(-45deg, #808080 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #808080 75%), linear-gradient(-45deg, transparent 75%, #808080 75%)',
+                            backgroundImage: 'linear-gradient(45deg, #2a2a2a 25%, transparent 25%), linear-gradient(-45deg, #2a2a2a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #2a2a2a 75%), linear-gradient(-45deg, transparent 75%, #2a2a2a 75%)',
                             backgroundSize: '20px 20px',
                             backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
-                            backgroundColor: '#404040'
+                            backgroundColor: '#1a1a1a'
                           }}
                           onClick={() => { setLightboxImage(`${attachmentUrl}?t=${Date.now()}`); }}
                         >
@@ -2177,12 +2196,12 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
               Cancel
             </button>
             <button
-              onClick={handleSave}
-              disabled={saving || !title.trim() || !hasChanges}
+              onClick={ticket?.state === "building" ? handleShip : handleSave}
+              disabled={saving || !title.trim() || (ticket?.state === "building" ? false : !hasChanges)}
               className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors"
-              style={{ backgroundColor: "var(--accent-blue)", color: "#fff", opacity: saving || !title.trim() || !hasChanges ? 0.5 : 1 }}
+              style={{ backgroundColor: "var(--accent-blue)", color: "#fff", opacity: saving || !title.trim() || (ticket?.state === "building" ? false : !hasChanges) ? 0.5 : 1 }}
             >
-              {saving ? "Saving..." : (ticket?.state === "building" || ticket?.state === "review") ? "Accept and Ship" : "Save Changes"}
+              {saving ? "Saving..." : ticket?.state === "building" ? "Accept and Ship" : "Save Changes"}
             </button>
             {ticket?.state === "planning" && (
               <button
@@ -2326,6 +2345,16 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                                 alt={att.name}
                                 className="max-w-[200px] max-h-[150px] rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
                                 onClick={() => setLightboxImage(att.data)}
+                                style={{
+                                  backgroundColor: "#1a1a1a",
+                                  backgroundImage:
+                                    "linear-gradient(45deg, #2a2a2a 25%, transparent 25%), " +
+                                    "linear-gradient(-45deg, #2a2a2a 25%, transparent 25%), " +
+                                    "linear-gradient(45deg, transparent 75%, #2a2a2a 75%), " +
+                                    "linear-gradient(-45deg, transparent 75%, #2a2a2a 75%)",
+                                  backgroundSize: "20px 20px",
+                                  backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
+                                }}
                               />
                             ) : (
                               <div
@@ -2755,6 +2784,16 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
                                 alt={att.name}
                                 className="max-w-[200px] max-h-[150px] rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
                                 onClick={() => setLightboxImage(att.data)}
+                                style={{
+                                  backgroundColor: "#1a1a1a",
+                                  backgroundImage:
+                                    "linear-gradient(45deg, #2a2a2a 25%, transparent 25%), " +
+                                    "linear-gradient(-45deg, #2a2a2a 25%, transparent 25%), " +
+                                    "linear-gradient(45deg, transparent 75%, #2a2a2a 75%), " +
+                                    "linear-gradient(-45deg, transparent 75%, #2a2a2a 75%)",
+                                  backgroundSize: "20px 20px",
+                                  backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
+                                }}
                               />
                             ) : (
                               <div

@@ -57,9 +57,6 @@ export async function POST(
   const allChecked = !hasUnchecked;
 
   const updates: Record<string, unknown> = { acceptanceCriteria: newCriteria };
-  if (allChecked && ticket.state === "building") {
-    updates.state = "test";
-  }
 
   await updateTicket(ticketId, updates);
 
@@ -68,20 +65,9 @@ export async function POST(
     event: "criterion_checked",
     actorType: "system",
     actorName: "System",
-    detail: `Checked off acceptance criterion #${index + 1}`,
+    detail: `Checked off acceptance criterion #${index + 1}${allChecked ? " (all criteria met)" : ""}`,
     metadata: { index, allChecked },
   });
 
-  if (allChecked && ticket.state === "building") {
-    await logAuditEvent({
-      ticketId,
-      event: "state_changed",
-      actorType: "system",
-      actorName: "System",
-      detail: "All criteria met — moved to test",
-      metadata: { from: "building", to: "test" },
-    });
-  }
-
-  return NextResponse.json({ ok: true, acceptanceCriteria: newCriteria, movedToTest: allChecked && ticket.state === "building" });
+  return NextResponse.json({ ok: true, acceptanceCriteria: newCriteria, allChecked });
 }

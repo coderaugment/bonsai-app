@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { BoardView } from "@/components/board/board-view";
-import { BoardActions } from "@/components/board/board-actions";
+import { BoardContainer } from "@/components/board/board-container";
 import { getProjectBySlug } from "@/db/data/projects";
 import { getTickets } from "@/db/data/tickets";
 import { getPersonas, isTeamComplete } from "@/db/data/personas";
@@ -57,20 +56,12 @@ export default async function BoardPage({
   )];
 
   return (
-    <div className="flex flex-col h-full">
-      <BoardActions
-        project={project}
-        shippedCount={ticketStats.shipped}
-        hasCommands={!!(project.buildCommand && project.runCommand)}
-      />
-      <BoardView
-        tickets={tickets}
-        projectId={project.id}
-        personas={personas}
-        project={project}
-        ticketStats={ticketStats}
-        awakePersonaIds={awakePersonaIds}
-      />
-    </div>
+    <BoardContainer
+      project={project}
+      tickets={tickets}
+      personas={personas}
+      ticketStats={ticketStats}
+      awakePersonaIds={awakePersonaIds}
+    />
   );
 }

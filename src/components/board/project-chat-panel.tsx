@@ -56,8 +56,8 @@ export function ProjectChatPanel({
   // Poll messages while open
   usePolling(fetchMessages, open ? 10_000 : null);
 
-  async function handlePost(text: string, _attachments: CommentAttachment[]) {
-    if (!text.trim()) return;
+  async function handlePost(text: string, attachments: CommentAttachment[]) {
+    if (!text.trim() && attachments.length === 0) return;
 
     // Optimistic: add message immediately
     const optimistic: ProjectMessage = {
@@ -66,6 +66,7 @@ export function ProjectChatPanel({
       authorType: "human",
       author: { name: "You" },
       content: text.trim(),
+      attachments: attachments.length > 0 ? attachments : undefined,
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimistic]);
@@ -79,7 +80,10 @@ export function ProjectChatPanel({
     const res = await fetch(`/api/projects/${projectId}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: text.trim() }),
+      body: JSON.stringify({
+        content: text.trim(),
+        attachments: attachments.length > 0 ? attachments : undefined,
+      }),
     });
 
     if (res.ok) {
@@ -305,75 +309,95 @@ function MessageBubble({ message }: { message: ProjectMessage }) {
   }
 
   return (
-    <div className={`flex items-start gap-3 ${isHuman ? "flex-row-reverse" : ""}`}>
-      {!isHuman && (
-        <div
-          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white flex-shrink-0 overflow-hidden"
-          style={{
-            backgroundColor: message.author?.color || "var(--accent-indigo)",
-          }}
-        >
-          {message.author?.avatarUrl ? (
-            <img
-              src={message.author.avatarUrl}
-              alt={message.author?.name || "Agent"}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            (message.author?.name?.[0] || "A").toUpperCase()
-          )}
-        </div>
-      )}
+    <div className="flex items-start gap-3">
+      {/* Avatar */}
       <div
-        className={`flex flex-col gap-1 max-w-[300px] ${isHuman ? "items-end" : "items-start"}`}
+        className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white flex-shrink-0 overflow-hidden"
+        style={{
+          backgroundColor: message.author?.color || (isHuman ? "var(--accent-blue)" : "var(--accent-indigo)"),
+        }}
       >
-        {!isHuman && message.author && (
-          <div className="flex items-center gap-2">
-            <span
-              className="text-xs font-medium"
-              style={{ color: message.author.color || "var(--text-secondary)" }}
-            >
-              {message.author.name}
-            </span>
-            {message.author.role && (
-              <span
-                className="text-[10px] px-1.5 py-0.5 rounded"
-                style={{
-                  backgroundColor: "rgba(139, 92, 246, 0.15)",
-                  color: "#a78bfa",
-                }}
-              >
-                {message.author.role}
-              </span>
-            )}
-          </div>
+        {message.author?.avatarUrl ? (
+          <img
+            src={message.author.avatarUrl}
+            alt={message.author?.name || (isHuman ? "You" : "Agent")}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          (message.author?.name?.[0] || (isHuman ? "Y" : "A")).toUpperCase()
         )}
-        <div
-          className="rounded-2xl px-4 py-2.5 text-sm leading-relaxed"
-          style={
-            isHuman
-              ? {
-                  backgroundColor: "var(--accent-blue)",
-                  color: "white",
-                  borderBottomRightRadius: "4px",
-                }
-              : {
-                  backgroundColor: "var(--bg-input)",
-                  color: "var(--text-primary)",
-                  borderBottomLeftRadius: "4px",
-                }
-          }
-        >
-          <span className="whitespace-pre-wrap break-words">
-            {renderContent(message.content)}
+      </div>
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        {/* Header: name, badge, timestamp */}
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+            {message.author?.name || (isHuman ? "You" : "Agent")}
+          </span>
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+            style={{
+              backgroundColor: isHuman ? "rgba(59, 130, 246, 0.15)" : "rgba(139, 92, 246, 0.15)",
+              color: isHuman ? "#60a5fa" : "#a78bfa",
+            }}
+          >
+            {!isHuman && message.author?.role ? message.author.role : message.authorType}
+          </span>
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+            {time}
           </span>
         </div>
-        <span
-          className="text-[10px] px-1"
-          style={{ color: "var(--text-muted)" }}
-        >
-          {time}
-        </span>
+        {/* Message content - no bubble styling */}
+        {message.content && (
+          <div
+            className="text-sm leading-relaxed whitespace-pre-wrap"
+            style={{ color: "rgba(255,255,255,0.8)" }}
+          >
+            {renderContent(message.content)}
+          </div>
+        )}
+        {/* Message attachments */}
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {message.attachments.map((att, i) => {
+              const isImage = att.type?.startsWith("image/");
+              return isImage ? (
+                <img
+                  key={i}
+                  src={att.data}
+                  alt={att.name}
+                  className="max-w-[200px] max-h-[150px] rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                  style={{
+                    border: "1px solid var(--border-medium)",
+                    backgroundColor: "#1a1a1a",
+                    backgroundImage:
+                      "linear-gradient(45deg, #2a2a2a 25%, transparent 25%), " +
+                      "linear-gradient(-45deg, #2a2a2a 25%, transparent 25%), " +
+                      "linear-gradient(45deg, transparent 75%, #2a2a2a 75%), " +
+                      "linear-gradient(-45deg, transparent 75%, #2a2a2a 75%)",
+                    backgroundSize: "20px 20px",
+                    backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
+                  }}
+                />
+              ) : (
+                <div
+                  key={i}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
+                  style={{
+                    backgroundColor: "var(--bg-input)",
+                    border: "1px solid var(--border-medium)",
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                  </svg>
+                  <span>{att.name}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

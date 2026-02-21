@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getGithubToken } from "@/lib/vault";
+// GitHub token stored in settings table
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -8,7 +8,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
-  const token = await getGithubToken();
+  const token = process.env.GITHUB_TOKEN;
   if (!token) {
     return NextResponse.json({ exists: false });
   }

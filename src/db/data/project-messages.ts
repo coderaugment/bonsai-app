@@ -13,7 +13,7 @@ export function getProjectMessages(projectId: number, limit: number = 100) {
     .all()
     .reverse(); // oldest first for chat display
 
-  // Get user name from settings once for all human messages
+  // Get user name and avatar from settings once for all human messages
   const userName =
     db
       .select({ value: settings.value })
@@ -21,13 +21,20 @@ export function getProjectMessages(projectId: number, limit: number = 100) {
       .where(eq(settings.key, "user_name"))
       .get()?.value ?? "User";
 
+  const userAvatar =
+    db
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, "user_avatar_url"))
+      .get()?.value ?? undefined;
+
   const enriched = rows.map((row) => {
     let author:
       | { name: string; avatarUrl?: string; color?: string; role?: string }
       | undefined;
 
     if (row.authorType === "human") {
-      author = { name: userName };
+      author = { name: userName, avatarUrl: userAvatar };
     } else if (row.authorType === "agent" && row.personaId) {
       const persona = db
         .select()

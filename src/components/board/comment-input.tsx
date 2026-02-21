@@ -4,6 +4,7 @@ import React, { useState, useRef, useCallback } from "react";
 import type { Persona, CommentAttachment } from "@/types";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { VoiceButton } from "@/components/voice-button";
+import { capturePreviewScreenshot } from "@/lib/screenshot";
 
 type MentionItem =
   | { kind: "persona"; persona: Persona }
@@ -199,6 +200,14 @@ export function CommentInput({ personasList, placeholder, onPost, enableVoice = 
     return "FILE";
   }
 
+  async function handleScreenshot() {
+    const screenshot = await capturePreviewScreenshot();
+    if (screenshot) {
+      setAttachments((prev) => [...prev, screenshot]);
+      inputRef.current?.focus();
+    }
+  }
+
   return (
     <div className="px-6 py-4 border-t flex-shrink-0" style={{ borderColor: "var(--border-subtle)" }}>
       <div
@@ -313,7 +322,21 @@ export function CommentInput({ personasList, placeholder, onPost, enableVoice = 
             {attachments.map((att, i) => (
               <div key={i} className="relative group">
                 {isImageType(att.type) ? (
-                  <img src={att.data} alt={att.name} className="h-16 w-auto rounded-lg object-cover" />
+                  <img
+                    src={att.data}
+                    alt={att.name}
+                    className="h-16 w-auto rounded-lg object-cover"
+                    style={{
+                      backgroundColor: "#1a1a1a",
+                      backgroundImage:
+                        "linear-gradient(45deg, #2a2a2a 25%, transparent 25%), " +
+                        "linear-gradient(-45deg, #2a2a2a 25%, transparent 25%), " +
+                        "linear-gradient(45deg, transparent 75%, #2a2a2a 75%), " +
+                        "linear-gradient(-45deg, transparent 75%, #2a2a2a 75%)",
+                      backgroundSize: "20px 20px",
+                      backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
+                    }}
+                  />
                 ) : (
                   <div className="h-16 px-3 rounded-lg flex items-center gap-2" style={{ backgroundColor: "rgba(255,255,255,0.06)" }}>
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(255,255,255,0.1)", color: "var(--text-muted)" }}>
@@ -349,6 +372,18 @@ export function CommentInput({ personasList, placeholder, onPost, enableVoice = 
             Attach
           </button>
           <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} className="hidden" />
+          <button
+            onClick={handleScreenshot}
+            className="flex items-center gap-1.5 text-xs transition-colors hover:text-white"
+            style={{ color: "var(--text-muted)" }}
+            title="Screenshot live preview"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+            </svg>
+            Screenshot
+          </button>
           {enableVoice && <VoiceButton voice={voice} compact />}
           <span className="text-xs" style={{ color: "var(--text-muted)" }}>
             {posting ? "Posting..." : "Enter to send \u00b7 Shift+Enter for newline"}

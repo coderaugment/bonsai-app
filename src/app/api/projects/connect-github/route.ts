@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getProjectById, updateProject } from "@/db/data/projects";
-import { getGithubToken } from "@/lib/vault";
+// GitHub token stored in settings table
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "projectId is required" }, { status: 400 });
   }
 
-  const token = await getGithubToken();
+  const token = process.env.GITHUB_TOKEN;
   if (!token) {
     return NextResponse.json({ error: "GitHub token not configured" }, { status: 401 });
   }

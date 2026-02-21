@@ -137,6 +137,18 @@ export async function POST(
       execFileSync("git", ["worktree", "remove", worktreePath, "--force"], gitOpts(mainRepo));
       log.push("Removed worktree.");
 
+      // Commit any uncommitted changes in main repo before merging
+      try {
+        execFileSync("git", ["add", "-A"], gitOpts(mainRepo));
+        const mainStatus = execFileSync("git", ["status", "--porcelain"], gitOpts(mainRepo)).trim();
+        if (mainStatus) {
+          execFileSync("git", ["commit", "-m", `auto-commit before merging ${ticketSlug}`], gitOpts(mainRepo));
+          log.push("Committed uncommitted work in main repo.");
+        }
+      } catch {
+        log.push("No changes to commit in main repo.");
+      }
+
       // Merge branch into main
       try {
         execFileSync("git", ["merge", branchName, "--no-ff", "-m", `merge ${ticketSlug}: ${ticket.title}`], gitOpts(mainRepo));
@@ -167,6 +179,14 @@ export async function POST(
       // No worktree exists — just check if the branch exists and merge it
       log.push("No worktree found. Checking for branch.");
       try {
+        // Commit any uncommitted changes in main repo before merging
+        execFileSync("git", ["add", "-A"], gitOpts(mainRepo));
+        const mainStatus = execFileSync("git", ["status", "--porcelain"], gitOpts(mainRepo)).trim();
+        if (mainStatus) {
+          execFileSync("git", ["commit", "-m", `auto-commit before merging ${ticketSlug}`], gitOpts(mainRepo));
+          log.push("Committed uncommitted work in main repo.");
+        }
+
         execFileSync("git", ["rev-parse", "--verify", branchName], gitOpts(mainRepo));
         execFileSync("git", ["merge", branchName, "-m", `merge ${ticketSlug}: ${ticket.title}`], gitOpts(mainRepo));
         mergeCommit = execFileSync("git", ["rev-parse", "HEAD"], gitOpts(mainRepo)).trim();

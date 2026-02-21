@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { getTicketById } from "@/db/data/tickets";
 import { getProjectById } from "@/db/data/projects";
+import { getWorktreePath } from "@/lib/worktree-paths";
 import { spawn, execSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as net from "node:net";
-
-const BONSAI_DIR = path.join(process.env.HOME || "~", ".bonsai");
 
 function isPortInUse(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -34,14 +33,61 @@ export async function POST(
   const project = await getProjectById(ticket.projectId);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  // Construct worktree path (format: worktrees/tkt_ID)
-  const worktreePath = path.join(project.localPath, "worktrees", `tkt_${ticket.id}`);
+  // Get worktree path from centralized utility
+  const worktreePath = getWorktreePath(project.localPath, ticket.id);
 
+  // If worktree doesn't exist, create it now
   if (!fs.existsSync(worktreePath)) {
-    return NextResponse.json({
-      error: "Worktree not found",
-      details: `No worktree at ${worktreePath}. Agent may not have started work yet.`
-    }, { status: 404 });
+    const mainRepo = project.localPath;
+    const gitDir = path.join(mainRepo, ".git");
+
+    if (!fs.existsSync(gitDir)) {
+      return NextResponse.json({
+        error: "Not a git repository",
+        details: `${mainRepo} is not a git repository. Cannot create worktree.`
+      }, { status: 400 });
+    }
+
+    try {
+      // Create worktrees directory structure
+      fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+
+      const branchName = `ticket/${ticket.id}`;
+
+      // Check if branch exists, create if not
+      try {
+        execSync(`git rev-parse --verify ${branchName}`, { cwd: mainRepo, stdio: "ignore" });
+      } catch {
+        execSync(`git branch ${branchName}`, { cwd: mainRepo });
+      }
+
+      // Create worktree
+      execSync(`git worktree add "${worktreePath}" ${branchName}`, { cwd: mainRepo });
+
+      // Copy env files from main repo
+      for (const envFile of [".env", ".env.local", ".env.development", ".env.development.local"]) {
+        const src = path.join(mainRepo, envFile);
+        const dst = path.join(worktreePath, envFile);
+        if (fs.existsSync(src) && !fs.existsSync(dst)) {
+          fs.copyFileSync(src, dst);
+        }
+      }
+
+      // Install dependencies in the worktree
+      console.log(`[ticket-preview] Installing dependencies for ticket ${ticket.id}...`);
+      execSync("npm install", {
+        cwd: worktreePath,
+        stdio: "ignore",
+        timeout: 300000, // 5 minutes
+      });
+
+      console.log(`[ticket-preview] Created worktree for ticket ${ticket.id} at ${worktreePath}`);
+    } catch (error) {
+      return NextResponse.json({
+        error: "Failed to create worktree",
+        details: error instanceof Error ? error.message : String(error)
+      }, { status: 500 });
+    }
   }
 
   // Use ticket ID for port allocation (4000-4999 range)
@@ -64,10 +110,10 @@ export async function POST(
     }, { status: 400 });
   }
 
-  // Spawn dev server in worktree
-  const logFile = path.join(BONSAI_DIR, "sessions", `preview-ticket-${ticketId}.log`);
-  const logDir = path.dirname(logFile);
+  // Spawn dev server in worktree - store logs in project .bonsai-logs directory
+  const logDir = path.join(project.localPath, ".bonsai-logs");
   if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+  const logFile = path.join(logDir, `preview-ticket-${ticketId}.log`);
 
   const envVars = { ...process.env, PORT: String(port) };
 
@@ -91,21 +137,22 @@ export async function POST(
     }
   }
 
+  // Run command must be set in project settings
+  if (!project.runCommand) {
+    return NextResponse.json({
+      error: "No run command configured",
+      details: "Project must have runCommand set in database settings"
+    }, { status: 400 });
+  }
+
   const out = fs.openSync(logFile, "a");
   const err = fs.openSync(logFile, "a");
 
-  // Parse run command or fall back to default
-  let cmd: string;
-  let args: string[];
-  if (project.runCommand) {
-    const expanded = project.runCommand.replace(/\{\{PORT\}\}/g, String(port));
-    const parts = expanded.split(/\s+/);
-    cmd = parts[0];
-    args = parts.slice(1).concat(["--port", String(port)]);
-  } else {
-    cmd = "npm";
-    args = ["run", "dev", "--", "--port", String(port)];
-  }
+  // Use project's run command with PORT substitution
+  const expanded = project.runCommand.replace(/\{\{PORT\}\}/g, String(port));
+  const parts = expanded.split(/\s+/);
+  const cmd = parts[0];
+  const args = parts.slice(1);
 
   const child = spawn(cmd, args, {
     cwd: worktreePath,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createProject } from "@/db/data/projects";
-import { getGithubToken } from "@/lib/vault";
+// GitHub token stored in settings table
 import path from "node:path";
 
 const HOME = process.env.HOME || "~";
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   }
 
   const slug = name.trim().toLowerCase().replace(/\s+/g, "-");
-  const token = await getGithubToken();
+  const token = process.env.GITHUB_TOKEN;
 
   if (!token) {
     return NextResponse.json(

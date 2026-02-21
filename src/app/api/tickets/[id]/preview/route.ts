@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTicketById } from "@/db/data/tickets";
 import { getProjectById } from "@/db/data/projects";
+import { getWorktreePath } from "@/lib/worktree-paths";
 
 export async function GET(
   request: NextRequest,
@@ -71,9 +72,8 @@ export async function GET(
       headers,
     });
   } catch (error) {
-    // Construct the path to the ticket's worktree for error message
-    const ticketSlug = `${ticket.id}-${ticket.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
-    const worktreePath = `${project.localPath}/.bonsai-worktrees/${ticketSlug}`;
+    // Get worktree path for error message
+    const worktreePath = getWorktreePath(project.localPath, ticket.id);
 
     // Only return HTML error page for HTML requests (not for assets)
     const accept = request.headers.get("Accept") || "";

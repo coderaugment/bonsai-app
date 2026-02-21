@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getProjects, createProject, updateProject, softDeleteProject } from "@/db/data/projects";
-import { getGithubToken } from "@/lib/vault";
+// GitHub token stored in settings table
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
   }
 
   const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const token = await getGithubToken();
+  const token = process.env.GITHUB_TOKEN;
 
   let githubOwner: string | undefined;
   let githubRepo: string | undefined;
@@ -172,7 +172,7 @@ export async function DELETE(req: Request) {
 
   // Delete GitHub repo if it exists
   if (project?.githubOwner && project?.githubRepo) {
-    const token = await getGithubToken();
+    const token = process.env.GITHUB_TOKEN;
     if (token) {
       try {
         const res = await githubFetch(

@@ -11,9 +11,11 @@ interface BoardHeaderProps {
   allProjects: Project[];
   shippedCount: number;
   hasCommands: boolean;
+  previewMode: boolean;
+  onPreviewToggle: (url: string | null) => void;
 }
 
-export function BoardHeader({ project, allProjects, shippedCount, hasCommands }: BoardHeaderProps) {
+export function BoardHeader({ project, allProjects, shippedCount, hasCommands, previewMode, onPreviewToggle }: BoardHeaderProps) {
   const router = useRouter();
   const [previewing, setPreviewing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -22,6 +24,12 @@ export function BoardHeader({ project, allProjects, shippedCount, hasCommands }:
   const previewEnabled = shippedCount >= 1 && hasCommands;
 
   async function handlePreview() {
+    // If already in preview mode, toggle it off
+    if (previewMode) {
+      onPreviewToggle(null);
+      return;
+    }
+
     if (!previewEnabled) {
       setSettingsNotice("Configure build and run commands in project settings to enable preview.");
       setSettingsOpen(true);
@@ -45,7 +53,7 @@ export function BoardHeader({ project, allProjects, shippedCount, hasCommands }:
       if (!data.alreadyRunning) {
         await new Promise((r) => setTimeout(r, 2000));
       }
-      window.open(data.url, "_blank");
+      onPreviewToggle(data.url);
     } catch (err) {
       console.error("[preview]", err);
     } finally {
@@ -74,17 +82,17 @@ export function BoardHeader({ project, allProjects, shippedCount, hasCommands }:
             disabled={previewing}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
             style={{
-              backgroundColor: "var(--bg-input)",
-              border: "1px solid var(--border-medium)",
-              color: "var(--text-secondary)",
-              opacity: previewEnabled && !previewing ? 1 : 0.4,
-              cursor: previewing ? "wait" : previewEnabled ? "pointer" : "not-allowed",
+              backgroundColor: previewMode ? "rgba(91, 141, 249, 0.1)" : "var(--bg-input)",
+              border: previewMode ? "1px solid var(--accent-blue)" : "1px solid var(--border-medium)",
+              color: previewMode ? "var(--accent-blue)" : "var(--text-secondary)",
+              opacity: (previewEnabled && !previewing) || previewMode ? 1 : 0.4,
+              cursor: previewing ? "wait" : (previewEnabled || previewMode) ? "pointer" : "not-allowed",
             }}
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z" />
             </svg>
-            {previewing ? "Starting..." : "Preview"}
+            {previewing ? "Starting..." : previewMode ? "Close Preview" : "Preview"}
           </button>
 
           <button

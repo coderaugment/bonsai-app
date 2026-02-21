@@ -29,13 +29,14 @@ export async function POST(
   const project = await getProjectById(Number(id));
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  const workspace = project.localPath;
+  // Main repo is at localPath/repo (not localPath itself)
+  const workspace = project.localPath ? path.join(project.localPath, "repo") : null;
   if (!workspace || !fs.existsSync(workspace)) {
     return NextResponse.json({ error: "Project local path not found" }, { status: 404 });
   }
 
-  // Derive a stable port from project ID (3100–3199 range)
-  const port = 3100 + (project.id % 100);
+  // Derive a stable port from project ID (3300–3399 range, below ticket ports 4000+)
+  const port = 3300 + (project.id % 100);
 
   // Use the requesting host so URLs work from LAN devices
   const reqHost = new URL(req.url).hostname;
@@ -45,6 +46,17 @@ export async function POST(
   const inUse = await isPortInUse(port);
   if (inUse) {
     return NextResponse.json({ url: `http://${host}:${port}`, alreadyRunning: true });
+  }
+
+  // Clean up stale Next.js lock file if port isn't in use
+  const lockFile = path.join(workspace, ".next", "dev", "lock");
+  if (fs.existsSync(lockFile)) {
+    try {
+      fs.unlinkSync(lockFile);
+      console.log(`[preview] Cleaned up stale lock file for project ${id}`);
+    } catch (err) {
+      console.error(`[preview] Failed to remove lock file:`, err);
+    }
   }
 
   // Ensure package.json exists
