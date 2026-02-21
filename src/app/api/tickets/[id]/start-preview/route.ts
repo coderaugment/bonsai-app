@@ -73,15 +73,9 @@ export async function POST(
         }
       }
 
-      // Symlink dependencies from monorepo so worktree is self-contained
-      // node_modules: avoids native module rebuild issues and is much faster
-      // agent: needed for heartbeat-dispatch.ts imports (../../agent/src/roles/)
-
+      // Symlink node_modules from main repo to avoid native module rebuild issues
       const mainNodeModules = path.join(mainRepo, "node_modules");
       const worktreeNodeModules = path.join(worktreePath, "node_modules");
-      const monorepoRoot = path.resolve(mainRepo, "../..");
-      const agentDir = path.join(monorepoRoot, "agent");
-      const worktreeAgentLink = path.join(worktreePath, "..", "..", "agent");
 
       if (fs.existsSync(mainNodeModules)) {
         console.log(`[ticket-preview] Symlinking node_modules for ticket ${ticket.id}...`);
@@ -97,21 +91,16 @@ export async function POST(
         console.warn(`[ticket-preview] Warning: node_modules not found at ${mainNodeModules}`);
       }
 
-      // Symlink agent directory so ../../agent/src imports work from worktree
-      if (fs.existsSync(agentDir)) {
-        console.log(`[ticket-preview] Symlinking agent directory for ticket ${ticket.id}...`);
-        // Create parent dirs if needed
-        fs.mkdirSync(path.dirname(worktreeAgentLink), { recursive: true });
-        if (fs.existsSync(worktreeAgentLink)) {
-          if (!fs.lstatSync(worktreeAgentLink).isSymbolicLink()) {
-            fs.rmSync(worktreeAgentLink, { recursive: true, force: true });
-          } else {
-            fs.unlinkSync(worktreeAgentLink);
-          }
-        }
-        fs.symlinkSync(agentDir, worktreeAgentLink, "dir");
-      } else {
-        console.warn(`[ticket-preview] Warning: agent directory not found at ${agentDir}`);
+      // SPECIAL CASE: Bonsai dogfooding itself
+      // If this project has ../../agent (monorepo structure), symlink it for worktree access
+      const monorepoRoot = path.resolve(mainRepo, "../..");
+      const agentDir = path.join(monorepoRoot, "agent");
+      const agentLinkInMain = path.join(mainRepo, "agent");
+
+      if (fs.existsSync(agentDir) && !fs.existsSync(agentLinkInMain)) {
+        // Only create symlink if agent dir exists in monorepo and link doesn't already exist
+        console.log(`[ticket-preview] Symlinking agent directory for monorepo project ${ticket.id}...`);
+        fs.symlinkSync("../../agent", agentLinkInMain, "dir");
       }
 
       console.log(`[ticket-preview] Created worktree for ticket ${ticket.id} at ${worktreePath}`);
