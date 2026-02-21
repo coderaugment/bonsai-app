@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import type { Role, Persona, ClaudeSkillDefinition } from "@/types";
 import { ConfirmDelete } from "@/components/ui/confirm-delete";
@@ -67,6 +67,7 @@ type Tab = "workers" | "roles" | "edit-worker";
 
 export function TeamView({ projectSlug }: { projectSlug: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<Tab>("workers");
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -150,6 +151,20 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Auto-open edit modal when edit query param is present
+  useEffect(() => {
+    const editPersonaId = searchParams.get("edit");
+    if (editPersonaId && personas.length > 0) {
+      const persona = personas.find((p) => p.id === editPersonaId);
+      if (persona) {
+        startEditWorker(persona);
+        // Clear the query param
+        router.replace(`/p/${projectSlug}/team`, { scroll: false });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, personas]);
 
   function handleSelectRoleForCreate(role: Role) {
     setEditingPersona({ id: "", name: "", slug: "", color: role.color, role: role.slug, roleId: role.id } as Persona);
@@ -249,13 +264,15 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
     setGenerating(true);
     setGeneratingPhase("text");
     try {
+      // Don't pass name or gender to force regeneration
       const genRes = await fetch("/api/generate-worker", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: roleSlug, name: name.trim() || undefined, gender, existingNames: personas.map((p) => p.name) }),
+        body: JSON.stringify({ role: roleSlug, existingNames: personas.map((p) => p.name) }),
       });
       const genData = await genRes.json();
       if (genData.name) setName(genData.name);
+      if (genData.gender) setGender(genData.gender);
       if (genData.appearance) setAppearance(genData.appearance);
       if (genData.style) setCommStyle(genData.style);
 
@@ -1070,47 +1087,36 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
               </div>
 
               <div className="flex-1 overflow-y-auto p-8">
-                <div className="flex gap-8 max-w-2xl">
+                <div className="flex gap-6">
                   {/* Avatar */}
-                  <div className="flex flex-col items-center gap-4">
+                  <div className="flex flex-col items-center gap-4 flex-shrink-0">
                     <div className="relative">
                       {avatarUrl ? (
-                        <img src={avatarUrl} alt={name} className="w-32 h-32 rounded-full object-cover border-2" style={{ borderColor: editAccent, opacity: generatingPhase === "avatar" ? 0.4 : 1, transition: "opacity 0.2s" }} />
+                        <img src={avatarUrl} alt={name} className="w-96 h-96 rounded-full object-cover border-4" style={{ borderColor: editAccent, backgroundColor: editAccent, opacity: generatingPhase === "avatar" ? 0.4 : 1, transition: "opacity 0.2s" }} />
                       ) : (
-                        <div className="w-32 h-32 rounded-full flex items-center justify-center text-4xl font-bold text-white" style={{ backgroundColor: editAccent }}>{editInitial}</div>
+                        <div className="w-96 h-96 rounded-full flex items-center justify-center text-9xl font-bold text-white" style={{ backgroundColor: editAccent }}>{editInitial}</div>
                       )}
                       {generatingPhase === "avatar" && (
                         <div className="absolute inset-0 flex items-center justify-center">
-                          <svg className="w-8 h-8 animate-spin text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                          <svg className="w-24 h-24 animate-spin text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
                         </div>
                       )}
-                      {avatarUrl && !generating && (
-                        <button onClick={() => setAvatarUrl(null)} className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center hover:bg-red-600">&times;</button>
-                      )}
                     </div>
-                    <div className="flex gap-2">
-                      <button onClick={rerollAvatar} disabled={!!rerolling || generating} className="p-2 rounded-lg border border-[var(--border-medium)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-white/5 disabled:opacity-40" title="Reroll avatar">
-                        <svg className={`w-4 h-4 ${rerolling === "avatar" ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" /></svg>
-                      </button>
-                      <button onClick={handleRegenerateForEdit} disabled={generating || !!rerolling} className="flex-1 px-3 py-2 rounded-lg text-xs font-medium border border-[var(--border-medium)] text-[var(--text-secondary)] hover:bg-white/5 disabled:opacity-40 flex items-center justify-center gap-1.5">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
-                        {generatingPhase === "text" ? "Profile..." : generatingPhase === "avatar" ? "Avatar..." : "Regen All"}
-                      </button>
-                    </div>
+                    {/* Avatar regen button only */}
+                    <button onClick={rerollAvatar} disabled={!!rerolling || generating} className="p-2 rounded-lg border border-[var(--border-medium)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-white/5 disabled:opacity-40" title="Reroll avatar">
+                      <svg className={`w-4 h-4 ${rerolling === "avatar" ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" /></svg>
+                    </button>
                   </div>
 
                   {/* Form */}
-                  <div className="flex-1 space-y-4">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <label className="text-xs font-medium text-[var(--text-muted)]">Name</label>
-                        <button onClick={rerollIdentity} disabled={rerolling === "name"} className="p-0.5 rounded hover:bg-white/10 text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-40" title="Reroll name">
-                          <svg className={`w-3.5 h-3.5 ${rerolling === "name" ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" /></svg>
-                        </button>
-                      </div>
-                      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Maya, Atlas, Nova..." className="w-full px-4 py-3 rounded-lg text-sm bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent-blue)]" />
-                    </div>
+                  <div className="flex-1 min-w-0 space-y-4">
+                    {/* Regen All button */}
+                    <button onClick={handleRegenerateForEdit} disabled={generating || !!rerolling} className="w-full px-4 py-2.5 rounded-lg text-sm font-medium border border-[var(--border-medium)] text-[var(--text-secondary)] hover:bg-white/5 disabled:opacity-40 flex items-center justify-center gap-2">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
+                      {generatingPhase === "text" ? "Generating Profile..." : generatingPhase === "avatar" ? "Generating Avatar..." : "Regen All"}
+                    </button>
 
+                    {/* Gender first */}
                     <div>
                       <label className="text-xs font-medium text-[var(--text-muted)] mb-1.5 block">Gender</label>
                       <div className="flex gap-2">
@@ -1123,6 +1129,17 @@ export function TeamView({ projectSlug }: { projectSlug: string }) {
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
                         </button>
                       </div>
+                    </div>
+
+                    {/* Then name */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <label className="text-xs font-medium text-[var(--text-muted)]">Name</label>
+                        <button onClick={rerollIdentity} disabled={rerolling === "name"} className="p-0.5 rounded hover:bg-white/10 text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-40" title="Reroll name">
+                          <svg className={`w-3.5 h-3.5 ${rerolling === "name" ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" /></svg>
+                        </button>
+                      </div>
+                      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Maya, Atlas, Nova..." className="w-full px-4 py-3 rounded-lg text-sm bg-[var(--bg-input)] border border-[var(--border-medium)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent-blue)]" />
                     </div>
 
                     <div>
