@@ -685,6 +685,7 @@ export default function TeamPage() {
                     position: "relative",
                     isolation: "isolate",
                     boxShadow: `0 0 40px ${styleAccent}30, 0 0 80px ${styleAccent}15`,
+                    backgroundColor: "var(--bg-primary)",
                   }}
                 >
                   {previewAvatar ? (
@@ -1273,7 +1274,7 @@ export default function TeamPage() {
 
       {/* ── Main Content: Pedestal + Traits Panel ── */}
       <div className="flex-1 overflow-y-auto" style={{ padding: "24px 40px 0" }}>
-        <div className="flex gap-10" style={{ maxWidth: 820, margin: "0 auto" }}>
+        <div className="flex gap-10" style={{ maxWidth: 1400, margin: "0 auto" }}>
 
           {/* ── Left Column: Character Pedestal ── */}
           <div className="flex flex-col items-center" style={{ width: 280, flexShrink: 0 }}>
@@ -1288,6 +1289,7 @@ export default function TeamPage() {
                   overflow: "hidden",
                   position: "relative" as const,
                   boxShadow: `0 0 40px ${accent}40, 0 0 80px ${accent}20`,
+                  backgroundColor: "var(--bg-primary)",
                 }}
               >
                 {avatarUrl ? (

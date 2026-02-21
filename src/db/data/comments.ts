@@ -38,7 +38,7 @@ export function getCommentsByTicketOrDocument(
 export function enrichComments(
   rows: (typeof comments.$inferSelect)[]
 ) {
-  // Get user name from settings once for all human comments
+  // Get user name and avatar from settings once for all human comments
   const userName =
     db
       .select({ value: settings.value })
@@ -46,13 +46,20 @@ export function enrichComments(
       .where(eq(settings.key, "user_name"))
       .get()?.value ?? "User";
 
+  const userAvatar =
+    db
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, "user_avatar_url"))
+      .get()?.value;
+
   const enriched = rows.map((row) => {
     let author:
       | { name: string; avatarUrl?: string; color?: string; role?: string }
       | undefined;
 
     if (row.authorType === "human") {
-      author = { name: userName };
+      author = { name: userName, avatarUrl: userAvatar || undefined };
     } else if (row.authorType === "agent" && row.personaId) {
       const persona = db
         .select()

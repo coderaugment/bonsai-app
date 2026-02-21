@@ -3,14 +3,14 @@ import type { Project, Persona } from "@/types";
 interface ProjectInfoPanelProps {
   project: Project;
   personas: Persona[];
-  ticketStats: { planning: number; building: number; test: number; shipped: number };
+  ticketStats: { planning: number; building: number; review: number; shipped: number };
   awakePersonaIds?: Set<string>;
   onPersonaClick?: (personaId: string) => void;
   onChatOpen?: () => void;
 }
 
 export function ProjectInfoPanel({ project, personas, ticketStats, awakePersonaIds = new Set(), onPersonaClick, onChatOpen }: ProjectInfoPanelProps) {
-  const total = ticketStats.planning + ticketStats.building + ticketStats.test + ticketStats.shipped;
+  const total = ticketStats.planning + ticketStats.building + ticketStats.review + ticketStats.shipped;
 
   return (
     <div

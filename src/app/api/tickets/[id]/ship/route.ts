@@ -205,10 +205,18 @@ export async function POST(
       log.push("Could not push to origin (may need manual push).");
     }
 
-    // Update ticket DB
-    await updateTicket(ticketId, { state: "shipped", mergedAt: new Date().toISOString(), mergeCommit });
+    // Update ticket DB - mark as shipped, approve all artifacts, clear agent activity
+    const now = new Date().toISOString();
+    await updateTicket(ticketId, {
+      state: "shipped",
+      mergedAt: now,
+      mergeCommit,
+      researchApprovedAt: ticket.researchApprovedAt || now,
+      planApprovedAt: ticket.planApprovedAt || now,
+      lastAgentActivity: null, // Clear agent activity for shipped tickets
+    });
 
-    log.push("Ticket state set to shipped.");
+    log.push("Ticket state set to shipped (all artifacts approved).");
 
     await logAuditEvent({
       ticketId,

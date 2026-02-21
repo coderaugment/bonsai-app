@@ -29,8 +29,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "ticketId and content or attachments required" }, { status: 400 });
   }
 
-  // Get user name from settings
+  // Get user name and avatar from settings
   const userName = await getSetting("user_name");
+  const userAvatar = await getSetting("user_avatar_url");
 
   const comment = await createCommentAndBumpCount({
     ticketId,
@@ -57,7 +58,7 @@ export async function POST(req: Request) {
       id: comment.id,
       ticketId: comment.ticketId,
       authorType: comment.authorType,
-      author: userName ? { name: userName } : undefined,
+      author: userName ? { name: userName, avatarUrl: userAvatar || undefined } : undefined,
       content: comment.content,
       attachments,
       documentId: comment.documentId ?? undefined,

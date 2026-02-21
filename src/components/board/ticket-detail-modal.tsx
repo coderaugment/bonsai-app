@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import { formatTicketSlug } from "@/types";
 import type { Ticket, TicketType, TicketState, Comment, CommentAttachment, TicketDocument, TicketAttachment, Persona } from "@/types";
 import { ticketTypes } from "@/lib/ticket-types";
+import { formatRelativeTime } from "@/lib/time-format";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { VoiceButton } from "@/components/voice-button";
 import { CommentInput } from "@/components/board/comment-input";
@@ -139,6 +140,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   // Comments state
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
+  const [, setTimestampTick] = useState(0); // Force re-render for timestamp updates
 
   // Personas list (for @mention autocomplete in CommentInput)
   const [personasList, setPersonasList] = useState<Persona[]>([]);
@@ -167,12 +169,20 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [iframeKey, setIframeKey] = useState(0); // Force iframe refresh
 
-  // Reset viewMode to info when ticket leaves preview-allowed states
+  // Reset viewMode to info and stop preview when ticket state changes
+  const prevStateRef = useRef<TicketState | null>(null);
   useEffect(() => {
-    if (ticket && ticket.state === "planning") {
-      setViewMode("info");
+    if (ticket) {
+      // If state changed and we're in preview mode, switch back to info
+      if (prevStateRef.current !== null && prevStateRef.current !== ticket.state && viewMode === "preview") {
+        setViewMode("info");
+        setPreviewUrl(null);
+        setStartingPreview(false);
+        setPreviewError(null);
+      }
+      prevStateRef.current = ticket.state;
     }
-  }, [ticket?.state]);
+  }, [ticket?.state, viewMode]);
 
   // Start preview server when switching to preview mode (in ticket's worktree)
   useEffect(() => {
@@ -359,6 +369,14 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }, 10_000);
     return () => clearInterval(poll);
   }, [ticketId]);
+
+  // Update timestamps every 30 seconds to keep relative times accurate
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimestampTick((prev) => prev + 1);
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Poll documents every 10s while modal is open
   useEffect(() => {
@@ -827,7 +845,7 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
       clearTimeout(dispatchTimerRef.current);
     }
 
-    dispatchTimerRef.current = setTimeout(async () => {
+    const doDispatch = async () => {
       const batch = pendingDispatchContent.current.splice(0);
       if (batch.length === 0) return;
       const combined = batch.join("\n\n---\n\n");
@@ -864,7 +882,14 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
       } catch {
         // dispatch failed silently
       }
-    }, 3000); // 3s debounce — wait for rapid-fire comments to settle
+    };
+
+    // For @mentions, dispatch immediately. For unmentioned comments, use 1s debounce.
+    const mention = extractMentionedPersona(commentContent);
+    const hasMention = mention.name || mention.role || mention.team;
+    const delay = hasMention ? 0 : 1000; // 0ms for mentions, 1s for unmentioned
+
+    dispatchTimerRef.current = setTimeout(doDispatch, delay);
   }
 
   async function handleCommentPost(text: string, attachments: CommentAttachment[]) {
@@ -1235,20 +1260,8 @@ export function TicketDetailModal({ ticket, initialDocType, projectId, onClose, 
     }
   }
 
-  function formatTime(dateStr: string) {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const mins = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    if (days < 7) return `${days}d ago`;
-    return date.toLocaleDateString();
-  }
+  // Use centralized time formatting
+  const formatTime = formatRelativeTime;
 
   if (!ticket || !mounted) return null;
 

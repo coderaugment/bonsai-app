@@ -189,10 +189,18 @@ function spawnAgent(
 
   // Create symlink in worktree so agents can run ./bonsai-cli from their cwd
   const bonsaiCliSymlink = path.join(cwd, "bonsai-cli");
-  if (fs.existsSync(bonsaiCliSymlink)) {
-    fs.unlinkSync(bonsaiCliSymlink); // Remove old symlink if exists
+  try {
+    if (fs.existsSync(bonsaiCliSymlink)) {
+      const stats = fs.lstatSync(bonsaiCliSymlink);
+      if (stats.isSymbolicLink() || stats.isFile()) {
+        fs.unlinkSync(bonsaiCliSymlink);
+      }
+    }
+    fs.symlinkSync(bonsaiCliWrapper, bonsaiCliSymlink);
+  } catch (err: any) {
+    // If symlink already exists and unlink failed, try to continue
+    if (err.code !== 'EEXIST') throw err;
   }
-  fs.symlinkSync(bonsaiCliWrapper, bonsaiCliSymlink);
 
   // Build --add-dir flags for skill discovery
   const addDirFlags: string[] = [];

@@ -25,9 +25,12 @@ function isAgentActive(lastAgentActivity?: string): boolean {
 type DocStatus = "none" | "pending" | "approved";
 
 function getDocStatus(completedAt?: string, approvedAt?: string): DocStatus {
-  if (!completedAt) return "none";
-  if (!approvedAt) return "pending";
-  return "approved";
+  // If approved, show as approved (regardless of completedAt)
+  if (approvedAt) return "approved";
+  // If completed but not approved, show as pending
+  if (completedAt) return "pending";
+  // If neither completed nor approved, show as none
+  return "none";
 }
 
 const statusColors = {
@@ -45,7 +48,8 @@ export function TicketCard({ ticket, onDragStart, onDragEnd, onEdit, onViewDocum
   const researchStatus = getDocStatus(ticket.researchCompletedAt, ticket.researchApprovedAt);
   const planStatus = getDocStatus(ticket.planCompletedAt, ticket.planApprovedAt);
 
-  const agentActive = isAgentActive(ticket.lastAgentActivity);
+  // Shipped tickets never show as "working"
+  const agentActive = ticket.state !== "shipped" && isAgentActive(ticket.lastAgentActivity);
   // Use running agent_runs for accurate working status (not just assigneeId)
   const activeRunIds = new Set(ticket.activeRunPersonaIds ?? []);
   // Fallback to assignee if no active runs tracked yet (e.g. first 15s after dispatch)

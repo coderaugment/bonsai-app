@@ -114,7 +114,9 @@ export async function POST(req: Request) {
   }
 
   const config = workerRoles[role as WorkerRole] || { label: role.replace(/_/g, " ") };
-  const g = gender || "male";
+  // If no gender provided, randomly select one
+  const genders: ("male" | "female" | "non-binary")[] = ["male", "female", "non-binary"];
+  const g = gender || genders[Math.floor(Math.random() * genders.length)];
 
   const rerollField = field || "all";
   let prompt: string;
@@ -144,6 +146,9 @@ Return ONLY valid JSON:
     const result: Record<string, unknown> = { success: true };
     if (parsed.appearance) result.appearance = parsed.appearance;
     if (parsed.name) result.name = parsed.name;
+
+    // Always return the gender that was used (either provided or randomly selected)
+    result.gender = g;
 
     // Backwards compat: personality field
     if (parsed.appearance) {

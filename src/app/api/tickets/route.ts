@@ -35,9 +35,14 @@ export async function PATCH(req: Request) {
     updates.researchApprovedAt = now;
   }
 
-  // When dragged to "building", mark plan as approved (manual move = human approval)
-  if (state === "building" && !prevTicket?.planApprovedAt) {
-    updates.planApprovedAt = now;
+  // When dragged to "building", mark both research and plan as approved (manual move = human approval)
+  if (state === "building") {
+    if (!prevTicket?.researchApprovedAt) {
+      updates.researchApprovedAt = now;
+    }
+    if (!prevTicket?.planApprovedAt) {
+      updates.planApprovedAt = now;
+    }
   }
 
   await updateTicket(numTicketId, updates);

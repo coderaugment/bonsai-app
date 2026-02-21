@@ -235,8 +235,8 @@ export function BoardView({
   }
 
   function handlePersonaClick(personaId: string) {
-    setChatMentionPersonaId(personaId);
-    setChatOpen(true);
+    // Navigate to team view to edit persona
+    router.push(`/p/${project?.slug}/team?edit=${personaId}`);
   }
 
   return (

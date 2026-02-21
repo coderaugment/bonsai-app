@@ -2,11 +2,41 @@ import { NextResponse } from "next/server";
 import { getSetting } from "@/db/data/settings";
 import { geminiRequest, GeminiKeyError } from "@/lib/gemini";
 import { appendFileSync } from "fs";
+import sharp from "sharp";
 
 const TELEMETRY_LOG = "/tmp/avatar-telemetry.jsonl";
 const MODEL = "gemini-2.5-flash-image";
 
 const IMAGE_OUTPUT_TOKENS = 1290;
+
+// Apply circular mask to avatar image
+async function applyCircularMask(base64Image: string): Promise<string> {
+  // Decode base64 to buffer
+  const imageBuffer = Buffer.from(base64Image, "base64");
+
+  // Get image dimensions
+  const metadata = await sharp(imageBuffer).metadata();
+  const size = Math.min(metadata.width || 512, metadata.height || 512);
+
+  // Create circular mask SVG
+  const circleMask = Buffer.from(
+    `<svg width="${size}" height="${size}">
+      <circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="white"/>
+    </svg>`
+  );
+
+  // Apply mask and resize to ensure it's square
+  const maskedBuffer = await sharp(imageBuffer)
+    .resize(size, size, { fit: "cover", position: "center" })
+    .composite([{
+      input: circleMask,
+      blend: "dest-in"
+    }])
+    .png()
+    .toBuffer();
+
+  return maskedBuffer.toString("base64");
+}
 const INPUT_COST_PER_TOKEN = 0.30 / 1_000_000;
 const OUTPUT_COST_PER_TOKEN = 30.0 / 1_000_000;
 const IMAGE_OUTPUT_COST = IMAGE_OUTPUT_TOKENS * OUTPUT_COST_PER_TOKEN;
@@ -75,7 +105,11 @@ export async function POST(req: Request) {
       for (const part of parts) {
         if (part.inlineData) {
           const { mimeType, data: b64 } = part.inlineData;
-          const dataUrl = `data:${mimeType};base64,${b64}`;
+
+          // Apply circular mask to prevent white corners
+          const maskedB64 = await applyCircularMask(b64);
+          const dataUrl = `data:image/png;base64,${maskedB64}`;
+
           const logLine = { ts: new Date().toISOString(), model: MODEL, status: "ok", elapsedMs: elapsed, mimeType, sizeKB: Math.round(b64.length / 1024), inputTokens, outputTokens, costUSD: +totalCost.toFixed(4), role, name };
           console.log(`[avatar] ${logLine.ts} | model=${MODEL} | OK | ${elapsed}ms | ${mimeType} | ${logLine.sizeKB}KB | in=${inputTokens} out=${outputTokens} | cost=$${totalCost.toFixed(4)}`);
           try { appendFileSync(TELEMETRY_LOG, JSON.stringify(logLine) + "\n"); } catch {}
