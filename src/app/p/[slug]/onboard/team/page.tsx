@@ -95,14 +95,13 @@ export default function TeamPage() {
       // ONLY ENABLE: researcher, developer
       const enabledRoleSlugs = ["researcher", "developer"];
       const filledRoleIds = new Set(allPersonas.map((p) => p.roleId).filter(Boolean));
-      const unfilled = allRoles
-        .filter((r) => enabledRoleSlugs.includes(r.slug))
-        .filter((r) => !filledRoleIds.has(r.id));
+      const enabledRoles = allRoles.filter((r) => enabledRoleSlugs.includes(r.slug));
+      const unfilled = enabledRoles.filter((r) => !filledRoleIds.has(r.id));
       setUnfilledRoles(unfilled);
 
-      // Only skip step 0 if style is set AND some personas already exist
-      // (meaning art direction was already completed for a previous project/session)
-      if (styleSet && unfilled.length < allRoles.length) {
+      // Only skip step 0 if style is set AND some personas already exist for this project
+      // (meaning art direction was already completed for this project specifically)
+      if (styleSet && unfilled.length < enabledRoles.length) {
         setStep(1);
       } else {
         // Auto-generate a preview on first load
