@@ -216,8 +216,25 @@ export function BoardView({
     }
 
     // Optimistic update
+    const now = new Date().toISOString();
     setTickets((prev) =>
-      prev.map((t) => (t.id === draggingId ? { ...t, state: targetState } : t))
+      prev.map((t) => {
+        if (t.id !== draggingId) return t;
+        const updates: Partial<typeof t> = { state: targetState };
+
+        // When moving to planning, approve research
+        if (targetState === "planning" && !t.researchApprovedAt) {
+          updates.researchApprovedAt = now;
+        }
+
+        // When moving to building, approve both research and plan
+        if (targetState === "building") {
+          if (!t.researchApprovedAt) updates.researchApprovedAt = now;
+          if (!t.planApprovedAt) updates.planApprovedAt = now;
+        }
+
+        return { ...t, ...updates };
+      })
     );
     setDraggingId(null);
 
@@ -263,6 +280,7 @@ export function BoardView({
               loading={startingPreview}
               error={previewError}
               onClose={onPreviewClose}
+              ticketId={searchParams.get("ticket") ? Number(searchParams.get("ticket")) : undefined}
             />
           </div>
         ) : (

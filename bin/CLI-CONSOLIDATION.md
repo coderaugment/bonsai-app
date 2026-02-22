@@ -21,7 +21,7 @@ Each script was a mini HTTP client duplicating logic.
 
 **One unified CLI** with simple bash wrappers:
 ```bash
-bin/bonsai-cli.ts          # 554 lines - unified CLI with all commands
+cli/bonsai-cli.ts          # 554 lines - unified CLI with all commands
 
 ~/.bonsai/sessions/tkt_106-agent-1234-p8/
 ├── bonsai-cli             # 4-line wrapper (makes CLI available)
@@ -138,7 +138,7 @@ BONSAI_API_BASE=http://...  # API endpoint (default: localhost:3080)
 
 ## Files Modified
 
-1. `bin/bonsai-cli.ts` - Added report, check-criteria, credit-status commands
+1. `cli/bonsai-cli.ts` - Added report, check-criteria, credit-status commands
 2. `bin/bonsai-cli.test.ts` - Comprehensive test suite (37 tests)
 3. `src/app/api/tickets/[id]/dispatch/route.ts` - Generate CLI wrappers instead of full scripts
 4. `vitest.config.ts` - Test configuration

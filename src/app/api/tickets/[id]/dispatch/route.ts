@@ -22,7 +22,7 @@ const CLAUDE_CLI = path.join(HOME, ".local", "bin", "claude");
 const MODEL = "opus";
 const BONSAI_DIR = path.join(HOME, ".bonsai");
 const API_BASE = process.env.API_BASE || "http://localhost:3080";
-const BONSAI_CLI = path.join(process.cwd(), "bin", "bonsai-cli.ts");
+const BONSAI_CLI = path.join(process.cwd(), "..", "cli", "bonsai-cli.ts");
 
 const TOOLS_READONLY = ["Read", "Grep", "Glob", "Bash"];
 const TOOLS_FULL = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"];
@@ -169,20 +169,22 @@ function spawnAgent(
 
   // credit-status.sh - check if API credits are paused
   const creditStatusScript = path.join(sessionDir, "credit-status.sh");
+  const webappDir = path.join(process.cwd()); // webapp root
   fs.writeFileSync(creditStatusScript, [
     `#!/bin/bash`,
-    `BONSAI_API_BASE="${API_BASE}" \\`,
+    `cd ${shellEscape(webappDir)} && \\`,
+    `BONSAI_API_BASE="${API_BASE}" NODE_PATH=./node_modules \\`,
     `npx tsx ${BONSAI_CLI} credit-status`,
   ].join("\n"));
   fs.chmodSync(creditStatusScript, 0o755);
 
   // bonsai-cli wrapper - makes CLI available as "bonsai-cli" command
   const bonsaiCliWrapper = path.join(sessionDir, "bonsai-cli");
-  const webappDir = path.join(process.cwd()); // webapp root
   fs.writeFileSync(bonsaiCliWrapper, [
     `#!/bin/bash`,
     `# Unified Bonsai CLI wrapper`,
-    `BONSAI_ENV=dev BONSAI_PERSONA_ID="${personaId}" BONSAI_API_BASE="${API_BASE}" BONSAI_DB_DIR="${webappDir}" \\`,
+    `cd ${shellEscape(webappDir)} && \\`,
+    `BONSAI_ENV=dev BONSAI_PERSONA_ID="${personaId}" BONSAI_API_BASE="${API_BASE}" BONSAI_DB_DIR="${webappDir}" NODE_PATH=./node_modules \\`,
     `exec npx tsx ${BONSAI_CLI} "$@"`,
   ].join("\n"));
   fs.chmodSync(bonsaiCliWrapper, 0o755);

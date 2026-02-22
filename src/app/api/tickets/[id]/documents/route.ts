@@ -15,7 +15,7 @@ interface RouteContext {
 
 // Trigger QMD sync in background (non-blocking) so new artifacts are searchable
 function triggerQMDSync() {
-  const bonsaiCli = path.join(process.cwd(), "bin", "bonsai-cli.ts");
+  const bonsaiCli = path.join(process.cwd(), "..", "cli", "bonsai-cli.ts");
   const webappDir = process.cwd();
 
   const child = spawn("npx", ["tsx", bonsaiCli, "sync-artifacts"], {

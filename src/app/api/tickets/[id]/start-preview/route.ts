@@ -30,6 +30,10 @@ export async function POST(
   const ticket = await getTicketById(ticketId);
   if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
 
+  if (!ticket.projectId) {
+    return NextResponse.json({ error: "Ticket has no project" }, { status: 400 });
+  }
+
   const project = await getProjectById(ticket.projectId);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
@@ -73,35 +77,26 @@ export async function POST(
         }
       }
 
-      // Symlink node_modules from main repo to avoid native module rebuild issues
+      // Copy node_modules from main repo (don't symlink - causes React context issues)
       const mainNodeModules = path.join(mainRepo, "node_modules");
       const worktreeNodeModules = path.join(worktreePath, "node_modules");
 
-      if (fs.existsSync(mainNodeModules)) {
-        console.log(`[ticket-preview] Symlinking node_modules for ticket ${ticket.id}...`);
-        if (fs.existsSync(worktreeNodeModules)) {
-          if (!fs.lstatSync(worktreeNodeModules).isSymbolicLink()) {
-            fs.rmSync(worktreeNodeModules, { recursive: true, force: true });
-          } else {
-            fs.unlinkSync(worktreeNodeModules);
-          }
+      if (fs.existsSync(mainNodeModules) && !fs.existsSync(worktreeNodeModules)) {
+        console.log(`[ticket-preview] Copying node_modules for ticket ${ticket.id}...`);
+        try {
+          execSync(`cp -R "${mainNodeModules}" "${worktreeNodeModules}"`, { stdio: "inherit" });
+        } catch (error) {
+          console.error(`[ticket-preview] Failed to copy node_modules:`, error);
+          return NextResponse.json({
+            error: "Failed to copy node_modules",
+            details: error instanceof Error ? error.message : String(error)
+          }, { status: 500 });
         }
-        fs.symlinkSync(mainNodeModules, worktreeNodeModules, "dir");
-      } else {
-        console.warn(`[ticket-preview] Warning: node_modules not found at ${mainNodeModules}`);
       }
 
-      // SPECIAL CASE: Bonsai dogfooding itself
-      // If this project has ../../agent (monorepo structure), symlink it for worktree access
-      const monorepoRoot = path.resolve(mainRepo, "../..");
-      const agentDir = path.join(monorepoRoot, "agent");
-      const agentLinkInMain = path.join(mainRepo, "agent");
-
-      if (fs.existsSync(agentDir) && !fs.existsSync(agentLinkInMain)) {
-        // Only create symlink if agent dir exists in monorepo and link doesn't already exist
-        console.log(`[ticket-preview] Symlinking agent directory for monorepo project ${ticket.id}...`);
-        fs.symlinkSync("../../agent", agentLinkInMain, "dir");
-      }
+      // NOTE: We don't symlink the agent directory for dogfooding anymore
+      // because Turbopack refuses to follow symlinks outside the project root.
+      // The @bonsai/agent package is already available via node_modules symlink.
 
       console.log(`[ticket-preview] Created worktree for ticket ${ticket.id} at ${worktreePath}`);
     } catch (error) {

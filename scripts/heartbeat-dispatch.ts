@@ -17,9 +17,9 @@ import path from "node:path";
 import fs from "node:fs";
 import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
-import { researcherRole } from "../../agent/src/roles/researcher.js";
-import { plannerRole } from "../../agent/src/roles/planner.js";
-import { developerRole } from "../../agent/src/roles/developer.js";
+import { researcherRole } from "../agent/src/roles/researcher.js";
+import { plannerRole } from "../agent/src/roles/planner.js";
+import { developerRole } from "../agent/src/roles/developer.js";
 import { buildSystemPrompt } from "../src/lib/prompt-builder.js";
 import { isCreditError, computePauseUntil, isPaused, pauseRemainingMs, isAuthError, AUTH_EXPIRED } from "../src/lib/credit-pause.js";
 

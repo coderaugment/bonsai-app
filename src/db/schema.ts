@@ -72,6 +72,7 @@ export const projects = sqliteTable("projects", {
   localPath: text("local_path"),
   buildCommand: text("build_command"),
   runCommand: text("run_command"),
+  isDogfooding: integer("is_dogfooding", { mode: "boolean" }).default(false),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   deletedAt: text("deleted_at"),
 });
@@ -151,7 +152,7 @@ export const comments = sqliteTable("comments", {
 export const ticketDocuments = sqliteTable("ticket_documents", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ticketId: integer("ticket_id").notNull().references(() => tickets.id),
-  type: text("type", { enum: ["research", "implementation_plan", "research_critique", "plan_critique"] }).notNull(),
+  type: text("type", { enum: ["research", "implementation_plan", "design"] }).notNull(),
   content: text("content").notNull(),
   version: integer("version").default(1),
   authorPersonaId: text("author_persona_id").references(() => personas.id),

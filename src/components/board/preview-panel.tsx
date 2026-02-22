@@ -7,11 +7,36 @@ interface PreviewPanelProps {
   loading?: boolean;
   error?: string | null;
   onClose?: () => void;
+  ticketId?: number;
 }
 
-export function PreviewPanel({ url, loading, error, onClose }: PreviewPanelProps) {
+export function PreviewPanel({ url, loading, error, onClose, ticketId }: PreviewPanelProps) {
   const [iframeKey, setIframeKey] = useState(0);
+  const [rebuilding, setRebuilding] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const handleRebuild = async () => {
+    if (!ticketId || rebuilding) return;
+
+    setRebuilding(true);
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/rebuild-preview`, {
+        method: "POST",
+      });
+
+      if (res.ok) {
+        // Refresh iframe after rebuild completes
+        setIframeKey(prev => prev + 1);
+      } else {
+        const data = await res.json();
+        alert(`Rebuild failed: ${data.error || "Unknown error"}`);
+      }
+    } catch (err) {
+      alert(`Rebuild failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setRebuilding(false);
+    }
+  };
 
   // Prevent browser from navigating when files are dragged over/dropped on iframe
   useEffect(() => {
@@ -43,15 +68,32 @@ export function PreviewPanel({ url, loading, error, onClose }: PreviewPanelProps
             <div className="font-semibold mb-2" style={{ color: "var(--text-primary)" }}>Preview not available</div>
             <pre className="text-xs text-left whitespace-pre-wrap" style={{ color: "var(--text-muted)" }}>{error}</pre>
           </div>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg text-sm hover:opacity-80 transition-opacity"
-              style={{ backgroundColor: "var(--bg-input)", color: "var(--text-secondary)" }}
-            >
-              Back to board
-            </button>
-          )}
+          <div className="flex gap-3">
+            {ticketId && (
+              <button
+                onClick={handleRebuild}
+                disabled={rebuilding}
+                className="px-4 py-2 rounded-lg text-sm transition-opacity"
+                style={{
+                  backgroundColor: rebuilding ? "rgba(59, 130, 246, 0.1)" : "rgba(59, 130, 246, 0.2)",
+                  color: rebuilding ? "rgba(147, 197, 253, 0.5)" : "rgba(147, 197, 253, 1)",
+                  cursor: rebuilding ? "not-allowed" : "pointer",
+                  opacity: rebuilding ? 0.5 : 1,
+                }}
+              >
+                {rebuilding ? "Rebuilding..." : "Rebuild & Run"}
+              </button>
+            )}
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg text-sm hover:opacity-80 transition-opacity"
+                style={{ backgroundColor: "var(--bg-input)", color: "var(--text-secondary)" }}
+              >
+                Back to board
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -77,8 +119,8 @@ export function PreviewPanel({ url, loading, error, onClose }: PreviewPanelProps
 
   return (
     <>
-      {/* Refresh button - Apple glass style */}
-      <div className="flex items-center justify-center py-3 px-8">
+      {/* Refresh and Rebuild buttons - Apple glass style */}
+      <div className="flex items-center justify-center gap-3 py-3 px-8">
         <button
           onClick={() => setIframeKey(prev => prev + 1)}
           className="p-2 rounded-full transition-all hover:scale-110 active:scale-95"
@@ -90,6 +132,7 @@ export function PreviewPanel({ url, loading, error, onClose }: PreviewPanelProps
             boxShadow: "0 8px 32px rgba(0, 0, 0, 0.1)",
           }}
           title="Refresh preview"
+          disabled={rebuilding}
         >
           <svg
             className="w-5 h-5"
@@ -97,11 +140,31 @@ export function PreviewPanel({ url, loading, error, onClose }: PreviewPanelProps
             viewBox="0 0 24 24"
             stroke="currentColor"
             strokeWidth={2}
-            style={{ color: "rgba(255, 255, 255, 0.9)" }}
+            style={{ color: rebuilding ? "rgba(255, 255, 255, 0.4)" : "rgba(255, 255, 255, 0.9)" }}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
           </svg>
         </button>
+
+        {ticketId && (
+          <button
+            onClick={handleRebuild}
+            disabled={rebuilding}
+            className="px-4 py-2 rounded-full transition-all hover:scale-105 active:scale-95 text-sm font-medium"
+            style={{
+              backgroundColor: rebuilding ? "rgba(255, 255, 255, 0.05)" : "rgba(59, 130, 246, 0.2)",
+              backdropFilter: "blur(20px) saturate(180%)",
+              WebkitBackdropFilter: "blur(20px) saturate(180%)",
+              border: `1px solid ${rebuilding ? "rgba(255, 255, 255, 0.1)" : "rgba(59, 130, 246, 0.3)"}`,
+              boxShadow: "0 8px 32px rgba(0, 0, 0, 0.1)",
+              color: rebuilding ? "rgba(255, 255, 255, 0.4)" : "rgba(147, 197, 253, 1)",
+              cursor: rebuilding ? "not-allowed" : "pointer",
+            }}
+            title="Rebuild and restart dev server"
+          >
+            {rebuilding ? "Rebuilding..." : "Rebuild & Run"}
+          </button>
+        )}
       </div>
       <iframe
         ref={iframeRef}
