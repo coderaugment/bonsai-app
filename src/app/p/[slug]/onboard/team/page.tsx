@@ -29,6 +29,7 @@ export default function TeamPage() {
   const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
   const [generatingPreview, setGeneratingPreview] = useState(false);
   const [randomizing, setRandomizing] = useState(false);
+  const [styleCategory, setStyleCategory] = useState<"artistic" | "cartoon" | "cyberpunk" | "pop_culture">("artistic");
 
   // Created workers (saved after each hire)
   const [hiredWorkers, setHiredWorkers] = useState<Persona[]>([]);
@@ -182,10 +183,15 @@ export default function TeamPage() {
     setGeneratingPreview(false);
   }
 
-  async function randomizeStyle() {
+  async function randomizeStyle(categoryOverride?: string) {
     setRandomizing(true);
     try {
-      const res = await fetch("/api/generate-style", { method: "POST" });
+      const type = categoryOverride || styleCategory;
+      const res = await fetch("/api/generate-style", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type }),
+      });
       const data = await res.json();
       if (data.code === "gemini_key_missing") {
         setRandomizing(false);
@@ -656,10 +662,23 @@ export default function TeamPage() {
   }
 
   // ══════════════════════════════════════════════
-  // STEP 0: Art Style — Textarea + Test Avatar
+  // STEP 0: Art Style — Two-Column with Category Buttons
   // ══════════════════════════════════════════════
   if (step === 0) {
     const styleAccent = "#6366f1";
+    const STYLE_CATEGORIES = [
+      { key: "artistic" as const, label: "Artistic" },
+      { key: "cartoon" as const, label: "Cartoon" },
+      { key: "cyberpunk" as const, label: "Cyberpunk" },
+      { key: "pop_culture" as const, label: "Pop Culture" },
+    ];
+    const categoryLabel = STYLE_CATEGORIES.find(c => c.key === styleCategory)?.label || "Artistic";
+
+    function handleCategorySelect(cat: typeof styleCategory) {
+      setStyleCategory(cat);
+      randomizeStyle(cat);
+    }
+
     return (
       <div
         className="flex flex-col h-full relative overflow-hidden"
@@ -668,294 +687,364 @@ export default function TeamPage() {
         }}
       >
         <div className="flex-1 overflow-y-auto" style={{ padding: "32px 40px 0" }}>
-          <div style={{ maxWidth: 600, margin: "0 auto" }}>
+          <div style={{ maxWidth: 900, margin: "0 auto" }}>
 
-            {/* ── Hero: Avatar + Title + Action Buttons ── */}
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 28 }}>
-              {/* Avatar */}
-              <div style={{ position: "relative", marginBottom: 16 }}>
-                <div
-                  style={{
-                    width: 140,
-                    height: 140,
-                    borderRadius: "50%",
-                    border: `3px solid ${styleAccent}`,
-                    overflow: "hidden",
-                    position: "relative",
-                    isolation: "isolate",
-                    boxShadow: `0 0 40px ${styleAccent}30, 0 0 80px ${styleAccent}15`,
-                    backgroundColor: "var(--bg-primary)",
-                  }}
-                >
-                  {previewAvatar ? (
-                    <img
-                      src={previewAvatar}
-                      alt="Style preview"
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        borderRadius: "50%",
-                        opacity: generatingPreview ? 0.4 : 1,
-                        transition: "opacity 0.3s",
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        backgroundColor: `${styleAccent}15`,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      {generatingPreview ? (
-                        <svg className="w-10 h-10 animate-spin" style={{ color: styleAccent }} fill="none" viewBox="0 0 24 24">
+            {/* ── Two-Column Layout: Avatar Left, Controls Right ── */}
+            <div
+              style={{
+                display: "flex",
+                gap: 40,
+                border: `1px solid ${styleAccent}20`,
+                borderRadius: 16,
+                padding: "32px 36px",
+                backgroundColor: `${styleAccent}04`,
+              }}
+            >
+              {/* ── Left Column: Avatar Preview + Title ── */}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 300, flexShrink: 0 }}>
+                {/* Avatar */}
+                <div style={{ position: "relative", marginBottom: 16 }}>
+                  <div
+                    style={{
+                      width: 220,
+                      height: 220,
+                      borderRadius: "50%",
+                      border: `3px solid ${styleAccent}`,
+                      overflow: "hidden",
+                      position: "relative",
+                      isolation: "isolate",
+                      boxShadow: `0 0 40px ${styleAccent}30, 0 0 80px ${styleAccent}15`,
+                      backgroundColor: "var(--bg-primary)",
+                    }}
+                  >
+                    {previewAvatar ? (
+                      <img
+                        src={previewAvatar}
+                        alt="Style preview"
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                          borderRadius: "50%",
+                          opacity: generatingPreview ? 0.4 : 1,
+                          transition: "opacity 0.3s",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          backgroundColor: `${styleAccent}15`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        {generatingPreview ? (
+                          <svg className="w-12 h-12 animate-spin" style={{ color: styleAccent }} fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-12 h-12" style={{ color: `${styleAccent}50` }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                          </svg>
+                        )}
+                      </div>
+                    )}
+                    {generatingPreview && previewAvatar && (
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <svg className="w-10 h-10 animate-spin text-white" fill="none" viewBox="0 0 24 24">
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                         </svg>
-                      ) : (
-                        <svg className="w-10 h-10" style={{ color: `${styleAccent}50` }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                      </div>
+                    )}
+                    {/* Reroll overlay */}
+                    {previewAvatar && !generatingPreview && (
+                      <button
+                        onClick={generateStylePreview}
+                        className="avatar-reroll-overlay"
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          opacity: 0,
+                          transition: "opacity 0.2s",
+                        }}
+                      >
+                        <div style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: "50%",
+                          backgroundColor: "rgba(0,0,0,0.5)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}>
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" /></svg>
+                        </div>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Pedestal */}
+                <div
+                  style={{
+                    width: 240,
+                    height: 20,
+                    marginTop: -4,
+                    background: `linear-gradient(to bottom, ${styleAccent}20, ${styleAccent}05)`,
+                    clipPath: "polygon(10% 0%, 90% 0%, 100% 100%, 0% 100%)",
+                  }}
+                />
+                <div
+                  style={{
+                    width: 260,
+                    height: 4,
+                    background: `linear-gradient(to right, transparent, ${styleAccent}25, transparent)`,
+                    marginTop: -1,
+                  }}
+                />
+
+                {/* Title */}
+                <h2 style={{ fontSize: 20, fontWeight: 700, color: styleAccent, marginTop: 16, marginBottom: 4, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  Art Direction
+                </h2>
+                <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  This style applies to all team avatars
+                </p>
+              </div>
+
+              {/* ── Right Column: Category Buttons + Style Prompt ── */}
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* Category buttons — 2x2 grid */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {STYLE_CATEGORIES.map((cat) => (
+                    <button
+                      key={cat.key}
+                      onClick={() => handleCategorySelect(cat.key)}
+                      disabled={generatingPreview || randomizing}
+                      style={{
+                        padding: "10px 16px",
+                        borderRadius: 8,
+                        border: styleCategory === cat.key ? `2px solid ${styleAccent}` : "1px solid var(--border-medium)",
+                        backgroundColor: styleCategory === cat.key ? `${styleAccent}18` : "transparent",
+                        color: styleCategory === cat.key ? "#fff" : "var(--text-secondary)",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        cursor: generatingPreview || randomizing ? "not-allowed" : "pointer",
+                        opacity: generatingPreview || randomizing ? 0.5 : 1,
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Category label + Generate Test Avatar */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)" }}>
+                    {categoryLabel} Style
+                  </span>
+                  <button
+                    onClick={generateStylePreview}
+                    disabled={generatingPreview || !stylePromptText.trim()}
+                    style={{
+                      padding: "7px 16px",
+                      borderRadius: 6,
+                      border: `1px solid ${styleAccent}50`,
+                      backgroundColor: `${styleAccent}12`,
+                      color: styleAccent,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: generatingPreview || !stylePromptText.trim() ? "not-allowed" : "pointer",
+                      opacity: generatingPreview || !stylePromptText.trim() ? 0.5 : 1,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    {generatingPreview && !randomizing ? (
+                      <>
+                        <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                         </svg>
-                      )}
-                    </div>
-                  )}
-                  {generatingPreview && previewAvatar && (
-                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <svg className="w-8 h-8 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                        </svg>
+                        Generate Test Avatar
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* ── Style Prompt / Image Drop ── */}
+                <input
+                  ref={styleFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleStyleFileInput}
+                  style={{ display: "none" }}
+                />
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setStyleDragOver(true); }}
+                  onDragLeave={() => setStyleDragOver(false)}
+                  onDrop={handleStyleFileDrop}
+                  style={{
+                    border: `1px solid ${styleDragOver ? styleAccent + "80" : generatingPreview || randomizing ? styleAccent + "60" : styleAccent + "20"}`,
+                    borderRadius: 10,
+                    backgroundColor: styleDragOver ? `${styleAccent}10` : `${styleAccent}04`,
+                    padding: "16px 18px",
+                    position: "relative",
+                    transition: "all 0.15s",
+                    flex: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  {(generatingPreview || randomizing) && (
+                    <div style={{
+                      position: "absolute",
+                      inset: 0,
+                      borderRadius: 10,
+                      backgroundColor: "rgba(0,0,0,0.3)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      zIndex: 2,
+                      gap: 8,
+                    }}>
+                      <svg className="w-4 h-4 animate-spin" style={{ color: styleAccent }} fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                       </svg>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: styleAccent }}>
+                        {randomizing ? "Generating style..." : "Generating avatar..."}
+                      </span>
                     </div>
                   )}
-                  {/* Reroll overlay */}
-                  {previewAvatar && !generatingPreview && (
+
+                  {/* Header row */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                    <label style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)" }}>
+                      Style Prompt
+                    </label>
+                    {/* Randomize — only in text mode */}
+                    {!styleImage && (
+                      <button
+                        onClick={() => randomizeStyle()}
+                        disabled={generatingPreview}
+                        title="Randomize style"
+                        style={{
+                          width: 20, height: 20, borderRadius: 4, border: "none",
+                          backgroundColor: "transparent", color: "#fff",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          cursor: generatingPreview ? "not-allowed" : "pointer",
+                          opacity: generatingPreview ? 0.3 : 0.5,
+                          transition: "opacity 0.2s", padding: 0,
+                        }}
+                        onMouseEnter={(e) => { if (!generatingPreview) e.currentTarget.style.opacity = "1"; }}
+                        onMouseLeave={(e) => { if (!generatingPreview) e.currentTarget.style.opacity = "0.5"; }}
+                      >
+                        <svg className={`w-3.5 h-3.5 ${randomizing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                        </svg>
+                      </button>
+                    )}
+                    {/* Upload photo button */}
                     <button
-                      onClick={generateStylePreview}
-                      className="avatar-reroll-overlay"
+                      onClick={() => styleFileInputRef.current?.click()}
+                      title="Upload style reference photo"
                       style={{
-                        position: "absolute",
-                        inset: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        background: "transparent",
-                        border: "none",
-                        cursor: "pointer",
-                        opacity: 0,
-                        transition: "opacity 0.2s",
+                        width: 20, height: 20, borderRadius: 4, border: "none",
+                        backgroundColor: "transparent", color: "#fff",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer", opacity: 0.5, transition: "opacity 0.2s", padding: 0,
                       }}
+                      onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.5"; }}
                     >
-                      <div style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: "50%",
-                        backgroundColor: "rgba(0,0,0,0.5)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}>
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3" /></svg>
-                      </div>
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                      </svg>
                     </button>
+                    {/* Clear image — only when image is set */}
+                    {styleImage && (
+                      <button
+                        onClick={() => { setStyleImage(null); setStyleMode("text"); }}
+                        title="Remove photo, use text prompt"
+                        style={{
+                          width: 20, height: 20, borderRadius: 4, border: "none",
+                          backgroundColor: "transparent", color: "#fff",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          cursor: "pointer", opacity: 0.5, transition: "opacity 0.2s", padding: 0,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.5"; }}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Image preview when a photo is set, textarea otherwise */}
+                  {styleImage ? (
+                    <div
+                      onClick={() => styleFileInputRef.current?.click()}
+                      style={{ position: "relative", cursor: "pointer", borderRadius: 6, overflow: "hidden", flex: 1 }}
+                    >
+                      <img
+                        src={styleImage}
+                        alt="Style reference"
+                        style={{ width: "100%", maxHeight: 200, objectFit: "cover", display: "block", borderRadius: 6 }}
+                      />
+                      <div style={{
+                        position: "absolute", inset: 0, borderRadius: 6,
+                        background: "linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 55%)",
+                        display: "flex", alignItems: "flex-end", justifyContent: "center", padding: 10,
+                      }}>
+                        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                          Click or drag to replace
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <textarea
+                      value={stylePromptText}
+                      onChange={(e) => setStylePromptText(e.target.value)}
+                      rows={8}
+                      placeholder="Describe the art style, or drag a reference photo onto this box..."
+                      style={{
+                        width: "100%", padding: "10px 12px", borderRadius: 6, fontSize: 12,
+                        backgroundColor: "var(--bg-input)", border: "1px solid var(--border-medium)",
+                        color: "var(--text-primary)", outline: "none", resize: "vertical", lineHeight: 1.6,
+                        flex: 1,
+                      }}
+                      onFocus={(e) => { e.currentTarget.style.borderColor = styleAccent; }}
+                      onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-medium)"; }}
+                    />
                   )}
                 </div>
               </div>
-
-              {/* Title */}
-              <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)", marginBottom: 4 }}>
-                Art Direction
-              </h2>
-              <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-                This style applies to all team avatars
-              </p>
-
-              {/* Action: Generate Test Avatar */}
-              <button
-                onClick={generateStylePreview}
-                disabled={generatingPreview || !stylePromptText.trim()}
-                style={{
-                  padding: "7px 16px",
-                  borderRadius: 6,
-                  border: `1px solid ${styleAccent}50`,
-                  backgroundColor: `${styleAccent}12`,
-                  color: styleAccent,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: generatingPreview || !stylePromptText.trim() ? "not-allowed" : "pointer",
-                  opacity: generatingPreview || !stylePromptText.trim() ? 0.5 : 1,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  transition: "all 0.2s",
-                }}
-              >
-                {generatingPreview && !randomizing ? (
-                  <>
-                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                    </svg>
-                    Generate Test Avatar
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* ── Style Prompt / Image Drop ── */}
-            <input
-              ref={styleFileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleStyleFileInput}
-              style={{ display: "none" }}
-            />
-            <div
-              onDragOver={(e) => { e.preventDefault(); setStyleDragOver(true); }}
-              onDragLeave={() => setStyleDragOver(false)}
-              onDrop={handleStyleFileDrop}
-              style={{
-                border: `1px solid ${styleDragOver ? styleAccent + "80" : generatingPreview || randomizing ? styleAccent + "60" : styleAccent + "20"}`,
-                borderRadius: 10,
-                backgroundColor: styleDragOver ? `${styleAccent}10` : `${styleAccent}04`,
-                padding: "16px 18px",
-                position: "relative",
-                transition: "all 0.15s",
-              }}
-            >
-              {(generatingPreview || randomizing) && (
-                <div style={{
-                  position: "absolute",
-                  inset: 0,
-                  borderRadius: 10,
-                  backgroundColor: "rgba(0,0,0,0.3)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  zIndex: 2,
-                  gap: 8,
-                }}>
-                  <svg className="w-4 h-4 animate-spin" style={{ color: styleAccent }} fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: styleAccent }}>
-                    {randomizing ? "Generating style..." : "Generating avatar..."}
-                  </span>
-                </div>
-              )}
-
-              {/* Header row — always visible */}
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                <label style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)" }}>
-                  Style Prompt
-                </label>
-                {/* Randomize — only in text mode */}
-                {!styleImage && (
-                  <button
-                    onClick={randomizeStyle}
-                    disabled={generatingPreview}
-                    title="Randomize style"
-                    style={{
-                      width: 20, height: 20, borderRadius: 4, border: "none",
-                      backgroundColor: "transparent", color: "#fff",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      cursor: generatingPreview ? "not-allowed" : "pointer",
-                      opacity: generatingPreview ? 0.3 : 0.5,
-                      transition: "opacity 0.2s", padding: 0,
-                    }}
-                    onMouseEnter={(e) => { if (!generatingPreview) e.currentTarget.style.opacity = "1"; }}
-                    onMouseLeave={(e) => { if (!generatingPreview) e.currentTarget.style.opacity = "0.5"; }}
-                  >
-                    <svg className={`w-3.5 h-3.5 ${randomizing ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-                    </svg>
-                  </button>
-                )}
-                {/* Upload photo button */}
-                <button
-                  onClick={() => styleFileInputRef.current?.click()}
-                  title="Upload style reference photo"
-                  style={{
-                    width: 20, height: 20, borderRadius: 4, border: "none",
-                    backgroundColor: "transparent", color: "#fff",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    cursor: "pointer", opacity: 0.5, transition: "opacity 0.2s", padding: 0,
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.5"; }}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-                  </svg>
-                </button>
-                {/* Clear image — only when image is set */}
-                {styleImage && (
-                  <button
-                    onClick={() => { setStyleImage(null); setStyleMode("text"); }}
-                    title="Remove photo, use text prompt"
-                    style={{
-                      width: 20, height: 20, borderRadius: 4, border: "none",
-                      backgroundColor: "transparent", color: "#fff",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      cursor: "pointer", opacity: 0.5, transition: "opacity 0.2s", padding: 0,
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.5"; }}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-
-              {/* Image preview when a photo is set, textarea otherwise */}
-              {styleImage ? (
-                <div
-                  onClick={() => styleFileInputRef.current?.click()}
-                  style={{ position: "relative", cursor: "pointer", borderRadius: 6, overflow: "hidden" }}
-                >
-                  <img
-                    src={styleImage}
-                    alt="Style reference"
-                    style={{ width: "100%", maxHeight: 200, objectFit: "cover", display: "block", borderRadius: 6 }}
-                  />
-                  <div style={{
-                    position: "absolute", inset: 0, borderRadius: 6,
-                    background: "linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 55%)",
-                    display: "flex", alignItems: "flex-end", justifyContent: "center", padding: 10,
-                  }}>
-                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-                      Click or drag to replace
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <textarea
-                  value={stylePromptText}
-                  onChange={(e) => setStylePromptText(e.target.value)}
-                  rows={6}
-                  placeholder="Describe the art style, or drag a reference photo onto this box..."
-                  style={{
-                    width: "100%", padding: "10px 12px", borderRadius: 6, fontSize: 12,
-                    backgroundColor: "var(--bg-input)", border: "1px solid var(--border-medium)",
-                    color: "var(--text-primary)", outline: "none", resize: "vertical", lineHeight: 1.6,
-                  }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = styleAccent; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = "var(--border-medium)"; }}
-                />
-              )}
             </div>
           </div>
         </div>
@@ -964,20 +1053,35 @@ export default function TeamPage() {
         <div style={{ padding: "20px 40px 32px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <button
-              onClick={() => router.push("/onboard/project")}
+              onClick={handleAcceptRandomTeam}
+              disabled={generatingPreview || saving}
               style={{
-                padding: "12px 24px",
+                padding: "12px 32px",
                 borderRadius: 10,
                 border: "1px solid var(--border-medium)",
                 backgroundColor: "transparent",
                 color: "var(--text-secondary)",
                 fontSize: 14,
                 fontWeight: 600,
-                cursor: "pointer",
+                cursor: generatingPreview || saving ? "not-allowed" : "pointer",
+                opacity: generatingPreview || saving ? 0.4 : 1,
                 transition: "all 0.2s",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
               }}
             >
-              Back
+              {saving ? (
+                <>
+                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Generating team...
+                </>
+              ) : (
+                "Accept Random Team"
+              )}
             </button>
             <button
               onClick={handleCreateTeam}
@@ -1000,38 +1104,6 @@ export default function TeamPage() {
               Create Your Team
             </button>
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", letterSpacing: "0.05em" }}>or</div>
-          <button
-            onClick={handleAcceptRandomTeam}
-            disabled={generatingPreview || saving}
-            style={{
-              padding: "10px 32px",
-              borderRadius: 8,
-              border: "1px solid var(--border-medium)",
-              backgroundColor: "transparent",
-              color: "var(--text-secondary)",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: generatingPreview || saving ? "not-allowed" : "pointer",
-              opacity: generatingPreview || saving ? 0.4 : 1,
-              transition: "all 0.2s",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            {saving ? (
-              <>
-                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Generating team...
-              </>
-            ) : (
-              "Accept Random Team"
-            )}
-          </button>
 
           {/* Show generating workers progressively */}
           {generatingWorkers.length > 0 && (
