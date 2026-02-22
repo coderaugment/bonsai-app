@@ -517,9 +517,77 @@ function buildStylePrompt(): string {
   return [constraints, ...parts].join(" ");
 }
 
-export async function POST() {
+// ── Cartoon styles (classic cartoons only, ONE reference) ───────────────────
+
+const CARTOON_STYLES = [
+  "Disney animation style",
+  "Pixar animation style",
+  "Looney Tunes style",
+  "Animaniacs style",
+  "Who Framed Roger Rabbit style",
+  "Jessica Rabbit style",
+];
+
+function buildCartoonPrompt(): string {
+  const constraints = "Bust portrait, head and shoulders only, face fills most of the frame. No full body. Square format, no text or logos.";
+  const style = CARTOON_STYLES[Math.floor(Math.random() * CARTOON_STYLES.length)];
+  return `${constraints} ${style}.`;
+}
+
+// ── Pop culture styles (ONE reference only) ──────────────────────────────────
+
+const POP_CULTURE_REFS = [
+  "Toy Story style",
+  "Shrek style",
+  "Spider-Verse style",
+  "Blade Runner 2049 aesthetic",
+  "The Matrix aesthetic",
+  "Arcane style",
+  "Fortnite art style",
+  "Marvel Comics style",
+  "Moebius style",
+  "Studio Ghibli style",
+];
+
+function buildPopCulturePrompt(): string {
+  const constraints = "Bust portrait, head and shoulders only, face fills most of the frame. No full body. Square format, no text or logos.";
+  const ref = POP_CULTURE_REFS[Math.floor(Math.random() * POP_CULTURE_REFS.length)];
+  return `${constraints} ${ref}.`;
+}
+
+export async function POST(req: Request) {
   try {
-    const style = buildStylePrompt();
+    const body = await req.json().catch(() => ({}));
+    const { type } = body;
+
+    let style = "";
+
+    if (type === "cartoon") {
+      style = buildCartoonPrompt();
+    } else if (type === "pop_culture") {
+      style = buildPopCulturePrompt();
+    } else if (type === "cyberpunk") {
+      // Cyberpunk variants only
+      const cyberpunkRefs = [
+        "Cyberpunk 2077 style",
+        "Shadowrun style",
+        "Blade Runner aesthetic",
+        "Ghost in the Shell style",
+        "Akira style",
+      ];
+      const steampunkRefs = [
+        "Steampunk aesthetic",
+        "Bioshock Infinite style",
+        "Dishonored style",
+      ];
+      const allRefs = [...cyberpunkRefs, ...steampunkRefs];
+      const ref = allRefs[Math.floor(Math.random() * allRefs.length)];
+      style = `Bust portrait, head and shoulders only, face fills most of the frame. No full body. Square format, no text or logos. ${ref}.`;
+    } else {
+      // Default: artistic (existing complex generator)
+      style = buildStylePrompt();
+    }
+
     return NextResponse.json({ style });
   } catch (err) {
     console.error("[generate-style] failed:", err);
