@@ -535,18 +535,59 @@ function buildCartoonPrompt(): string {
 }
 
 // ── Pop culture styles (ONE reference only) ──────────────────────────────────
+// Specific movies, TV shows, games, comics, music artists - NOT aesthetic movements or generic styles
 
 const POP_CULTURE_REFS = [
+  // Movies
+  "Kill Bill style",
+  "Pulp Fiction style",
+  "Blade Runner style",
+  "The Matrix style",
+  "Mad Max: Fury Road style",
+  "Sin City style",
+  "300 style",
+  "Scott Pilgrim vs. the World style",
+  "Drive style",
+  "Tron style",
+  "Reservoir Dogs style",
+  "Django Unchained style",
+  "Inglourious Basterds style",
+
+  // TV Shows
+  "iCarly style",
+  "Breaking Bad style",
+  "Stranger Things style",
+  "The Mandalorian style",
+  "Game of Thrones style",
+
+  // Animation
   "Toy Story style",
   "Shrek style",
   "Spider-Verse style",
-  "Blade Runner 2049 aesthetic",
-  "The Matrix aesthetic",
   "Arcane style",
-  "Fortnite art style",
-  "Marvel Comics style",
-  "Moebius style",
   "Studio Ghibli style",
+  "The Incredibles style",
+  "Akira style",
+
+  // Games
+  "Fortnite style",
+  "Borderlands style",
+  "Overwatch style",
+  "Cyberpunk 2077 style",
+  "Bioshock style",
+  "Team Fortress 2 style",
+
+  // Comics & Superheroes
+  "Superman comic style",
+  "Marvel Comics style",
+  "DC Comics style",
+  "Batman comic style",
+  "Spider-Man comic style",
+
+  // Music Artists
+  "Bad Bunny aesthetic",
+  "Tyler, the Creator aesthetic",
+  "Billie Eilish aesthetic",
 ];
 
 function buildPopCulturePrompt(): string {
@@ -584,8 +625,8 @@ export async function POST(req: Request) {
       const ref = allRefs[Math.floor(Math.random() * allRefs.length)];
       style = `Bust portrait, head and shoulders only, face fills most of the frame. No full body. Square format, no text or logos. ${ref}.`;
     } else {
-      // Default: artistic (existing complex generator)
-      style = buildStylePrompt();
+      // Default: pop culture (movies, TV, games, comics)
+      style = buildPopCulturePrompt();
     }
 
     return NextResponse.json({ style });
